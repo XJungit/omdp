@@ -24,7 +24,7 @@ const __LOG = join(tmpdir(), 'dsh-vision-bridge-register.log')
 function __log(msg) {
   try { __logFs(__LOG, new Date().toISOString() + ' ' + msg + '\n') } catch {}
 }
-export const inject = ['tools', 'agents', 'attachments', 'llm']
+export const inject = ['tools', 'agents', 'attachments', 'llm', 'credentials']
 
 const MEDIA_EXT = {
   'image/png': '.png',
