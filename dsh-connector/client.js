@@ -283,15 +283,31 @@ window.__ModuleLoader__.load({
       var _a = react.useState(null)
       var editing = _a[0]
       var setEditing = _a[1]
+      var _b = react.useState('')
+      var err = _b[0]
+      var setErr = _b[1]
 
       function open(name) {
-        api('/skills/' + encodeURIComponent(name), { method: 'GET' }).then(function (skill) { setEditing(skill) })
+        api('/skills/' + encodeURIComponent(name), { method: 'GET' }).then(function (skill) {
+          if (skill && skill.error) { setErr(skill.error); return }
+          setErr('')
+          setEditing(skill)
+        })
       }
       function save(skill) {
-        api('/skills', { method: 'PUT', body: JSON.stringify(skill) }).then(function () { setEditing(null); props.onChanged() })
+        api('/skills', { method: 'PUT', body: JSON.stringify(skill) }).then(function (r) {
+          if (r && r.error) { setErr(r.error); return }
+          setErr('')
+          setEditing(null)
+          props.onChanged()
+        })
       }
       function remove(name) {
-        api('/skills/' + encodeURIComponent(name), { method: 'DELETE' }).then(function () { props.onChanged() })
+        api('/skills/' + encodeURIComponent(name), { method: 'DELETE' }).then(function (r) {
+          if (r && r.error) { setErr(r.error); return }
+          setErr('')
+          props.onChanged()
+        })
       }
 
       var rows = props.skills.map(function (s) {
@@ -309,6 +325,7 @@ window.__ModuleLoader__.load({
 
       return createElement('div', { className: 'pm_section' },
         createElement('div', { className: 'pm_sectionHead' }, '用户 Skills (~/.dsh/skills) User Skills'),
+        err ? createElement('div', { className: 'pm_err' }, err) : null,
         createElement('div', { className: 'pm_hint' }, '读写用户技能目录，保存即生效（skill catalog 自动刷新）。Read/write user skills; saved changes take effect immediately.'),
         rows,
         editing === null

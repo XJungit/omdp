@@ -172,11 +172,14 @@ function parseMcpServers(blockText) {
         continue
       }
       if (key === 'url') {
-        // Modeled ONLY for transport validation: a streamable-http server is
-        // complete only when its url line is non-empty. The raw line (possibly
-        // a `!!js` expression) still falls through to `preserve` so rendering
-        // keeps it verbatim and the tag survives.
         cur.url = val
+        // Plain http(s) urls are re-emitted from `cur.url` on render, so they
+        // must NOT also land in `preserve` (that would duplicate the line and,
+        // worse, make a `url` edit get clobbered by the stale preserve line).
+        // A `!!js`/process.env expression cannot be re-emitted through
+        // safeScalar (the tag would become literal text), so it falls through
+        // to `preserve` and is kept verbatim.
+        if (!looksLikeExpression(val)) continue
       }
       if (KNOWN_KEYS.has(key)) {
         if (key === 'serverName') cur.serverName = val
@@ -243,6 +246,9 @@ function renderServer(s) {
   out.push(`      config:`)
   out.push(`        transport: ${safeScalar(s.transport || 'stdio')}`)
   if (s.serverName) out.push(`        serverName: ${safeScalar(s.serverName)}`)
+  // Plain http(s) urls are emitted here; `!!js`/process.env expressions stay
+  // in `preserve` and come back verbatim (safeScalar would break the tag).
+  if (s.url && !looksLikeExpression(s.url)) out.push(`        url: ${safeScalar(s.url)}`)
   if (s.command) out.push(`        command: ${safeScalar(s.command)}`)
   out.push(...renderHeader(s))
   // args: either a real flow array, or a verbatim block sequence.
@@ -275,9 +281,12 @@ function buildPatch(text, servers) {
       '\n'
     return text.replace(/\n*$/, '\n') + block
   }
-  const blockHead = `- insert:\n`
-  const body = servers.length ? servers.map(renderServer).join('\n') + '\n' : ''
-  return found.head + blockHead + body + found.tail
+  // When every MCP server is removed, drop the whole insert block instead of
+  // leaving a bare `- insert:` (that would render as `insert: null` and could
+  // break the loader on the next boot).
+  if (!servers.length) return found.head + found.tail
+  const body = servers.map(renderServer).join('\n') + '\n'
+  return found.head + `- insert:\n` + body + found.tail
 }
 
 /* ───────────────────────────── Skills ──────────────────────────────────── */
@@ -581,6 +590,12 @@ export function apply(ctx) {
       // PUT /api/skills — save
       if (req.method === 'PUT' && path === API_PREFIX + '/skills') {
         const body = await readBody(req)
+        // Guard against malformed bodies (readBody falls back to {} on bad
+        // JSON): without this, `name` could be undefined and, matching the
+        // kebab-case regex as the string "undefined", create a junk skill.
+        if (typeof body !== 'object' || body === null || Array.isArray(body) || typeof body.name !== 'string') {
+          return json(res, 400, { error: 'malformed request body: skill name (string) is required' })
+        }
         const written = await saveUserSkill(resolveHome(), body)
         return json(res, 200, { ok: true, path: written.path })
       }
@@ -590,6 +605,9 @@ export function apply(ctx) {
       // GET /api/skills/:name — get one
       if (req.method === 'GET' && skMatch) {
         const name = decodeURIComponent(skMatch[1])
+        // Validate before touching the filesystem: a crafted `..%2F..%2F`
+        // name could otherwise escape ~/.dsh/skills and read arbitrary files.
+        if (!SKILL_NAME.test(name)) return json(res, 400, { error: 'invalid skill name' })
         const skill = await readUserSkill(resolveHome(), name)
         if (!skill) return json(res, 404, { error: 'skill not found' })
         return json(res, 200, skill)
@@ -598,6 +616,7 @@ export function apply(ctx) {
       // DELETE /api/skills/:name — remove
       if (req.method === 'DELETE' && skMatch) {
         const name = decodeURIComponent(skMatch[1])
+        if (!SKILL_NAME.test(name)) return json(res, 400, { error: 'invalid skill name' })
         await removeUserSkill(resolveHome(), name)
         return json(res, 200, { ok: true })
       }
