@@ -113,8 +113,8 @@ window.__ModuleLoader__.load({
 
       return createElement('div', { className: 'pm_root' },
         createElement('div', { className: 'pm_tabs' },
-          createElement('button', { className: 'pm_btn' + (tab === 'mcp' ? ' primary' : ''), onClick: function () { setTab('mcp') } }, 'MCP 服务器'),
-          createElement('button', { className: 'pm_btn' + (tab === 'skills' ? ' primary' : ''), onClick: function () { setTab('skills') } }, 'Skills'),
+          createElement('button', { className: 'pm_btn' + (tab === 'mcp' ? ' primary' : ''), onClick: function () { setTab('mcp') } }, 'MCP 服务器 / MCP Servers'),
+          createElement('button', { className: 'pm_btn' + (tab === 'skills' ? ' primary' : ''), onClick: function () { setTab('skills') } }, 'Skills / 技能'),
         ),
         error ? createElement('div', { className: 'pm_err' }, error) : null,
         tab === 'mcp'
@@ -149,19 +149,19 @@ window.__ModuleLoader__.load({
           ),
           createElement('div', { className: 'pm_meta' }, s.url ? 'url: ' + s.url : (s.command ? 'cmd: ' + s.command : '')),
           createElement('div', { className: 'pm_actions' },
-            createElement('button', { className: 'pm_btn', onClick: function () { setEditing(s) } }, '编辑'),
-            createElement('button', { className: 'pm_btn danger', onClick: function () { remove(s.id) } }, '删除'),
+            createElement('button', { className: 'pm_btn', onClick: function () { setEditing(s) } }, '编辑 / Edit'),
+            createElement('button', { className: 'pm_btn danger', onClick: function () { remove(s.id) } }, '删除 / Delete'),
           ),
         )
       })
 
       return createElement('div', { className: 'pm_section' },
-        createElement('div', { className: 'pm_sectionHead' }, 'MCP 服务器'),
+        createElement('div', { className: 'pm_sectionHead' }, 'MCP 服务器 / MCP Servers'),
         createElement('div', { className: 'pm_hint' },
-          props.mcp.exists ? '编辑 profiles/web/cordis.patch.yml 中的 mcp-* 块。保存后重启 dsh 生效。' : '未找到 cordis.patch.yml。'),
+          props.mcp.exists ? '编辑 profiles/web/cordis.patch.yml 中的 mcp-* 块。保存后重启 dsh 生效。 / Edit the mcp-* block in cordis.patch.yml; restart dsh to apply.' : '未找到 cordis.patch.yml。 / cordis.patch.yml not found.'),
         rows,
         editing === null
-          ? createElement('button', { className: 'pm_btn pm_add', onClick: function () { setEditing({ id: 'mcp-new', name: '', transport: 'stdio', serverName: '', url: '', command: '', args: '' }) } }, '＋ 添加 MCP 服务器')
+          ? createElement('button', { className: 'pm_btn pm_add', onClick: function () { setEditing({ id: 'mcp-new', name: '', transport: 'stdio', serverName: '', url: '', command: '', args: '' }) } }, '＋ 添加 MCP 服务器 / Add MCP Server')
           : createElement(ServerForm, { value: editing, onSave: save, onCancel: function () { setEditing(null) } }),
       )
     }
@@ -181,16 +181,16 @@ window.__ModuleLoader__.load({
 
       return createElement('div', { className: 'pm_row' },
         createElement('div', { className: 'pm_form' },
-          field('名称 (serverName)', v.serverName, set('serverName')),
-          selectField('传输', v.transport, ['stdio', 'streamable-http'], set('transport')),
+          field('名称 (serverName) / Name', v.serverName, set('serverName')),
+          selectField('传输 / Transport', v.transport, ['stdio', 'streamable-http'], set('transport')),
           field('URL (http)', v.url, set('url')),
-          field('命令 (stdio)', v.command, set('command')),
-          field('参数 (空格分隔)', v.args, set('args')),
+          field('命令 (stdio) / Command', v.command, set('command')),
+          field('参数 (空格分隔) / Args', v.args, set('args')),
           field('Header', v.header, set('header')),
         ),
         createElement('div', { className: 'pm_actions' },
-          createElement('button', { className: 'pm_btn primary', onClick: submit }, '保存'),
-          createElement('button', { className: 'pm_btn', onClick: props.onCancel }, '取消'),
+          createElement('button', { className: 'pm_btn primary', onClick: submit }, '保存 / Save'),
+          createElement('button', { className: 'pm_btn', onClick: props.onCancel }, '取消 / Cancel'),
         ),
       )
     }
@@ -217,18 +217,18 @@ window.__ModuleLoader__.load({
           ),
           createElement('div', { className: 'pm_meta' }, s.description || ''),
           createElement('div', { className: 'pm_actions' },
-            createElement('button', { className: 'pm_btn', onClick: function () { open(s.name) } }, '编辑'),
-            createElement('button', { className: 'pm_btn danger', onClick: function () { remove(s.name) } }, '删除'),
+            createElement('button', { className: 'pm_btn', onClick: function () { open(s.name) } }, '编辑 / Edit'),
+            createElement('button', { className: 'pm_btn danger', onClick: function () { remove(s.name) } }, '删除 / Delete'),
           ),
         )
       })
 
       return createElement('div', { className: 'pm_section' },
-        createElement('div', { className: 'pm_sectionHead' }, '用户 Skills (~/.dsh/skills)'),
-        createElement('div', { className: 'pm_hint' }, '读写用户技能目录，保存即生效（skill catalog 自动刷新）。'),
+        createElement('div', { className: 'pm_sectionHead' }, '用户 Skills (~/.dsh/skills) / User Skills'),
+        createElement('div', { className: 'pm_hint' }, '读写用户技能目录，保存即生效（skill catalog 自动刷新）。 / Read/write user skills; saved changes take effect immediately.'),
         rows,
         editing === null
-          ? createElement('button', { className: 'pm_btn pm_add', onClick: function () { setEditing({ name: '', description: '', content: '' }) } }, '＋ 新建 Skill')
+          ? createElement('button', { className: 'pm_btn pm_add', onClick: function () { setEditing({ name: '', description: '', content: '' }) } }, '＋ 新建 Skill / New Skill')
           : createElement(SkillForm, { value: editing, onSave: save, onCancel: function () { setEditing(null) } }),
       )
     }
@@ -241,16 +241,16 @@ window.__ModuleLoader__.load({
 
       return createElement('div', { className: 'pm_row' },
         createElement('div', { className: 'pm_form' },
-          field('名称 (kebab-case)', v.name, set('name')),
-          field('描述', v.description, set('description')),
+          field('名称 (kebab-case) / Name', v.name, set('name')),
+          field('描述 / Description', v.description, set('description')),
           createElement('label', { className: 'wide' },
-            'SKILL.md 内容 (Markdown)',
+            'SKILL.md 内容 (Markdown) / Content',
             createElement('textarea', { className: 'pm_textarea wide', value: v.content || '', onChange: function (e) { var next = Object.assign({}, v); next.content = e.target.value; setV(next) } }),
           ),
         ),
         createElement('div', { className: 'pm_actions' },
-          createElement('button', { className: 'pm_btn primary', onClick: function () { props.onSave(v) } }, '保存'),
-          createElement('button', { className: 'pm_btn', onClick: props.onCancel }, '取消'),
+          createElement('button', { className: 'pm_btn primary', onClick: function () { props.onSave(v) } }, '保存 / Save'),
+          createElement('button', { className: 'pm_btn', onClick: props.onCancel }, '取消 / Cancel'),
         ),
       )
     }
@@ -260,7 +260,7 @@ window.__ModuleLoader__.load({
       if (slots === undefined) return
       slots.inject('settings.section', function () {
         return slots.register(
-          { name: 'settings.section', id: 'connector', order: 55, label: 'Connector' },
+          { name: 'settings.section', id: 'connector', order: 55, label: 'Connector / 连接器' },
           ManageTab,
         )
       })
