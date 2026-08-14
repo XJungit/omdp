@@ -66,7 +66,7 @@ function findMcpBlock(text) {
     if (next) end = next.index + 1
     re.lastIndex = 0
     const blockText = text.slice(blockStart, end)
-    if (/\n\s*- id:\s*mcp-/.test(blockText)) {
+    if (/\n\s*- id:\s*["']?mcp-/.test(blockText)) {
       return { head: text.slice(0, blockStart), blockText, tail: text.slice(end) }
     }
   }
@@ -80,13 +80,17 @@ function stripQuotes(v) {
   return v
 }
 
-const KNOWN_KEYS = new Set(['transport', 'serverName', 'url', 'command', 'header'])
+const KNOWN_KEYS = new Set(['transport', 'serverName', 'command', 'header'])
 // `args` is intentionally NOT modeled: it appears both as a single-line array
 // (`args: ['/c', ...]`) and as a block sequence — rendering either form back
 // losslessly is error-prone, and a bad render here would corrupt the patch and
 // crash dsh. So args is preserved verbatim (see PRESERVE_KEYS) and never
 // rewritten.
-const PRESERVE_KEYS = new Set(['args'])
+// `url` is ALSO preserved verbatim: it may be a `!!js` expression
+// (`url: !!js (process.env.X || '') && ('https://...')`), and re-emitting it
+// through a quoted scalar would turn the `!!js` tag into literal text, breaking
+// the server on the next boot. Keeping it raw preserves the expression.
+const PRESERVE_KEYS = new Set(['args', 'url'])
 // Keys that `renderServer` emits itself (fixed `name`, the `config:` container
 // opener). They must be dropped on parse so the rewrite doesn't duplicate them.
 const SKIP_KEYS = new Set(['name', 'config'])
@@ -106,7 +110,7 @@ function parseMcpServers(blockText) {
   // under `args:`. `argsSeqIndent` is that sequence's indent (-1 = not collecting).
   let argsSeqIndent = -1
   for (const line of lines) {
-    const idm = line.match(/^(\s*)- id:\s*(mcp-\S+)\s*$/)
+    const idm = line.match(/^(\s*)- id:\s*["']?(mcp-[^\s"']+)["']?\s*$/)
     if (idm) {
       if (cur) servers.push(cur)
       cur = {
@@ -156,7 +160,6 @@ function parseMcpServers(blockText) {
       if (KNOWN_KEYS.has(key)) {
         if (key === 'serverName') cur.serverName = val
         else if (key === 'transport') cur.transport = val
-        else if (key === 'url') cur.url = val
         else if (key === 'command') cur.command = val
         else if (key === 'header') cur.header = val
         continue
@@ -193,7 +196,6 @@ function renderServer(s) {
   out.push(`      config:`)
   out.push(`        transport: ${safeScalar(s.transport || 'stdio')}`)
   if (s.serverName) out.push(`        serverName: ${safeScalar(s.serverName)}`)
-  if (s.url) out.push(`        url: ${safeScalar(s.url)}`)
   if (s.command) out.push(`        command: ${safeScalar(s.command)}`)
   if (s.header) out.push(`        header: ${safeScalar(s.header)}`)
   // args: either an inline array string, or a verbatim block sequence.

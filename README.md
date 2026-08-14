@@ -18,7 +18,7 @@ omdp/
 
 ## Plugins
 
-### `dsh-connector` → npm name `omdp-dsh-connector`
+### `dsh-connector` → npm name `@omdp/dsh-connector`
 
 One settings tab ("Connector") that manages two things from the DSH Web UI:
 
@@ -28,11 +28,11 @@ One settings tab ("Connector") that manages two things from the DSH Web UI:
 Install into a profile (see each plugin's README for the exact command):
 
 ```sh
-dsh plugin --profile web add github:XJungit/omdp/dsh-connector
+dsh plugin --profile web add github:XJungit/omdp#path:dsh-connector
 ```
 
 ## Conventions
 
 - Every plugin subdirectory is a standalone npm package with a `dsh.bundle` (and optionally `dsh.client`) manifest.
-- Package names are prefixed `omdp-` to avoid colliding with upstream `dsh-*` packages on npm.
+- Package names are scoped under `@omdp/` to avoid colliding with upstream `dsh-*` packages on npm.
 - Plugins in this repo are plain JavaScript (no build step), so a GitHub install works directly without a compile stage.

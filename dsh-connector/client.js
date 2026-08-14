@@ -1,5 +1,5 @@
 /**
- * omdp-dsh-connector — client half.
+ * @omdp/dsh-connector — client half.
  *
  * Installed-package client bundle: the harness serves this file at
  * /plugins/<id>/client.js and expects a single window.__ModuleLoader__.load
@@ -12,7 +12,7 @@
  * on the DSH GUI webserver (/connector/api/*), exactly like
  * dsh-mcp-manager's client does with fetch — not the dynamic-only host.call.
  *
- * @module omdp-dsh-connector/client
+ * @module @omdp/dsh-connector/client
  */
 
 window.__ModuleLoader__.load({

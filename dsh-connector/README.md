@@ -1,4 +1,4 @@
-# omdp-dsh-connector
+# @omdp/dsh-connector
 
 **English** | 简体中文
 
