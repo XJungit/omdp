@@ -9,6 +9,7 @@ node_modules/
 
 # lockfiles (profile-managed, not part of the plugin source)
 **/pnpm-lock.yaml
+package-lock.json
 
 # os / editor
 .DS_Store

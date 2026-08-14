@@ -44,17 +44,28 @@ DSH 视觉桥插件：自动区分多模态 / 文本模型。
 
 ## 安装
 
-### 方式一：从仓库安装（推荐，自动激活）
+### 方式一：本地 `link:` 安装（推荐，自动激活）
 
-```sh
-dsh plugin --profile web add github:XJungit/omdp#path:dsh-vision-bridge
+避免从 GitHub 直接拉取的网络/TLS 问题。在 `profiles/web/package.json` 的
+`dependencies` 里加入（或直接编辑）：
+
+```json
+"@omdp/dsh-vision-bridge": "link:D:/WorkSpace/omdp/dsh-vision-bridge"
 ```
 
-重启 `dsh --profile web` 并刷新页面。包内通过 `dsh.bundle.patch` 声明了激活行
-（`id: vision-bridge`，`name: @omdp/dsh-vision-bridge`），安装即自动激活，无需手动改
-`cordis.patch.yml`。
+然后在该 profile 下重建 lockfile 并建立 junction：
 
-### 方式二：本机 web profile 手动安装
+```sh
+cd ~/.dsh/profiles/web
+pnpm install --lockfile-only --offline
+```
+
+> `pnpm install` 会为 `link:` 依赖建立 `node_modules/@omdp/dsh-vision-bridge` junction
+> 指向 `D:/WorkSpace/omdp/dsh-vision-bridge`，插件源码即仓库源码，**改仓库 → 重启 dsh 即生效**。
+> 确保 `dsh.profile.bundles` 里包含 `"@omdp/dsh-vision-bridge"`（包内声明了
+> `dsh.bundle.patch`，激活行自动生效，无需手动改 `cordis.patch.yml`）。
+
+### 方式二：本机 web profile 手动安装（备用）
 
 在 `profiles/web/cordis.patch.yml` 追加：
 
@@ -73,6 +84,11 @@ dsh plugin --profile web add github:XJungit/omdp#path:dsh-vision-bridge
 密钥：`.credentials.yaml` / `.env` 均加 `AGNES_API_KEY`。
 
 重启 DSH（web profile）生效。插件本体零依赖。
+
+## 更新
+
+本地 link 模式下没有"拉取"这一步：直接 `git pull` 或编辑 `D:/WorkSpace/omdp`，
+然后**重启 `dsh --profile web`**（或刷新浏览器页面）加载新代码。
 
 ## 配置字段
 

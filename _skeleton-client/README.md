@@ -27,6 +27,15 @@ used by `dsh-mcp-manager`. It is NOT the dynamic-plugin `harness.handle` /
 
 ## Install
 
+Prefer a **local `link:` dependency** (no GitHub fetch, edits take effect on restart):
+
+```json
+"@omdp/<your-plugin>": "link:<abs-path>/omdp/<your-plugin-dir>"
+```
+
+Then in the profile (`~/.dsh/profiles/web`) run `pnpm install` and add the bundle
+name to `dsh.profile.bundles`. GitHub install also works:
+
 ```sh
 dsh plugin --profile web add github:XJungit/omdp#path:<your-plugin-dir>
 ```

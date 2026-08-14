@@ -15,33 +15,33 @@
 
 ## 安装
 
-```sh
-dsh plugin --profile web add github:XJungit/omdp#path:dsh-connector
+**推荐：本地 `link:` 安装**（避免从 GitHub 直接拉取的网络/TLS 问题）。在
+`profiles/web/package.json` 的 `dependencies` 里加入（或直接编辑）：
+
+```json
+"@omdp/dsh-connector": "link:D:/WorkSpace/omdp/dsh-connector"
 ```
 
-或从本地路径安装（开发时）：
+然后在该 profile 下重建 lockfile 并建立 junction（`dsh plugin add` 底层就是 pnpm，
+等价于）：
 
 ```sh
-dsh plugin --profile web add /abs/path/to/omdp/dsh-connector
+cd ~/.dsh/profiles/web
+pnpm install --lockfile-only --offline   # 按 link 依赖重写 lockfile
 ```
 
-> `dsh plugin` 底层是 pnpm：`add`/`update` 会把 `github:XJungit/omdp#path:dsh-connector`
-> 规范化成裸 `git+https://github.com/XJungit/omdp.git`（`package.json` 里的
-> spec 会丢掉 `#path:`，lockfile 仍保留）。这没关系——仓库根有配套的
-> `package.json`（名字同为 `@omdp/dsh-connector`），裸 git 安装会解析到
-> `dsh-connector/` 子目录，装出来仍是完整插件，与 `#path:` 安装等价。
+> `pnpm install` 会为 `link:` 依赖建立 `node_modules/@omdp/dsh-connector` junction
+> 指向 `D:/WorkSpace/omdp/dsh-connector`，插件源码即仓库源码，**改仓库 → 重启 dsh 即生效**。
 
-重启 `dsh --profile web` 并刷新页面。包内声明了 `dsh.bundle.patch`，插件自动激活——无需手动改 `cordis.patch.yml`。
+确保 `dsh.profile.bundles` 里包含 `"@omdp/dsh-connector"`（包内声明了
+`dsh.bundle.patch`，激活行自动生效，无需手动改 `cordis.patch.yml`）。
 
 > 安装前请先**备份** `profiles/web/cordis.patch.yml`。本插件会改写其中的 MCP 块。
 
 ## 更新
 
-```sh
-dsh plugin --profile web update @omdp/dsh-connector
-```
-
-更新会拉取仓库最新提交并替换 `node_modules` 里的代码，之后**重启 `dsh --profile web`** 才加载新版本（运行中的进程仍用旧代码）。
+本地 link 模式下**没有"拉取"这一步**：直接 `git pull` 或编辑 `D:/WorkSpace/omdp`，
+然后**重启 `dsh --profile web`** 加载新代码（运行中的进程仍用旧代码）。
 
 ## 使用
 

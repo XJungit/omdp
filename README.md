@@ -34,10 +34,10 @@ One settings tab ("Connector") that manages two things from the DSH Web UI:
 - **MCP servers** — edits the MCP block in `cordis.patch.yml` (stdio / streamable-http). Legacy SSE servers (e.g. Zhihu) are kept as `mcp-remote --transport sse-only` stdio bridges; this plugin only manages that config text.
 - **User skills** — read / write / delete skills under `~/.dsh/skills/<name>/SKILL.md`.
 
-Install into a profile (see each plugin's README for the exact command):
+Install into a profile via a **local `link:` dependency** (see its README for the exact steps):
 
-```sh
-dsh plugin --profile web add github:XJungit/omdp#path:dsh-connector
+```json
+"@omdp/dsh-connector": "link:D:/WorkSpace/omdp/dsh-connector"
 ```
 
 ### `dsh-vision-bridge` → npm name `@omdp/dsh-vision-bridge`
@@ -48,34 +48,31 @@ configurable OpenAI-compatible multimodal endpoint (default Agnes `agnes-2.5-fla
 returned text back as evidence. Ships a `vision_bridge_read_image` tool, a paste/drop → temp-path
 browser handler, a wrapped `(vision bridge)` provider entry, and an `agent/pre-step` auto-read hook.
 
-Install into a profile:
+Install into a profile via a **local `link:` dependency**:
 
-```sh
-dsh plugin --profile web add github:XJungit/omdp#path:dsh-vision-bridge
+```json
+"@omdp/dsh-vision-bridge": "link:D:/WorkSpace/omdp/dsh-vision-bridge"
 ```
 
 See its own `README.md` for the full config reference.
 
-## Why the repository root has a package.json
+## Why local `link:` installs are recommended
 
-`dsh plugin add/update` is a pnpm wrapper, and pnpm canonicalizes a
-`github:XJungit/omdp#path:<plugin>` spec into a **bare**
-`git+https://github.com/XJungit/omdp.git` URL, dropping the `#path:` selector
-from `package.json` (the lockfile keeps the path). To keep such installs
-functional, the repository root ships `package.json` named
-`@omdp/dsh-connector` whose `main`/`exports` re-export the `dsh-connector/`
-subdirectory and whose `dsh.bundle.patch` points into it — so a bare-git
-install resolves to a complete plugin, identical to a `#path:` install.
+GitHub installs (`dsh plugin add github:XJungit/omdp#path:<plugin>`) work but hit
+network/TLS friction (e.g. `UNABLE_TO_VERIFY_LEAF_SIGNATURE`, proxy rewrites).
+Installing each plugin as a **local `link:` dependency** instead:
 
-This matters because *any* later `dsh plugin --profile <p> update @omdp/dsh-connector`
-rewrites the saved spec to the bare form. Both forms are supported and
-interchangeable; the root manifest exists precisely so that normalization
-never breaks an install.
+- `pnpm install` creates a `node_modules/@omdp/<plugin>` junction pointing at the
+  repo subdirectory, so the running plugin **is** the repo source.
+- Updating = edit/pull the repo + restart `dsh` — no re-fetch, no lockfile pins.
+- The repo-root `package.json` (named `@omdp/dsh-connector`) is still kept so that
+  a pnpm-canonicalized bare-git install of `dsh-connector` remains resolvable; it is
+  not needed for local-link installs.
 
 ## Conventions
 
 - Every plugin subdirectory is a standalone npm package with a `dsh.bundle` (and optionally `dsh.client`) manifest.
 - Package names are scoped under `@omdp/` to avoid colliding with upstream `dsh-*` packages on npm.
-- Plugins in this repo are plain JavaScript (no build step), so a GitHub install works directly without a compile stage.
-- The repository-root `package.json` mirrors `@omdp/dsh-connector` so that pnpm-canonicalized bare-git specs still install a complete bundle (see below). Each *other* plugin installs via a `#path:` selector (e.g. `github:XJungit/omdp#path:dsh-vision-bridge`), which keeps that plugin's subdirectory as the install target.
+- Plugins in this repo are plain JavaScript (no build step), so both local-link and GitHub installs work without a compile stage.
+- **Installing locally is preferred**: add `"@omdp/<plugin>": "link:<abs-path>/omdp/<plugin>"` to the profile's `dependencies` and run `pnpm install` — the plugin loads straight from the repo and updates with a restart. GitHub installs remain possible via `github:XJungit/omdp#path:<plugin>`; the repository-root `package.json` mirrors `@omdp/dsh-connector` so a pnpm-canonicalized bare-git install of `dsh-connector` still resolves (see above).
 - `_skeleton-client/` and `_skeleton-host/` are copy-paste templates for new plugins; they are not installable bundles themselves.
