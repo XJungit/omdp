@@ -1,7 +1,5 @@
 # @omdp/dsh-connector
 
-**English** | 简体中文
-
 一个 DeepSeek Harness (`dsh`) 插件，把 **MCP 服务器** 和 **用户 Skills** 的管理合并到 Web UI 的同一个设置页里（设置页标签：**Connector**）。
 
 - **MCP**：读取/编辑 `profiles/web/cordis.patch.yml` 中的 `mcp-*` 块（结构化表单）。保存后**重启 `dsh` 生效**。
@@ -27,9 +25,23 @@ dsh plugin --profile web add github:XJungit/omdp#path:dsh-connector
 dsh plugin --profile web add /abs/path/to/omdp/dsh-connector
 ```
 
+> `dsh plugin` 底层是 pnpm：`add`/`update` 会把 `github:XJungit/omdp#path:dsh-connector`
+> 规范化成裸 `git+https://github.com/XJungit/omdp.git`（`package.json` 里的
+> spec 会丢掉 `#path:`，lockfile 仍保留）。这没关系——仓库根有配套的
+> `package.json`（名字同为 `@omdp/dsh-connector`），裸 git 安装会解析到
+> `dsh-connector/` 子目录，装出来仍是完整插件，与 `#path:` 安装等价。
+
 重启 `dsh --profile web` 并刷新页面。包内声明了 `dsh.bundle.patch`，插件自动激活——无需手动改 `cordis.patch.yml`。
 
 > 安装前请先**备份** `profiles/web/cordis.patch.yml`。本插件会改写其中的 MCP 块。
+
+## 更新
+
+```sh
+dsh plugin --profile web update @omdp/dsh-connector
+```
+
+更新会拉取仓库最新提交并替换 `node_modules` 里的代码，之后**重启 `dsh --profile web`** 才加载新版本（运行中的进程仍用旧代码）。
 
 ## 使用
 
@@ -55,6 +67,7 @@ dsh plugin --profile web add /abs/path/to/omdp/dsh-connector
 ## 已知限制
 
 - MCP 改动需**重启 dsh** 才生效（因为 `dsh-mcp-client` 实例是静态加载的）。若想要保存即时生效，需用 `dsh-mcp-manager`（它自行实现 MCP client）。
+- 保存时按 `dsh-mcp-client` 的契约**校验**：`transport` 只能是 `stdio`/`streamable-http`；`serverName` 必须匹配 `[A-Za-z0-9_-]{1,32}`；stdio 的 `command` 必须是单个词且能在 PATH 中找到（或为绝对路径）；streamable-http 的 `url` 必须是合法 http(s)（`!!js` 表达式除外）；命令/URL/参数中不允许控制字符。任何一项不合法，保存会被拒绝（HTTP 400）并提示原因，**不会写入** `cordis.patch.yml`——坏配置永远到不了下次启动。
 - MCP 块解析为结构化提取，复杂嵌套 YAML（如多 env 变量）在表单里以单字段呈现；极复杂配置请直接在 `cordis.patch.yml` 编辑。
 - 不桥接 MCP 的 resources/prompts，只管理 server 配置。
 
