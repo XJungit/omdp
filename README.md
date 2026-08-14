@@ -56,6 +56,39 @@ Install into a profile via a **local `link:` dependency**:
 
 See its own `README.md` for the full config reference.
 
+## Remote installs from GitHub (alternative)
+
+Each plugin is a standalone npm package in its own subdirectory, so it can also
+be installed straight from GitHub without a local checkout:
+
+```sh
+dsh plugin --profile web add github:XJungit/omdp#path:dsh-connector
+dsh plugin --profile web add github:XJungit/omdp#path:dsh-vision-bridge
+```
+
+The `#path:<subdir>` selector tells pnpm which workspace subdirectory to install
+(it resolves to that subpackage's `package.json`, not the repo root).
+
+**pnpm ≥10 build-script gate.** A git install fetches *sources*, and pnpm refuses
+to run a git dependency's `prepare`/build scripts until explicitly allowed — the
+first `add` fails until you whitelist it in the profile's `pnpm-workspace.yaml`:
+
+```yaml
+allowBuilds:
+  '@omdp/dsh-connector': true
+  '@omdp/dsh-vision-bridge': true
+```
+
+Then re-run the `add`. (These plugins are plain JavaScript with no build step,
+so the whitelist is the only hurdle — no `prepare` script is needed. See the
+official [publish.md](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/user/develop/basic/publish.md)
+for the full "build-script catch".) Treat the allowance as permission to run the
+package's code at install time; for untrusted sources, pin a commit
+(`github:XJungit/omdp#<sha>&path:<subdir>`).
+
+The same monorepo layout is used by other DSH plugin collections, e.g.
+[zhu1090093659/dsh-web-ui](https://github.com/zhu1090093659/dsh-web-ui).
+
 ## Why local `link:` installs are recommended
 
 GitHub installs (`dsh plugin add github:XJungit/omdp#path:<plugin>`) work but hit

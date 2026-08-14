@@ -38,6 +38,25 @@ pnpm install --lockfile-only --offline   # 按 link 依赖重写 lockfile
 
 > 安装前请先**备份** `profiles/web/cordis.patch.yml`。本插件会改写其中的 MCP 块。
 
+### 备选：从 GitHub 远程安装
+
+不想本地 checkout 时，可直接从仓库装（`#path:` 指向子目录）：
+
+```sh
+dsh plugin --profile web add github:XJungit/omdp#path:dsh-connector
+```
+
+pnpm ≥10 默认拒绝运行 git 依赖的构建脚本，首次 `add` 会失败，需在
+`profiles/web/pnpm-workspace.yaml` 加白名单后重试：
+
+```yaml
+allowBuilds:
+  '@omdp/dsh-connector': true
+```
+
+（本插件是纯 JS 零构建，白名单是唯一门槛，无需 `prepare` 脚本。详见官方
+[publish.md](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/user/develop/basic/publish.md)。）
+
 ## 更新
 
 本地 link 模式下**没有"拉取"这一步**：直接 `git pull` 或编辑 `D:/WorkSpace/omdp`，
