@@ -174,9 +174,9 @@ window.__ModuleLoader__.load({
 
       function submit() {
         var id = v.id === 'mcp-new'
-          ? 'mcp-' + (v.name || 'server').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+          ? 'mcp-' + (v.serverName || v.name || 'server').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
           : v.id
-        props.onSave(Object.assign({}, v, { id: id, name: v.name }))
+        props.onSave(Object.assign({}, v, { id: id, name: v.serverName || v.name }))
       }
 
       return createElement('div', { className: 'pm_row' },
