@@ -220,7 +220,7 @@ function buildPatch(text, servers) {
   if (!found) {
     if (!servers.length) return text
     const block =
-      `\n# MCP servers managed by omdp-dsh-connector\n` +
+      `\n# MCP servers managed by @omdp/dsh-connector\n` +
       `- insert:\n` +
       servers.map(renderServer).join('\n') +
       '\n'
@@ -388,7 +388,7 @@ export function apply(ctx) {
         try {
           text = await readFile(patchPath(), 'utf8')
         } catch (error) {
-          if (isAbsent(error)) text = '# Managed by omdp-dsh-connector\n[]\n'
+          if (isAbsent(error)) text = '# Managed by @omdp/dsh-connector\n[]\n'
           else throw error
         }
         const existing = new Map()

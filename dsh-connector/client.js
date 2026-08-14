@@ -16,7 +16,7 @@
  */
 
 window.__ModuleLoader__.load({
-  id: 'omdp-dsh-connector',
+  id: '@omdp/dsh-connector',
   factory: (require) => {
     var module = { exports: {} }
     var exports = module.exports
@@ -49,10 +49,10 @@ window.__ModuleLoader__.load({
       '.pm_hint{font-size:12px;color:var(--dsw-alias-label-secondary,#888)}' +
       '.pm_textarea{font-family:ui-monospace,Menlo,Consolas,monospace;min-height:140px}'
 
-    if (typeof document !== 'undefined' && document.querySelector('style[data-plugin-css="omdp-dsh-connector/section"]') === null) {
+    if (typeof document !== 'undefined' && document.querySelector('style[data-plugin-css="@omdp/dsh-connector/section"]') === null) {
       var tag = document.createElement('style')
-      tag.dataset.plugin = 'omdp-dsh-connector'
-      tag.dataset.pluginCss = 'omdp-dsh-connector/section'
+      tag.dataset.plugin = '@omdp/dsh-connector'
+      tag.dataset.pluginCss = '@omdp/dsh-connector/section'
       tag.textContent = css
       document.head.appendChild(tag)
     }

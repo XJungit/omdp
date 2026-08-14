@@ -3,4 +3,4 @@
 # The user's own cordis.patch.yml may still override or disable this row by id.
 - insert:
     - id: connector
-      name: omdp-dsh-connector
+      name: '@omdp/dsh-connector'
