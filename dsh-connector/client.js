@@ -201,13 +201,44 @@ window.__ModuleLoader__.load({
       var derivedId = deriveServerId(v.serverName || v.name)
       var idValue = isNew ? (v.customId !== undefined && v.customId !== '' ? v.customId : derivedId) : v.id
 
+      // dsh-mcp-client's own serverName contract; the harness rejects anything
+      // else at boot, so it must be rejected here.
+      var SERVER_NAME_RE = /^[A-Za-z0-9_-]{1,32}$/
+      var CONTROL_CHARS = /[\x00-\x1f\x7f]/
+      var TRANSPORTS = { stdio: true, 'streamable-http': true }
+
+      function looksLikeExpression(value) {
+        var text = (value || '').trim()
+        return text.indexOf('!!js') === 0 || text.indexOf('process.env') !== -1 || text.indexOf('&&') !== -1 || text.indexOf('(') === 0
+      }
+
       function submit() {
         var problems = []
         var t = v.transport || 'stdio'
-        if (!(v.serverName || '').trim()) problems.push('serverName 必填 Name is required')
-        if (t === 'stdio' && !(v.command || '').trim()) problems.push('stdio 传输必须填 Command Command is required for stdio')
-        if (t === 'streamable-http' && !(v.url || '').trim()) problems.push('streamable-http 传输必须填 URL URL is required for streamable-http')
-        if (t !== 'stdio' && t !== 'streamable-http') problems.push('未知传输类型 Unknown transport')
+        var name = (v.serverName || '').trim()
+        if (!name) problems.push('serverName 必填 Name is required')
+        else if (!SERVER_NAME_RE.test(name)) problems.push('serverName 必须为 1-32 位 [A-Za-z0-9_-] Name must match [A-Za-z0-9_-]{1,32}')
+        if (!TRANSPORTS[t]) problems.push('未知传输类型 Unknown transport')
+        if (t === 'stdio') {
+          var command = (v.command || '').trim()
+          if (!command) problems.push('stdio 传输必须填 Command Command is required for stdio')
+          else if (/\s|['"]/.test(command)) problems.push('Command 必须是单个词，不能有空格或引号 Command must be a single token (no spaces/quotes)')
+          else if (CONTROL_CHARS.test(command)) problems.push('Command 不能含控制字符 Command must not contain control characters')
+          var argsText = (v.args || '').trim()
+          if (argsText && CONTROL_CHARS.test(argsText)) problems.push('Args 不能含控制字符 Args must not contain control characters')
+        }
+        if (t === 'streamable-http') {
+          var url = (v.url || '').trim()
+          if (!url) problems.push('streamable-http 传输必须填 URL URL is required for streamable-http')
+          else if (!looksLikeExpression(url)) {
+            try {
+              var parsed = new URL(url)
+              if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') problems.push('URL 必须是 http(s) URL must be http(s)')
+            } catch (e) {
+              problems.push('URL 无效 Invalid URL')
+            }
+          }
+        }
         if (isNew) {
           var custom = (v.customId || '').trim()
           if (custom && !MCP_ID_RE.test(custom)) problems.push('ID 必须以 mcp- 开头且为小写 kebab-case，如 mcp-github ID must be mcp-<kebab-case>')

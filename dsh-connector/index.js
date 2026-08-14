@@ -21,6 +21,8 @@
  */
 
 import { readFile, writeFile, mkdir, readdir, rm, rename } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
@@ -30,7 +32,15 @@ const SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 // Server ids are keys for the mcp-* block (and dsh-mcp-client instances):
 // kebab-case under a fixed `mcp-` prefix, which parseMcpServers also requires.
 const MCP_ID_RE = /^mcp-[a-z0-9]+(?:-[a-z0-9]+)*$/
+// dsh-mcp-client's own serverName contract (lib/types/index.js SERVER_NAME_PATTERN).
+const SERVER_NAME_RE = /^[A-Za-z0-9_-]{1,32}$/
+const TRANSPORTS = new Set(['stdio', 'streamable-http'])
+// Anything that would break YAML/JSON transport, a cmd command line, or the
+// patch file itself (NUL, control chars). Tab/newline are already rejected by
+// the single-token rules; this catches the rest defensively.
+const CONTROL_CHARS = /[\x00-\x1f\x7f]/
 export const inject = ['webServer']
+export { validateServer, commandResolvable }
 
 function resolveHome() {
   const fromEnv = process.env.DSH_HOME
@@ -380,6 +390,97 @@ async function removeUserSkill(home, name) {
   await rm(join(skillsRoot(), name), { recursive: true, force: true })
 }
 
+/* ─────────────────────── MCP server validation ─────────────────────────
+ * The authoritative gate between the UI and the patch file: every field the
+ * user can type is checked against the exact contract dsh-mcp-client enforces
+ * at boot (transport enum, serverName pattern) plus the OS-level constraints
+ * that make a stdio spawn actually work (command must resolve to something
+ * executable; no spaces/quotes that would break the cmd command line) and the
+ * streamable-http contract (url must parse as an http(s) URL). A value that
+ * fails here would either crash the next boot (schema reject) or spam cmd
+ * errors ('a' is not recognized...) — both are rejected before writing.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+// A `!!js` url expression (e.g. `!!js (process.env.X || '') && ('https://...')`)
+// is evaluated by the harness at activation, so its raw text cannot be URL
+// checked. Anything that looks like an expression is exempted.
+function looksLikeExpression(value) {
+  const text = String(value ?? '').trim()
+  return text.startsWith('!!js') || text.includes('process.env') || text.includes('&&') || text.startsWith('(')
+}
+
+// Windows has no `which`; PATH lookup mirrors cmd's own resolution. A
+// path-like command (contains a separator or a known script/exec extension)
+// must exist on disk instead — `where` would not resolve a bare `.js`.
+function commandResolvable(command) {
+  if (/[\\/]/.test(command) || /\.(js|mjs|cjs|cmd|bat|exe|ps1|py)$/i.test(command)) {
+    return existsSync(command)
+  }
+  if (process.platform === 'win32') {
+    const r = spawnSync('where', [command], { stdio: 'ignore' })
+    return r.status === 0
+  }
+  const r = spawnSync('which', [command], { stdio: 'ignore' })
+  return r.status === 0
+}
+
+// One string field shared by every server entry; returns the first problem.
+function checkScalar(label, value) {
+  if (typeof value !== 'string') return `${label} must be a string`
+  if (CONTROL_CHARS.test(value)) return `${label} must not contain control characters`
+  return null
+}
+
+// Full validation for one server object (raw from the request body). Returns
+// an array of human-readable problems; empty means it is safe to write.
+function validateServer(s) {
+  const problems = []
+  const id = String(s.id ?? '')
+  if (!MCP_ID_RE.test(id)) {
+    problems.push(`invalid server id ${JSON.stringify(id)} (must be mcp-<kebab-case>, e.g. mcp-github)`)
+  }
+  const transport = String(s.transport ?? 'stdio')
+  if (!TRANSPORTS.has(transport)) {
+    problems.push(`server ${JSON.stringify(id)}: transport ${JSON.stringify(transport)} is not supported (use stdio or streamable-http)`)
+  }
+  const name = String(s.serverName ?? '')
+  if (!SERVER_NAME_RE.test(name)) {
+    problems.push(`server ${JSON.stringify(id)}: serverName ${JSON.stringify(name)} must match ${String(SERVER_NAME_RE)} (harness contract)`)
+  }
+  for (const [label, key] of [['command', 'command'], ['url', 'url'], ['header', 'header'], ['args', 'args']]) {
+    if (typeof s[key] === 'string') {
+      const problem = checkScalar(`${JSON.stringify(id)}.${label}`, s[key])
+      if (problem) problems.push(problem)
+    }
+  }
+  if (transport === 'stdio') {
+    const command = String(s.command ?? '')
+    if (!command.trim()) {
+      problems.push(`server ${JSON.stringify(id)}: command is required for stdio transport`)
+    } else if (/\s|['"]/.test(command)) {
+      problems.push(`server ${JSON.stringify(id)}: command must be a single token (no spaces or quotes), e.g. node or npx`)
+    } else if (!commandResolvable(command)) {
+      problems.push(`server ${JSON.stringify(id)}: command ${JSON.stringify(command)} not found — check the name or the full path`)
+    }
+  }
+  if (transport === 'streamable-http') {
+    const url = String(s.url ?? '')
+    if (!url.trim()) {
+      problems.push(`server ${JSON.stringify(id)}: url is required for streamable-http transport`)
+    } else if (!looksLikeExpression(url)) {
+      try {
+        const parsed = new URL(url)
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+          problems.push(`server ${JSON.stringify(id)}: url must be http(s)`)
+        }
+      } catch {
+        problems.push(`server ${JSON.stringify(id)}: url ${JSON.stringify(url)} is not a valid URL`)
+      }
+    }
+  }
+  return problems
+}
+
 /* ─────────────────────────── HTTP API ──────────────────────────────────── */
 
 function json(res, code, value) {
@@ -422,23 +523,18 @@ export function apply(ctx) {
       // existing entry with the same id so edits never drop credentials.
       if (req.method === 'POST' && path === API_PREFIX + '/mcp') {
         const body = await readBody(req)
-        const incoming = Array.isArray(body.servers) ? body.servers : []
-        const bad = incoming.find((s) => typeof s.id !== 'string' || !MCP_ID_RE.test(s.id))
-        if (bad) {
-          return json(res, 400, {
-            error: `invalid server id ${JSON.stringify(bad && bad.id)} (must be mcp-<kebab-case>, e.g. mcp-github)`,
-          })
+        if (!Array.isArray(body.servers)) {
+          return json(res, 400, { error: 'malformed request body: servers must be an array' })
         }
-        // Transport-specific required fields: a stdio server without a command
-        // (or an http server without a url) would fail dsh-mcp-client's schema
-        // and crash the next boot, so reject it before it reaches the patch.
-        for (const s of incoming) {
-          const t = s.transport || 'stdio'
-          if (t === 'stdio' && !String(s.command || '').trim()) {
-            return json(res, 400, { error: `server ${JSON.stringify(s.id)}: command is required for stdio transport` })
-          }
-          if (t === 'streamable-http' && !String(s.url || '').trim()) {
-            return json(res, 400, { error: `server ${JSON.stringify(s.id)}: url is required for streamable-http transport` })
+        // Authoritative validation gate: any problem (bad transport, invalid
+        // serverName, unresolvable command, invalid url, control characters)
+        // rejects the whole save with a specific message BEFORE it reaches the
+        // patch — a bad entry would crash the next boot, so it must never be
+        // written.
+        for (const s of body.servers) {
+          const problems = validateServer(s)
+          if (problems.length) {
+            return json(res, 400, { error: problems.join('; ') })
           }
         }
         let text
@@ -451,21 +547,18 @@ export function apply(ctx) {
         const existing = new Map()
         const found = findMcpBlock(text)
         if (found) for (const s of parseMcpServers(found.blockText)) existing.set(s.id, s)
-        const servers = incoming.map((s) => {
+        const servers = body.servers.map((s) => {
           const prev = existing.get(s.id)
           return prev ? { ...s, preserve: s.preserve || prev.preserve } : s
         })
         const next = buildPatch(text, servers)
         // Validate the entire resulting patch parses as YAML before writing.
-        // cordis.patch.yml uses `!!js` tags and comments that the `yaml`
-        // parser tolerates via its default (non-strict, js:true) mode, so a
-        // successful parse here means DSH can load it too. If it does NOT
-        // parse, refuse to write — better to reject the edit than crash dsh
-        // on next boot.
+        // cordis.patch.yml uses `!!js` tags; the parser tolerates them via
+        // silent log level (values stay raw, nothing printed), so a successful
+        // parse here means DSH can load it too. If it does NOT parse, refuse
+        // to write — better to reject the edit than crash dsh on next boot.
         try {
-          // js:true mirrors how DSH itself parses cordis.patch.yml (it uses
-          // !!js tags), so a successful parse here guarantees DSH can load it.
-          parseYaml(next, { js: true })
+          parseYaml(next, { logLevel: 'silent' })
         } catch (err) {
           return json(res, 422, { ok: false, error: 'generated patch is not valid YAML: ' + (err && err.message ? err.message : String(err)) })
         }
