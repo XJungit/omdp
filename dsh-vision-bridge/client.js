@@ -16,9 +16,11 @@
 // Hand-written in the lazy-CJS bundle protocol (window.__ModuleLoader__.load
 // with a factory returning cordis-plugin exports), so no build step and no
 // imports from dsh client packages — the same zero-dependency stance as the
-// host half.
+// host half. The registered id MUST be the package name (@omdp/dsh-vision-bridge):
+// dsh-client-modules rejects any bundle whose __ModuleLoader__.load id does
+// not match the package it was loaded for.
 window.__ModuleLoader__.load({
-  id: 'dsh-vision-bridge',
+  id: '@omdp/dsh-vision-bridge',
   factory: () => {
     var module = { exports: {} }
     var exports = module.exports
