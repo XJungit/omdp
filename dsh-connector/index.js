@@ -20,7 +20,7 @@
  * @module dsh-connector
  */
 
-import { readFile, writeFile, mkdir, readdir, rm } from 'node:fs/promises'
+import { readFile, writeFile, mkdir, readdir, rm, rename } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
@@ -80,7 +80,16 @@ function stripQuotes(v) {
   return v
 }
 
-const KNOWN_KEYS = new Set(['transport', 'serverName', 'url', 'command', 'args', 'header'])
+const KNOWN_KEYS = new Set(['transport', 'serverName', 'url', 'command', 'header'])
+// `args` is intentionally NOT modeled: it appears both as a single-line array
+// (`args: ['/c', ...]`) and as a block sequence — rendering either form back
+// losslessly is error-prone, and a bad render here would corrupt the patch and
+// crash dsh. So args is preserved verbatim (see PRESERVE_KEYS) and never
+// rewritten.
+const PRESERVE_KEYS = new Set(['args'])
+// Keys that `renderServer` emits itself (fixed `name`, the `config:` container
+// opener). They must be dropped on parse so the rewrite doesn't duplicate them.
+const SKIP_KEYS = new Set(['name', 'config'])
 
 /**
  * Parse server entries (4-space-indented `- id: mcp-*`) inside the MCP block.
@@ -92,6 +101,10 @@ function parseMcpServers(blockText) {
   const servers = []
   let cur = null
   let curIndent = 0
+  // When we hit `args:` with no inline value, the following deeper-indented
+  // `- ` list items are a block sequence we must keep verbatim and re-emit
+  // under `args:`. `argsSeqIndent` is that sequence's indent (-1 = not collecting).
+  let argsSeqIndent = -1
   for (const line of lines) {
     const idm = line.match(/^(\s*)- id:\s*(mcp-\S+)\s*$/)
     if (idm) {
@@ -104,10 +117,12 @@ function parseMcpServers(blockText) {
         url: '',
         command: '',
         args: '',
+        argsLines: [],
         header: '',
         preserve: '',
       }
       curIndent = idm[1].length
+      argsSeqIndent = -1
       continue
     }
     if (!cur) continue
@@ -117,20 +132,32 @@ function parseMcpServers(blockText) {
     // A sibling server at the same indent ends this entry.
     if (indent === curIndent && /^- id:/.test(line)) continue
     if (indent <= curIndent) {
-      // Left the config entirely: flush the current entry before dropping it.
+      // Left the config entirely (or a sibling): stop collecting args.
+      argsSeqIndent = -1
       if (cur) { servers.push(cur); cur = null }
+      continue
+    }
+    // While collecting an args block sequence, every deeper list item is kept.
+    if (argsSeqIndent >= 0 && indent >= argsSeqIndent && /^\s*- /.test(line)) {
+      cur.argsLines.push(line.trim())
       continue
     }
     const kv = line.match(/^\s+(\w+):\s*(.*)$/)
     if (kv) {
       const key = kv[1]
       const val = stripQuotes(kv[2].trim())
+      if (SKIP_KEYS.has(key)) continue
+      if (key === 'args') {
+        // Inline array: `args: [...]` -> string. Block sequence: start collecting.
+        if (val.length) cur.args = val
+        else argsSeqIndent = indent + 2
+        continue
+      }
       if (KNOWN_KEYS.has(key)) {
         if (key === 'serverName') cur.serverName = val
         else if (key === 'transport') cur.transport = val
         else if (key === 'url') cur.url = val
         else if (key === 'command') cur.command = val
-        else if (key === 'args') cur.args = val
         else if (key === 'header') cur.header = val
         continue
       }
@@ -142,22 +169,44 @@ function parseMcpServers(blockText) {
   return servers
 }
 
+// Emit a YAML scalar safely for arbitrary user input. We always use double
+// quotes with JSON-style escaping: it is a single line, so it can never
+// disturb the surrounding block indentation (a block scalar like `|-` would
+// swallow the following lines). Double quotes in YAML accept the same
+// \n \t \" \\ escapes as JSON.
+function safeScalar(value) {
+  const v = value === undefined || value === null ? '' : String(value)
+  if (v === '') return "''"
+  const escaped = v
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, '\\n')
+    .replace(/\t/g, '\\t')
+    .replace(/\r/g, '\\r')
+  return '"' + escaped + '"'
+}
+
 function renderServer(s) {
   const out = []
-  out.push(`    - id: ${s.id}`)
+  out.push(`    - id: ${safeScalar(s.id)}`)
   out.push(`      name: '@deepseek-ai/dsh-mcp-client'`)
   out.push(`      config:`)
-  out.push(`        transport: ${s.transport || 'stdio'}`)
-  if (s.serverName) out.push(`        serverName: ${s.serverName}`)
-  if (s.url) out.push(`        url: ${s.url}`)
-  if (s.command) out.push(`        command: ${s.command}`)
-  if (s.args) out.push(`        args: ${s.args}`)
-  if (s.header) out.push(`        header: ${s.header}`)
+  out.push(`        transport: ${safeScalar(s.transport || 'stdio')}`)
+  if (s.serverName) out.push(`        serverName: ${safeScalar(s.serverName)}`)
+  if (s.url) out.push(`        url: ${safeScalar(s.url)}`)
+  if (s.command) out.push(`        command: ${safeScalar(s.command)}`)
+  if (s.header) out.push(`        header: ${safeScalar(s.header)}`)
+  // args: either an inline array string, or a verbatim block sequence.
+  if (s.argsLines && s.argsLines.length) {
+    out.push(`        args:`)
+    for (const item of s.argsLines) out.push(`          ${item}`)
+  } else if (s.args) {
+    out.push(`        args: ${safeScalar(s.args)}`)
+  }
   if (s.preserve) {
     const trimmed = s.preserve.trimEnd()
     if (trimmed.length) out.push(trimmed)
   }
-  out.push(`        toolCallTimeoutMs: 60000`)
   return out.join('\n')
 }
 
@@ -269,10 +318,22 @@ async function saveUserSkill(home, skill) {
   if (!SKILL_NAME.test(skill.name)) {
     throw new Error(`invalid skill name "${skill.name}" (kebab-case only)`)
   }
+  // A bare `---` line inside the body would be mistaken for the frontmatter
+  // terminator on read and truncate the skill. Reject it up front.
+  if (skill.content && /(^|\n)\s*---\s*(\n|$)/.test(skill.content)) {
+    throw new Error('skill content must not contain a standalone "---" line')
+  }
   const dir = join(skillsRoot(), skill.name)
+  const file = join(dir, 'SKILL.md')
+  const serialized = serializeSkill(skill)
+  // Round-trip check: the file we are about to write must parse back into a
+  // valid skill (name + at least one closing delimiter). If not, refuse.
+  if (!parseFrontmatter(serialized)) {
+    throw new Error('generated SKILL.md is not valid (frontmatter missing or unterminated)')
+  }
   await mkdir(dir, { recursive: true })
-  await writeFile(join(dir, 'SKILL.md'), serializeSkill(skill), 'utf8')
-  return { path: join(dir, 'SKILL.md') }
+  await writeFile(file, serialized, 'utf8')
+  return { path: file }
 }
 
 async function removeUserSkill(home, name) {
@@ -338,8 +399,26 @@ export function apply(ctx) {
           return prev ? { ...s, preserve: s.preserve || prev.preserve } : s
         })
         const next = buildPatch(text, servers)
+        // Validate the entire resulting patch parses as YAML before writing.
+        // cordis.patch.yml uses `!!js` tags and comments that the `yaml`
+        // parser tolerates via its default (non-strict, js:true) mode, so a
+        // successful parse here means DSH can load it too. If it does NOT
+        // parse, refuse to write — better to reject the edit than crash dsh
+        // on next boot.
+        try {
+          // js:true mirrors how DSH itself parses cordis.patch.yml (it uses
+          // !!js tags), so a successful parse here guarantees DSH can load it.
+          parseYaml(next, { js: true })
+        } catch (err) {
+          return json(res, 422, { ok: false, error: 'generated patch is not valid YAML: ' + (err && err.message ? err.message : String(err)) })
+        }
         await mkdir(dirname(patchPath()), { recursive: true })
-        await writeFile(patchPath(), next, 'utf8')
+        // Atomic replace: write to a temp file, then rename over the original
+        // so a crash mid-write cannot leave a half-written patch behind.
+        const target = patchPath()
+        const tmp = target + '.tmp'
+        await writeFile(tmp, next, 'utf8')
+        await rename(tmp, target)
         return json(res, 200, { ok: true })
       }
 
