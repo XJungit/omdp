@@ -136,18 +136,30 @@ window.__ModuleLoader__.load({
       var _a = react.useState(null)
       var editing = _a[0]
       var setEditing = _a[1]
+      var _b = react.useState('')
+      var err = _b[0]
+      var setErr = _b[1]
 
       function save(server) {
         api('/mcp', {
           method: 'POST',
           body: JSON.stringify({ servers: props.mcp.servers.map(function (s) { return s.id === server.id ? server : s }).concat(props.mcp.servers.some(function (s) { return s.id === server.id }) ? [] : [server]) }),
-        }).then(function () { setEditing(null); props.onChanged() })
+        }).then(function (r) {
+          if (r && r.error) { setErr(r.error); return }
+          setErr('')
+          setEditing(null)
+          props.onChanged()
+        })
       }
       function remove(id) {
         api('/mcp', {
           method: 'POST',
           body: JSON.stringify({ servers: props.mcp.servers.filter(function (s) { return s.id !== id }) }),
-        }).then(function () { props.onChanged() })
+        }).then(function (r) {
+          if (r && r.error) { setErr(r.error); return }
+          setErr('')
+          props.onChanged()
+        })
       }
 
       var rows = props.mcp.servers.map(function (s) {
@@ -166,6 +178,7 @@ window.__ModuleLoader__.load({
 
       return createElement('div', { className: 'pm_section' },
         createElement('div', { className: 'pm_sectionHead' }, 'MCP 服务器 MCP Servers'),
+        err ? createElement('div', { className: 'pm_err' }, err) : null,
         createElement('div', { className: 'pm_hint' },
           props.mcp.exists ? '编辑 profiles/web/cordis.patch.yml 中的 mcp-* 块。保存后重启 dsh 生效。Edit the mcp-* block in cordis.patch.yml; restart dsh to apply.' : '未找到 cordis.patch.yml。cordis.patch.yml not found.'),
         rows,
@@ -179,6 +192,9 @@ window.__ModuleLoader__.load({
       var _a = react.useState(props.value)
       var v = _a[0]
       var setV = _a[1]
+      var _b = react.useState('')
+      var err = _b[0]
+      var setErr = _b[1]
       function set(key) { return function (val) { var next = Object.assign({}, v); next[key] = val; setV(next) } }
 
       var isNew = v.id === 'mcp-new'
@@ -186,8 +202,19 @@ window.__ModuleLoader__.load({
       var idValue = isNew ? (v.customId !== undefined && v.customId !== '' ? v.customId : derivedId) : v.id
 
       function submit() {
+        var problems = []
+        var t = v.transport || 'stdio'
+        if (!(v.serverName || '').trim()) problems.push('serverName 必填 Name is required')
+        if (t === 'stdio' && !(v.command || '').trim()) problems.push('stdio 传输必须填 Command Command is required for stdio')
+        if (t === 'streamable-http' && !(v.url || '').trim()) problems.push('streamable-http 传输必须填 URL URL is required for streamable-http')
+        if (t !== 'stdio' && t !== 'streamable-http') problems.push('未知传输类型 Unknown transport')
         if (isNew) {
           var custom = (v.customId || '').trim()
+          if (custom && !MCP_ID_RE.test(custom)) problems.push('ID 必须以 mcp- 开头且为小写 kebab-case，如 mcp-github ID must be mcp-<kebab-case>')
+        }
+        if (problems.length) { setErr(problems.join('；')); return }
+        setErr('')
+        if (isNew) {
           var id = MCP_ID_RE.test(custom) ? custom : derivedId
           props.onSave(Object.assign({}, v, { id: id, name: v.serverName || v.name }))
         } else {
@@ -196,6 +223,7 @@ window.__ModuleLoader__.load({
       }
 
       return createElement('div', { className: 'pm_row' },
+        err ? createElement('div', { className: 'pm_err' }, err) : null,
         createElement('div', { className: 'pm_form' },
           field('名称 (serverName) Name', v.serverName, set('serverName')),
           selectField('传输 Transport', v.transport, ['stdio', 'streamable-http'], set('transport')),
@@ -262,9 +290,21 @@ window.__ModuleLoader__.load({
       var _a = react.useState(props.value)
       var v = _a[0]
       var setV = _a[1]
+      var _b = react.useState('')
+      var err = _b[0]
+      var setErr = _b[1]
       function set(key) { return function (val) { var next = Object.assign({}, v); next[key] = val; setV(next) } }
 
+      function submit() {
+        var name = (v.name || '').trim()
+        if (!name) { setErr('名称必填 Name is required'); return }
+        if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) { setErr('名称必须是小写 kebab-case，如 my-skill Name must be kebab-case'); return }
+        setErr('')
+        props.onSave(Object.assign({}, v, { name: name }))
+      }
+
       return createElement('div', { className: 'pm_row' },
+        err ? createElement('div', { className: 'pm_err' }, err) : null,
         createElement('div', { className: 'pm_form' },
           field('名称 (kebab-case) Name', v.name, set('name')),
           field('描述 Description', v.description, set('description')),
@@ -274,7 +314,7 @@ window.__ModuleLoader__.load({
           ),
         ),
         createElement('div', { className: 'pm_actions' },
-          createElement('button', { className: 'pm_btn primary', onClick: function () { props.onSave(v) } }, '保存 Save'),
+          createElement('button', { className: 'pm_btn primary', onClick: submit }, '保存 Save'),
           createElement('button', { className: 'pm_btn', onClick: props.onCancel }, '取消 Cancel'),
         ),
       )

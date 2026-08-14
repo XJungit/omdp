@@ -422,6 +422,18 @@ export function apply(ctx) {
             error: `invalid server id ${JSON.stringify(bad && bad.id)} (must be mcp-<kebab-case>, e.g. mcp-github)`,
           })
         }
+        // Transport-specific required fields: a stdio server without a command
+        // (or an http server without a url) would fail dsh-mcp-client's schema
+        // and crash the next boot, so reject it before it reaches the patch.
+        for (const s of incoming) {
+          const t = s.transport || 'stdio'
+          if (t === 'stdio' && !String(s.command || '').trim()) {
+            return json(res, 400, { error: `server ${JSON.stringify(s.id)}: command is required for stdio transport` })
+          }
+          if (t === 'streamable-http' && !String(s.url || '').trim()) {
+            return json(res, 400, { error: `server ${JSON.stringify(s.id)}: url is required for streamable-http transport` })
+          }
+        }
         let text
         try {
           text = await readFile(patchPath(), 'utf8')
