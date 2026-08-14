@@ -1,4 +1,4 @@
-# dsh-connector
+# omdp-dsh-connector
 
 **English** | 简体中文
 
@@ -18,13 +18,13 @@
 ## 安装
 
 ```sh
-npx -p @deepseek-ai/dsh dsh plugin --profile web add github:<you>/dsh-connector
+dsh plugin --profile web add github:XJungit/omdp#path:dsh-connector
 ```
 
 或从本地路径安装（开发时）：
 
 ```sh
-npx -p @deepseek-ai/dsh dsh plugin --profile web add /abs/path/to/dsh-connector
+dsh plugin --profile web add /abs/path/to/omdp/dsh-connector
 ```
 
 重启 `dsh --profile web` 并刷新页面。包内声明了 `dsh.bundle.patch`，插件自动激活——无需手动改 `cordis.patch.yml`。

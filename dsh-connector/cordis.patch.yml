@@ -1,4 +1,4 @@
-# dsh-connector bundle patch: activates the plugin row in any profile
+# omdp-dsh-connector bundle patch: activates the plugin row in any profile
 # that installs this package (via `dsh plugin --profile <name> add ...`).
 # The user's own cordis.patch.yml may still override or disable this row by id.
 - insert:

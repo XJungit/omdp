@@ -1,5 +1,5 @@
 /**
- * dsh-connector — client half.
+ * omdp-dsh-connector — client half.
  *
  * Installed-package client bundle: the harness serves this file at
  * /plugins/<id>/client.js and expects a single window.__ModuleLoader__.load
@@ -12,11 +12,11 @@
  * on the DSH GUI webserver (/connector/api/*), exactly like
  * dsh-mcp-manager's client does with fetch — not the dynamic-only host.call.
  *
- * @module dsh-connector/client
+ * @module omdp-dsh-connector/client
  */
 
 window.__ModuleLoader__.load({
-  id: 'dsh-connector',
+  id: 'omdp-dsh-connector',
   factory: (require) => {
     var module = { exports: {} }
     var exports = module.exports
@@ -49,10 +49,10 @@ window.__ModuleLoader__.load({
       '.pm_hint{font-size:12px;color:var(--dsw-alias-label-secondary,#888)}' +
       '.pm_textarea{font-family:ui-monospace,Menlo,Consolas,monospace;min-height:140px}'
 
-    if (typeof document !== 'undefined' && document.querySelector('style[data-plugin-css="dsh-connector/section"]') === null) {
+    if (typeof document !== 'undefined' && document.querySelector('style[data-plugin-css="omdp-dsh-connector/section"]') === null) {
       var tag = document.createElement('style')
-      tag.dataset.plugin = 'dsh-connector'
-      tag.dataset.pluginCss = 'dsh-connector/section'
+      tag.dataset.plugin = 'omdp-dsh-connector'
+      tag.dataset.pluginCss = 'omdp-dsh-connector/section'
       tag.textContent = css
       document.head.appendChild(tag)
     }
