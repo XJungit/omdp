@@ -66,6 +66,15 @@ window.__ModuleLoader__.load({
       })
     }
 
+    // Server ids must stay kebab-case under the fixed `mcp-` prefix: the host
+    // parser and dsh-mcp-client both key on it, so the prefix is not optional.
+    var MCP_ID_RE = /^mcp-[a-z0-9]+(?:-[a-z0-9]+)*$/
+
+    function deriveServerId(serverName) {
+      var base = (serverName || 'server').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+      return 'mcp-' + (base || 'server')
+    }
+
     function field(label, value, onChange) {
       return createElement('label', { className: 'wide' },
         label,
@@ -161,7 +170,7 @@ window.__ModuleLoader__.load({
           props.mcp.exists ? '编辑 profiles/web/cordis.patch.yml 中的 mcp-* 块。保存后重启 dsh 生效。Edit the mcp-* block in cordis.patch.yml; restart dsh to apply.' : '未找到 cordis.patch.yml。cordis.patch.yml not found.'),
         rows,
         editing === null
-          ? createElement('button', { className: 'pm_btn pm_add', onClick: function () { setEditing({ id: 'mcp-new', name: '', transport: 'stdio', serverName: '', url: '', command: '', args: '' }) } }, '＋ 添加 MCP 服务器 Add MCP Server')
+          ? createElement('button', { className: 'pm_btn pm_add', onClick: function () { setEditing({ id: 'mcp-new', customId: '', name: '', transport: 'stdio', serverName: '', url: '', command: '', args: '' }) } }, '＋ 添加 MCP 服务器 Add MCP Server')
           : createElement(ServerForm, { value: editing, onSave: save, onCancel: function () { setEditing(null) } }),
       )
     }
@@ -172,11 +181,18 @@ window.__ModuleLoader__.load({
       var setV = _a[1]
       function set(key) { return function (val) { var next = Object.assign({}, v); next[key] = val; setV(next) } }
 
+      var isNew = v.id === 'mcp-new'
+      var derivedId = deriveServerId(v.serverName || v.name)
+      var idValue = isNew ? (v.customId !== undefined && v.customId !== '' ? v.customId : derivedId) : v.id
+
       function submit() {
-        var id = v.id === 'mcp-new'
-          ? 'mcp-' + (v.serverName || v.name || 'server').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
-          : v.id
-        props.onSave(Object.assign({}, v, { id: id, name: v.serverName || v.name }))
+        if (isNew) {
+          var custom = (v.customId || '').trim()
+          var id = MCP_ID_RE.test(custom) ? custom : derivedId
+          props.onSave(Object.assign({}, v, { id: id, name: v.serverName || v.name }))
+        } else {
+          props.onSave(Object.assign({}, v, { name: v.serverName || v.name }))
+        }
       }
 
       return createElement('div', { className: 'pm_row' },
@@ -187,6 +203,15 @@ window.__ModuleLoader__.load({
           field('命令 (stdio) Command', v.command, set('command')),
           field('参数 (空格分隔) Args', v.args, set('args')),
           field('Header', v.header, set('header')),
+          isNew
+            ? createElement('label', { className: 'wide' },
+                'ID (默认自动生成，前缀固定 mcp- 如 mcp-github) ID (auto, fixed mcp- prefix)',
+                createElement('input', {
+                  value: idValue,
+                  onChange: function (e) { set('customId')(e.target.value) },
+                }),
+              )
+            : createElement('div', { className: 'pm_meta wide' }, 'id: ' + v.id),
         ),
         createElement('div', { className: 'pm_actions' },
           createElement('button', { className: 'pm_btn primary', onClick: submit }, '保存 Save'),

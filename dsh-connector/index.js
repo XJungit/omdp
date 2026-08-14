@@ -27,6 +27,9 @@ import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 
 const API_PREFIX = '/connector/api'
 const SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
+// Server ids are keys for the mcp-* block (and dsh-mcp-client instances):
+// kebab-case under a fixed `mcp-` prefix, which parseMcpServers also requires.
+const MCP_ID_RE = /^mcp-[a-z0-9]+(?:-[a-z0-9]+)*$/
 export const inject = ['webServer']
 
 function resolveHome() {
@@ -413,6 +416,12 @@ export function apply(ctx) {
       if (req.method === 'POST' && path === API_PREFIX + '/mcp') {
         const body = await readBody(req)
         const incoming = Array.isArray(body.servers) ? body.servers : []
+        const bad = incoming.find((s) => typeof s.id !== 'string' || !MCP_ID_RE.test(s.id))
+        if (bad) {
+          return json(res, 400, {
+            error: `invalid server id ${JSON.stringify(bad && bad.id)} (must be mcp-<kebab-case>, e.g. mcp-github)`,
+          })
+        }
         let text
         try {
           text = await readFile(patchPath(), 'utf8')
