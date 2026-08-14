@@ -81,12 +81,13 @@ function stripQuotes(v) {
 }
 
 const KNOWN_KEYS = new Set(['transport', 'serverName', 'command', 'header'])
-// `args` is intentionally NOT modeled: it appears both as a single-line array
-// (`args: ['/c', ...]`) and as a block sequence — rendering either form back
-// losslessly is error-prone, and a bad render here would corrupt the patch and
-// crash dsh. So args is preserved verbatim (see PRESERVE_KEYS) and never
-// rewritten.
-// `url` is ALSO preserved verbatim: it may be a `!!js` expression
+// `args` is modeled as a string: it appears both as a single-line array
+// (`args: ['/c', ...]`) and as a block sequence. The inline form is stored in
+// `cur.args` and re-emitted as a REAL YAML flow array on render — writing it
+// back as a quoted string would violate dsh-mcp-client's schema (args:
+// string[]) and crash the next boot. The block form is kept verbatim
+// (argsLines) and re-emitted unchanged.
+// `url` is preserved verbatim: it may be a `!!js` expression
 // (`url: !!js (process.env.X || '') && ('https://...')`), and re-emitting it
 // through a quoted scalar would turn the `!!js` tag into literal text, breaking
 // the server on the next boot. Keeping it raw preserves the expression.
@@ -189,6 +190,32 @@ function safeScalar(value) {
   return '"' + escaped + '"'
 }
 
+// Turn a connector args field into a real argument list: a JS/JSON array
+// literal string ("['/c', 'npx', ...]") is parsed, anything else is split on
+// whitespace. Keeps dsh-mcp-client's schema (args: string[]) satisfied.
+function parseArgsValue(raw) {
+  const text = String(raw ?? '').trim()
+  if (!text) return ['']
+  if (/^\[.*\]$/s.test(text)) {
+    try {
+      const arr = JSON.parse(text.replace(/'/g, '"'))
+      if (Array.isArray(arr)) return arr.map((x) => String(x))
+    } catch {}
+  }
+  return text.split(/\s+/).filter(Boolean)
+}
+
+// dsh-mcp-client only accepts `headers` (an object) on streamable-http. A
+// bare `header: "k: v"` line on stdio violates the schema and crashes the next
+// boot, so we only render it for http, and only in the map form.
+function renderHeader(s) {
+  if (!s.header || (s.transport || 'stdio') !== 'streamable-http') return []
+  const hm = /^([^:]+):\s*(.*)$/.exec(s.header)
+  if (!hm) return []
+  const key = hm[1].trim().replace(/"/g, '\\"')
+  return [`        headers: { "${key}": ${safeScalar(hm[2].trim())} }`]
+}
+
 function renderServer(s) {
   const out = []
   out.push(`    - id: ${safeScalar(s.id)}`)
@@ -197,13 +224,13 @@ function renderServer(s) {
   out.push(`        transport: ${safeScalar(s.transport || 'stdio')}`)
   if (s.serverName) out.push(`        serverName: ${safeScalar(s.serverName)}`)
   if (s.command) out.push(`        command: ${safeScalar(s.command)}`)
-  if (s.header) out.push(`        header: ${safeScalar(s.header)}`)
-  // args: either an inline array string, or a verbatim block sequence.
+  out.push(...renderHeader(s))
+  // args: either a real flow array, or a verbatim block sequence.
   if (s.argsLines && s.argsLines.length) {
     out.push(`        args:`)
     for (const item of s.argsLines) out.push(`          ${item}`)
   } else if (s.args) {
-    out.push(`        args: ${safeScalar(s.args)}`)
+    out.push(`        args: [${parseArgsValue(s.args).map(safeScalar).join(', ')}]`)
   }
   if (s.preserve) {
     const trimmed = s.preserve.trimEnd()
