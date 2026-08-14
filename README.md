@@ -14,6 +14,12 @@ omdp/
 │   ├── cordis.patch.yml # bundle activation row
 │   ├── package.json
 │   └── README.md
+├── dsh-vision-bridge/   # vision bridge: let text-only models "see" via a configured multimodal endpoint
+│   ├── index.js         # host half
+│   ├── client.js        # client half (paste/drop → temp path)
+│   ├── cordis.patch.yml # bundle activation row
+│   ├── package.json
+│   └── README.md
 ├── _skeleton-client/    # copy-paste template: client + host bundle (Web UI plugin)
 ├── _skeleton-host/      # copy-paste template: host-only bundle
 └── <future plugins>/    # each its own subdirectory + package.json
@@ -33,6 +39,22 @@ Install into a profile (see each plugin's README for the exact command):
 ```sh
 dsh plugin --profile web add github:XJungit/omdp#path:dsh-connector
 ```
+
+### `dsh-vision-bridge` → npm name `@omdp/dsh-vision-bridge`
+
+A zero-dependency plugin that gives **text-only models** vision: it auto-detects whether the
+routed model supports images, and for text-only models forwards pasted / attached images to a
+configurable OpenAI-compatible multimodal endpoint (default Agnes `agnes-2.5-flash`) and feeds the
+returned text back as evidence. Ships a `vision_bridge_read_image` tool, a paste/drop → temp-path
+browser handler, a wrapped `(vision bridge)` provider entry, and an `agent/pre-step` auto-read hook.
+
+Install into a profile:
+
+```sh
+dsh plugin --profile web add github:XJungit/omdp#path:dsh-vision-bridge
+```
+
+See its own `README.md` for the full config reference.
 
 ## Why the repository root has a package.json
 
@@ -55,5 +77,5 @@ never breaks an install.
 - Every plugin subdirectory is a standalone npm package with a `dsh.bundle` (and optionally `dsh.client`) manifest.
 - Package names are scoped under `@omdp/` to avoid colliding with upstream `dsh-*` packages on npm.
 - Plugins in this repo are plain JavaScript (no build step), so a GitHub install works directly without a compile stage.
-- The repository-root `package.json` mirrors the current plugin so that pnpm-canonicalized bare-git specs still install a complete bundle (see above).
+- The repository-root `package.json` mirrors `@omdp/dsh-connector` so that pnpm-canonicalized bare-git specs still install a complete bundle (see below). Each *other* plugin installs via a `#path:` selector (e.g. `github:XJungit/omdp#path:dsh-vision-bridge`), which keeps that plugin's subdirectory as the install target.
 - `_skeleton-client/` and `_skeleton-host/` are copy-paste templates for new plugins; they are not installable bundles themselves.
