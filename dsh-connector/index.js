@@ -161,6 +161,13 @@ function parseMcpServers(blockText) {
         else argsSeqIndent = indent + 2
         continue
       }
+      if (key === 'url') {
+        // Modeled ONLY for transport validation: a streamable-http server is
+        // complete only when its url line is non-empty. The raw line (possibly
+        // a `!!js` expression) still falls through to `preserve` so rendering
+        // keeps it verbatim and the tag survives.
+        cur.url = val
+      }
       if (KNOWN_KEYS.has(key)) {
         if (key === 'serverName') cur.serverName = val
         else if (key === 'transport') cur.transport = val
