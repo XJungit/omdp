@@ -1,0 +1,63 @@
+# dsh-connector
+
+**English** | 简体中文
+
+一个 DeepSeek Harness (`dsh`) 插件，把 **MCP 服务器** 和 **用户 Skills** 的管理合并到 Web UI 的同一个设置页里（设置页标签：**Connector**）。
+
+- **MCP**：读取/编辑 `profiles/web/cordis.patch.yml` 中的 `mcp-*` 块（结构化表单）。保存后**重启 `dsh` 生效**。
+- **Skills**：列出/查看/编辑/删除 `~/.dsh/skills` 下的 `SKILL.md`。保存**即时生效**（filesystem provider 自动重新发现）。
+
+设计上复用官方两款参考插件的方式：
+- 设置页槽位注册方式参照 [`dsh-mcp-manager`](https://github.com/hyqhyq3/dsh-mcp-manager)（`settings.section` + Package 私有 HTTP API）。
+- Skills 的 frontmatter 解析/序列化参照 [`dsh-skill-manager`](https://github.com/bitterSmilezzz/dsh-skill-manager)。
+
+### SSE(MCP over SSE) 如何处理
+
+本插件**不**内置 SSE 桥接。需要连接走 legacy SSE 协议的 MCP 服务器（如知乎搜索 / 全网搜索）时，仍在 `cordis.patch.yml` 里用 [`mcp-remote`](https://github.com/geelen/mcp-remote) 把 SSE 转成 stdio，本插件只是把它作为一条普通 mcp-remote 配置来可视化编辑。这样避免重造进程管理逻辑——连接本身交给成熟的 mcp-remote。
+
+## 安装
+
+```sh
+npx -p @deepseek-ai/dsh dsh plugin --profile web add github:<you>/dsh-connector
+```
+
+或从本地路径安装（开发时）：
+
+```sh
+npx -p @deepseek-ai/dsh dsh plugin --profile web add /abs/path/to/dsh-connector
+```
+
+重启 `dsh --profile web` 并刷新页面。包内声明了 `dsh.bundle.patch`，插件自动激活——无需手动改 `cordis.patch.yml`。
+
+> 安装前请先**备份** `profiles/web/cordis.patch.yml`。本插件会改写其中的 MCP 块。
+
+## 使用
+
+打开 Web UI 的 **设置 → Connector**：
+
+1. **MCP 服务器** 区：
+   - 列出当前 `cordis.patch.yml` 里的 `mcp-*` 服务器
+   - 「编辑」改名称/传输/URL/命令/参数/Header；「删除」移除；「＋ 添加」新建
+   - 保存后提示**重启 dsh** 才会真正加载新的 MCP server
+2. **Skills** 区：
+   - 列出 `~/.dsh/skills` 下的用户技能
+   - 「编辑」改 frontmatter 与正文；「删除」移除目录；「＋ 新建」创建
+
+## 工作原理
+
+| 组成 | 机制 |
+|---|---|
+| 设置页 | client half 注册 `settings.section` 槽位（"Connector" 页签） |
+| 跨边界调用 | client 用 `fetch('/connector/api/...')`，host 用 `ctx.webServer.register` 接收（安装包走 HTTP） |
+| MCP 持久化 | 文本块级提取并替换 `cordis.patch.yml` 中含 `mcp-` 的 insert 块，**保留 `!!js` 表达式与 env 块原样**（preserve 桶） |
+| Skill 持久化 | 直接读写 `~/.dsh/skills/<name>/SKILL.md` |
+
+## 已知限制
+
+- MCP 改动需**重启 dsh** 才生效（因为 `dsh-mcp-client` 实例是静态加载的）。若想要保存即时生效，需用 `dsh-mcp-manager`（它自行实现 MCP client）。
+- MCP 块解析为结构化提取，复杂嵌套 YAML（如多 env 变量）在表单里以单字段呈现；极复杂配置请直接在 `cordis.patch.yml` 编辑。
+- 不桥接 MCP 的 resources/prompts，只管理 server 配置。
+
+## License
+
+MIT

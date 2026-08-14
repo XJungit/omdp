@@ -1,0 +1,15 @@
+# dependencies
+node_modules/
+**/node_modules/
+
+# build output (plugins that ship TypeScript keep source only)
+**/dist/
+**/lib/
+*.tsbuildinfo
+
+# lockfiles (profile-managed, not part of the plugin source)
+**/pnpm-lock.yaml
+
+# os / editor
+.DS_Store
+*.log
