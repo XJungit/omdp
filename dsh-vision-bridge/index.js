@@ -24,7 +24,11 @@ const __LOG = join(tmpdir(), 'dsh-vision-bridge-register.log')
 function __log(msg) {
   try { __logFs(__LOG, new Date().toISOString() + ' ' + msg + '\n') } catch {}
 }
-export const inject = ['tools', 'agents', 'attachments', 'llm', 'credentials']
+// Hard dependencies only: tools (register), attachments (read paste images),
+// llm (resolveModelInfo), credentials (resolve api key). `agents` was an
+// over-injection (never read) — Cordis would make the plugin wait for the
+// agents service to appear even though nothing here consumes it.
+export const inject = ['tools', 'attachments', 'llm', 'credentials']
 
 const MEDIA_EXT = {
   'image/png': '.png',
@@ -215,15 +219,15 @@ async function convertImagesToEvidence(ctx, config, messages, signal, adapter) {
 }
 
 function cachedEvidence(ctx, config, adapter, block) {
-  // The cache key is a JSON fingerprint of the attachment. Defensive: a
-  // circular or non-serializable attachment must not throw here — fall back
-  // to a unique key so the call still works (just uncached).
-  let key
-  try {
-    key = JSON.stringify(block.attachment ?? block)
-  } catch {
-    key = 'unique-' + Math.random().toString(36).slice(2)
-  }
+  // Cache key from leaf fields only — never JSON.stringify the whole internal
+  // attachment object (it may be non-serializable or circular, and Cordis live
+  // data must not be copied wholesale). Extract the stable scalars that
+  // actually identify the image.
+  const a = block.attachment
+  const leaf = a && typeof a === 'object'
+    ? [a.id, a.path, a.mediaType, a.url].map((x) => (x === undefined || x === null ? '' : String(x))).join('|')
+    : JSON.stringify(block)
+  const key = leaf || 'empty'
   const hit = adapter.evidenceCache?.get?.(key)
   if (hit !== undefined) {
     adapter.evidenceCache.delete(key)
