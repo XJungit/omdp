@@ -38,6 +38,24 @@ pnpm install --lockfile-only --offline   # 按 link 依赖重写 lockfile
 
 > 安装前请先**备份** `profiles/web/cordis.patch.yml`。本插件会改写其中的 MCP 块。
 
+### 方式一（推荐）：从 npm 安装
+
+插件已发布到 npm（GitHub Actions 自动发包，见仓库根 `docs/npm-publish.md`）。
+在 profile 的 `package.json` 加入依赖后 `pnpm install`：
+
+```jsonc
+"dependencies": {
+  "@omdp/dsh-connector": "^0.1.0"
+}
+```
+
+```sh
+cd ~/.dsh/profiles/web
+pnpm install
+```
+
+更新：`pnpm update @omdp/dsh-connector`（标准 npm 语义，无 git `#path:` 问题）。
+
 ### 备选：从 GitHub 远程安装
 
 不想本地 checkout 时，可直接从仓库装（`#path:` 指向子目录）：

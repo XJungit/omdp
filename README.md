@@ -90,53 +90,63 @@ package's code at install time; for untrusted sources, pin a commit
 The same monorepo layout is used by other DSH plugin collections, e.g.
 [zhu1090093659/dsh-web-ui](https://github.com/zhu1090093659/dsh-web-ui).
 
-## Updating GitHub-installed plugins (one-shot script)
+## Installing from npm (recommended)
 
-Updating multiple `github:...#path:` plugins from the **same monorepo** has three
-recurring failure modes, all now handled by a one-shot script
-(`~/.dsh/profiles/web/update-omdp.ps1`):
+Both plugins are published to **npm** (`@omdp/dsh-connector`, `@omdp/dsh-vision-bridge`),
+automatically by GitHub Actions on every `v*` tag. This is the **preferred** install
+path — it avoids the git-`#path:` normalization, cross-resolution, and
+`allowBuilds` friction that GitHub installs cause (see the history in
+`docs/npm-publish.md`).
 
-1. **Missing `#path:` in `package.json` → cross-resolution.** If a dependency is
-   written as bare `git+https://github.com/XJungit/omdp.git` (no `#path:`), pnpm
-   resolves **both** `@omdp/dsh-connector` and `@omdp/dsh-vision-bridge` to the
-   **repo root** (whose `package.json` is `@omdp/dsh-connector`). Result: the
-   `@omdp/dsh-vision-bridge` folder contains connector code. The script re-pins
-   the two `#path:` specs before updating.
-2. **`allowBuilds` placeholder accumulation.** Every new commit makes pnpm append
-   `'@omdp/...@git+...#<sha>&path:...': set this to true or false` rows to
-   `pnpm-workspace.yaml`; they never get cleaned. The script rewrites `allowBuilds`
-   to bare package names only (`'@omdp/dsh-connector': true`), which match every
-   commit and stop the placeholder spam.
-3. **Duplicate loader entry ids.** In `cordis.patch.yml`, a bundle already in
-   `dsh.profile.bundles` must be overridden with a top-level `- id:` block, never
-   re-`insert`ed, or the loader reports `duplicate loader entry id`. The script
-   scans for duplicate ids.
-
-The script backs up `package.json` / `pnpm-lock.yaml` / `pnpm-workspace.yaml` to
-`%TEMP%\dsh-omdp-backup-<stamp>`, runs `pnpm update`, then **verifies**:
-`&path:` present in the lockfile for both packages, both `node_modules` folders
-contain the right code (not cross-resolved), and no duplicate ids. Exit 0 = good.
-
-```powershell
-powershell -ExecutionPolicy Bypass -File C:\Users\xj\.dsh\profiles\web\update-omdp.ps1
+```jsonc
+// ~/.dsh/profiles/<name>/package.json
+"dependencies": {
+  "@omdp/dsh-connector": "^0.1.0",
+  "@omdp/dsh-vision-bridge": "^0.1.0"
+}
 ```
 
-> pnpm exits 1 on `ERR_PNPM_IGNORED_BUILDS` — that is a *warning* for these
-> pure-JS packages (the `allowBuilds` gate), not a failure; the script treats
-> exit 0/1 as success and reports real failures with exit 2/3/4.
+```sh
+cd ~/.dsh/profiles/<name>
+pnpm install
+```
 
-## Why local `link:` installs are recommended
+Updating is a standard `pnpm update`:
 
-GitHub installs (`dsh plugin add github:XJungit/omdp#path:<plugin>`) work but hit
-network/TLS friction (e.g. `UNABLE_TO_VERIFY_LEAF_SIGNATURE`, proxy rewrites).
-Installing each plugin as a **local `link:` dependency** instead:
+```sh
+cd ~/.dsh/profiles/<name>
+pnpm update @omdp/dsh-connector @omdp/dsh-vision-bridge
+```
 
-- `pnpm install` creates a `node_modules/@omdp/<plugin>` junction pointing at the
-  repo subdirectory, so the running plugin **is** the repo source.
-- Updating = edit/pull the repo + restart `dsh` — no re-fetch, no lockfile pins.
-- The repo-root `package.json` (named `@omdp/dsh-connector`) is still kept so that
-  a pnpm-canonicalized bare-git install of `dsh-connector` remains resolvable; it is
-  not needed for local-link installs.
+No `#path:` spec, no `allowBuilds` gate, no one-shot repair script, no duplicate
+loader-id pitfalls — npm packages install as clean bundles.
+
+## Releasing a new version (GitHub Actions)
+
+1. Bump `version` in `dsh-connector/package.json` and `dsh-vision-bridge/package.json`.
+2. Commit, then tag and push:
+   ```sh
+   git tag v0.1.1
+   git push origin master && git push origin v0.1.1
+   ```
+3. `.github/workflows/publish.yml` publishes both packages to npm with provenance.
+4. Update your profile: `pnpm update @omdp/dsh-connector @omdp/dsh-vision-bridge`.
+
+See [`docs/npm-publish.md`](docs/npm-publish.md) for the full setup (npm token,
+GitHub Secret, troubleshooting).
+
+## Historical: GitHub and local-link installs
+
+GitHub installs (`dsh plugin add github:XJungit/omdp#path:<plugin>`) worked but hit
+network/TLS friction (e.g. `UNABLE_TO_VERIFY_LEAF_SIGNATURE`) and pnpm's git-`#path:`
+normalization on `update` (which dropped the `#path:` spec and could cross-resolve
+both packages to the repo root). A one-shot repair script
+(`~/.dsh/profiles/web/update-omdp.ps1`) handled those, but npm installs make all of
+that unnecessary.
+
+Local `link:` installs (`"@omdp/<plugin>": "link:<abs-path>/omdp/<plugin>"`) still work:
+`pnpm install` creates a junction so the running plugin **is** the repo source, and
+updating = edit/pull + restart. They remain a good choice during active development.
 
 ## Conventions
 

@@ -85,7 +85,25 @@ pnpm install --lockfile-only --offline
 
 重启 DSH（web profile）生效。插件本体零依赖。
 
-### 方式三：从 GitHub 远程安装（备选）
+### 方式三（推荐）：从 npm 安装
+
+插件已发布到 npm（GitHub Actions 自动发包，见仓库根 `docs/npm-publish.md`）。
+在 profile 的 `package.json` 加入依赖后 `pnpm install`：
+
+```jsonc
+"dependencies": {
+  "@omdp/dsh-vision-bridge": "^0.1.0"
+}
+```
+
+```sh
+cd ~/.dsh/profiles/web
+pnpm install
+```
+
+更新：`pnpm update @omdp/dsh-vision-bridge`（标准 npm 语义，无 git `#path:` 问题）。
+
+### 方式四：从 GitHub 远程安装（备选）
 
 不想本地 checkout 时，可直接从仓库装（`#path:` 指向子目录）：
 
