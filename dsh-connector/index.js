@@ -544,7 +544,7 @@ export function apply(ctx) {
         }
         const found = findMcpBlock(text)
         const servers = found ? parseMcpServers(found.blockText) : []
-        return json(res, 200, { servers, exists: true })
+        return json(res, 200, { servers, exists: true, version: '0.1.1' })
       }
 
       // POST /api/mcp — replace server entries. Preserve env/!!js from the
