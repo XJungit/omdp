@@ -22,6 +22,7 @@ omdp/
 │   └── README.md
 ├── _skeleton-client/    # copy-paste template: client + host bundle (Web UI plugin)
 ├── _skeleton-host/      # copy-paste template: host-only bundle
+├── docs/                # research notes, e.g. AI-DSH-plugin-quality.md (community findings)
 └── <future plugins>/    # each its own subdirectory + package.json
 ```
 
