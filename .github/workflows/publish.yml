@@ -22,11 +22,13 @@ jobs:
         # If this exact version is already on npm (e.g. a previous run published
         # it), skip instead of failing — so one package's republish does not
         # block the other package's first publish.
-        run: npm publish --provenance --access public || echo "skip: version already published"
+        # NB: the run value is single-quoted so the colon in "skip: ..." is not
+        # parsed as a YAML nested mapping (which made GitHub reject the file).
+        run: 'npm publish --provenance --access public || echo "skip: version already published"'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Publish @omdp/dsh-vision-bridge
         working-directory: dsh-vision-bridge
-        run: npm publish --provenance --access public || echo "skip: version already published"
+        run: 'npm publish --provenance --access public || echo "skip: version already published"'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
