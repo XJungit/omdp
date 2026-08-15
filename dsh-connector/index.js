@@ -93,6 +93,14 @@ function stripQuotes(v) {
   return v
 }
 
+// Extract the bare scalar from a YAML block-sequence item line like
+// `  - '--transport'` -> `--transport`. Handles quoted and unquoted values.
+function stripListScalar(line) {
+  const m = line.match(/^\s*-\s*(.*)$/)
+  if (!m) return line.trim()
+  return stripQuotes(m[1].trim())
+}
+
 const KNOWN_KEYS = new Set(['transport', 'serverName', 'command', 'header'])
 // `args` is modeled as a string: it appears both as a single-line array
 // (`args: ['/c', ...]`) and as a block sequence. The inline form is stored in
@@ -156,8 +164,11 @@ function parseMcpServers(blockText) {
       continue
     }
     // While collecting an args block sequence, every deeper list item is kept.
+    // Store the BARE value (strip the leading "- " and any quotes) so the
+    // frontend can join it into a space-separated args string and renderServer
+    // can re-emit it with safeScalar — keeping "- " prefixes out of the value.
     if (argsSeqIndent >= 0 && indent >= argsSeqIndent && /^\s*- /.test(line)) {
-      cur.argsLines.push(line.trim())
+      cur.argsLines.push(stripListScalar(line))
       continue
     }
     const kv = line.match(/^\s+(\w+):\s*(.*)$/)
@@ -254,7 +265,7 @@ function renderServer(s) {
   // args: either a real flow array, or a verbatim block sequence.
   if (s.argsLines && s.argsLines.length) {
     out.push(`        args:`)
-    for (const item of s.argsLines) out.push(`          ${item}`)
+    for (const item of s.argsLines) out.push(`          - ${safeScalar(item)}`)
   } else if (s.args) {
     out.push(`        args: [${parseArgsValue(s.args).map(safeScalar).join(', ')}]`)
   }

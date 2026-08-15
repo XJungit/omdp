@@ -189,7 +189,22 @@ window.__ModuleLoader__.load({
     }
 
     function ServerForm(props) {
-      var _a = react.useState(props.value)
+      // Normalize a block-sequence `args` (parsed into argsLines[]) into the
+      // space-separated string the form edits, and drop argsLines so a save
+      // always goes through the `args` field (renderServer re-emits it as an
+      // inline array). Without this, editing a server whose args were written
+      // as a YAML block sequence shows an empty Args box, and clearing the
+      // field can't remove the old argsLines.
+      function initForm(value) {
+        var a = value.args || ''
+        if (!a && value.argsLines && value.argsLines.length) {
+          a = value.argsLines.join(' ')
+        }
+        var next = Object.assign({}, value, { args: a })
+        delete next.argsLines
+        return next
+      }
+      var _a = react.useState(initForm(props.value))
       var v = _a[0]
       var setV = _a[1]
       var _b = react.useState('')
@@ -245,11 +260,15 @@ window.__ModuleLoader__.load({
         }
         if (problems.length) { setErr(problems.join('；')); return }
         setErr('')
+        // Never send a stale argsLines back: renderServer prefers argsLines over
+        // args, so a leftover array would clobber the edited/cleared args field.
+        var next = Object.assign({}, v)
+        delete next.argsLines
         if (isNew) {
           var id = MCP_ID_RE.test(custom) ? custom : derivedId
-          props.onSave(Object.assign({}, v, { id: id, name: v.serverName || v.name }))
+          props.onSave(Object.assign({}, next, { id: id, name: v.serverName || v.name }))
         } else {
-          props.onSave(Object.assign({}, v, { name: v.serverName || v.name }))
+          props.onSave(Object.assign({}, next, { name: v.serverName || v.name }))
         }
       }
 
