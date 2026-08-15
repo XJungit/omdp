@@ -236,7 +236,15 @@ function parseArgsValue(raw) {
       if (Array.isArray(arr)) return arr.map((x) => String(x))
     } catch {}
   }
-  return text.split(/\s+/).filter(Boolean)
+  // Quote-aware tokenizer (learned from dsh-mcp-manager's parseArgs): arguments
+  // wrapped in "..." or '...' stay intact even when they contain spaces, so
+  // e.g. `--header "Authorization: Bearer x"` becomes two argv tokens instead
+  // of being split on every whitespace.
+  const out = []
+  const re = /"([^"]*)"|'([^']*)'|(\S+)/g
+  let m
+  while ((m = re.exec(text))) out.push(m[1] ?? m[2] ?? m[3])
+  return out
 }
 
 // dsh-mcp-client only accepts `headers` (an object) on streamable-http. A

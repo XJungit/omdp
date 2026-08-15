@@ -90,6 +90,17 @@ allowBuilds:
 - MCP 块解析为结构化提取，复杂嵌套 YAML（如多 env 变量）在表单里以单字段呈现；极复杂配置请直接在 `cordis.patch.yml` 编辑。
 - 不桥接 MCP 的 resources/prompts，只管理 server 配置。
 
+## 安全实践
+
+- **不要在 `cordis.patch.yml` 里写明文 token**。MCP server 需要密钥时，用环境变量引用（`!!js process.env.XXX`），例如：
+  ```yaml
+  env:
+    AUTH_HEADER: !!js ('Bearer ' + process.env.ZHIHU_TOKEN)
+  ```
+  token 明文只存在于 `.env` / 系统环境变量，不落进配置文件（同 `dsh-mcp-manager` 的 `tokenEnv` 理念）。
+- 本插件的 API（`/connector/api/*`）与 DSH GUI 同源，无额外鉴权——仅限本机使用，不要暴露到公网。
+- Skills 内容与 MCP 配置都属于本地敏感数据，改动会直接写入磁盘。
+
 ## License
 
 MIT
