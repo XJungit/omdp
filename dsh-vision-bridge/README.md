@@ -134,9 +134,13 @@ allowBuilds:
 4. **工具名用独特名**（`vision_bridge_read_image`），否则被宿主原生 `read_image` 遮蔽。
 5. **package.json 必须声明 `dsh.client`**（platform: web, immediately），否则 client.js 不会被 client-modules 加载，粘贴截获不生效。
 6. **注册日志已改为写入 `os.tmpdir()` 下的临时文件**（旧版写死 `C:\Users\xj\...` 绝对路径，换机器会失效）。
+7. **本地文件读取有 25MB 上限**（先 `stat` 再读，避免大图 base64 膨胀 ~33% 吃内存）；文件不存在会报 `file not found` 而不是裸 ENOENT。
+8. **HTTP 错误会附加中文原因提示**：401 → key 无效/缺失、404 → 端点/模型不存在、429 → 限流、5xx → 服务端异常，模型/Agent 能直接看到失败原因。
+9. **粘贴路由增加 Content-Type 快速拒绝**（非 `image/*` 直接 415，不缓冲大上传）；真实校验仍靠 magic-byte 嗅探，缺 Content-Type 的客户端也兼容。
 
 ## 安全
 
 - api key 优先走 DSH credential（不落配置文件明文）。
-- 粘贴路由：magic-byte 校验 + 25MB 上限 + 私有临时目录（0600）+ TTL 清理。
+- 粘贴路由：Content-Type 检查 + magic-byte 校验 + 25MB 上限 + 私有临时目录（0600）+ TTL 清理。
+- 本地文件读取 25MB 上限，防超大图内存占用。
 - 图片会发送到你配置的多模态端点，注意隐私。

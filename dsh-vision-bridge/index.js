@@ -43,6 +43,9 @@ const PASTE_SNIFFS = [
   { ext: '.heic', test: (b) => b.length >= 12 && b.toString('ascii', 4, 8) === 'ftyp' },
 ]
 const PASTE_MAX_BYTES = 25 * 1024 * 1024
+// Local files bigger than this are rejected before being base64-encoded, to
+// avoid loading a huge image into memory (data URL inflates ~33%).
+const FILE_MAX_BYTES = 25 * 1024 * 1024
 const EVIDENCE_CACHE_LIMIT = 64
 
 // ---------- 配置 ----------
@@ -63,10 +66,28 @@ async function resolveApiKey(ctx, config) {
   try {
     const cred = await ctx.credentials?.resolve?.(ref)
     if (cred && cred.value) return cred.value
+    console.warn(`[dsh-vision-bridge] credential "${ref}" not found in credentials store; falling back to process.env`)
   } catch (error) {
-    console.error('[dsh-vision-bridge] credential resolve failed:', error && error.message)
+    console.error(`[dsh-vision-bridge] credential resolve for "${ref}" failed:`, error && error.message)
   }
-  return process.env[ref] || ''
+  const fromEnv = process.env[ref] || ''
+  if (!fromEnv) {
+    console.warn(`[dsh-vision-bridge] "${ref}" is neither in credentials nor process.env — multimodal calls will fail with 401`)
+  }
+  return fromEnv
+}
+
+// Map common HTTP status codes to a short, actionable Chinese hint so the
+// model/agent sees WHY the multimodal call failed, not just the raw status.
+function statusHint(status) {
+  switch (status) {
+    case 401: return 'API key 无效或缺失，请检查 credential/env'
+    case 403: return '没有权限访问该多模态端点'
+    case 404: return '端点或模型不存在，请检查 baseUrl/model'
+    case 429: return '请求过于频繁（限流），请稍后重试'
+    case 500: case 502: case 503: return '多模态服务端异常，请稍后重试'
+    default: return ''
+  }
 }
 
 // 调多模态端点（OpenAI 兼容 chat/completions，图片用 image_url）
@@ -105,7 +126,8 @@ async function askMultimodal(ctx, config, imageUrl, prompt, signal, timeoutMs) {
     const data = await res.json().catch(() => null)
     if (!res.ok) {
       const msg = data?.error?.message || data?.message || ('HTTP ' + res.status)
-      throw new Error(msg)
+      const hint = statusHint(res.status)
+      throw new Error(msg + (hint ? `（${hint}）` : ''))
     }
     const text = data?.choices?.[0]?.message?.content
     if (!text || typeof text !== 'string') throw new Error('多模态端点未返回文本内容')
@@ -119,7 +141,16 @@ async function askMultimodal(ctx, config, imageUrl, prompt, signal, timeoutMs) {
 // 本地路径 → data URL；http(s) URL 原样返回
 async function pathToImageUrl(path) {
   if (/^https?:\/\//i.test(path)) return path
-  const { readFile } = await import('node:fs/promises')
+  const { readFile, stat } = await import('node:fs/promises')
+  try {
+    const info = await stat(path)
+    if (info.size > FILE_MAX_BYTES) {
+      throw new Error(`file too large (${Math.round(info.size / 1024 / 1024)}MB > ${Math.round(FILE_MAX_BYTES / 1024 / 1024)}MB limit)`)
+    }
+  } catch (error) {
+    if (error && error.code === 'ENOENT') throw new Error(`file not found: ${path}`)
+    throw error
+  }
   const buf = await readFile(path)
   const ext = String(path.split('.').pop() || '').toLowerCase()
   const mime = {
@@ -184,7 +215,15 @@ async function convertImagesToEvidence(ctx, config, messages, signal, adapter) {
 }
 
 function cachedEvidence(ctx, config, adapter, block) {
-  const key = JSON.stringify(block.attachment ?? block)
+  // The cache key is a JSON fingerprint of the attachment. Defensive: a
+  // circular or non-serializable attachment must not throw here — fall back
+  // to a unique key so the call still works (just uncached).
+  let key
+  try {
+    key = JSON.stringify(block.attachment ?? block)
+  } catch {
+    key = 'unique-' + Math.random().toString(36).slice(2)
+  }
   const hit = adapter.evidenceCache?.get?.(key)
   if (hit !== undefined) {
     adapter.evidenceCache.delete(key)
@@ -473,6 +512,16 @@ function registerPasteRoute(ctx, config) {
         path: '/vision-bridge/paste',
         handler: async (req, res) => {
           if (req.method !== 'POST') { res.writeHead(405).end(); return }
+          // Cheap early rejection: if a Content-Type is present it must look
+          // like an image (magic-byte sniffing below is the real gate, but this
+          // avoids buffering large non-image uploads). Absent header is allowed
+          // (some paste clients omit it) and still sniffed.
+          const ctype = String(req.headers?.['content-type'] || '').split(';')[0].trim().toLowerCase()
+          if (ctype && !ctype.startsWith('image/')) {
+            res.writeHead(415, { 'content-type': 'application/json' })
+            res.end(JSON.stringify({ error: 'Content-Type 必须是 image/*（收到 ' + ctype + '）' }))
+            return
+          }
           try {
             const chunks = []
             let total = 0
