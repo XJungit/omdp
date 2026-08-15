@@ -90,6 +90,41 @@ package's code at install time; for untrusted sources, pin a commit
 The same monorepo layout is used by other DSH plugin collections, e.g.
 [zhu1090093659/dsh-web-ui](https://github.com/zhu1090093659/dsh-web-ui).
 
+## Updating GitHub-installed plugins (one-shot script)
+
+Updating multiple `github:...#path:` plugins from the **same monorepo** has three
+recurring failure modes, all now handled by a one-shot script
+(`~/.dsh/profiles/web/update-omdp.ps1`):
+
+1. **Missing `#path:` in `package.json` → cross-resolution.** If a dependency is
+   written as bare `git+https://github.com/XJungit/omdp.git` (no `#path:`), pnpm
+   resolves **both** `@omdp/dsh-connector` and `@omdp/dsh-vision-bridge` to the
+   **repo root** (whose `package.json` is `@omdp/dsh-connector`). Result: the
+   `@omdp/dsh-vision-bridge` folder contains connector code. The script re-pins
+   the two `#path:` specs before updating.
+2. **`allowBuilds` placeholder accumulation.** Every new commit makes pnpm append
+   `'@omdp/...@git+...#<sha>&path:...': set this to true or false` rows to
+   `pnpm-workspace.yaml`; they never get cleaned. The script rewrites `allowBuilds`
+   to bare package names only (`'@omdp/dsh-connector': true`), which match every
+   commit and stop the placeholder spam.
+3. **Duplicate loader entry ids.** In `cordis.patch.yml`, a bundle already in
+   `dsh.profile.bundles` must be overridden with a top-level `- id:` block, never
+   re-`insert`ed, or the loader reports `duplicate loader entry id`. The script
+   scans for duplicate ids.
+
+The script backs up `package.json` / `pnpm-lock.yaml` / `pnpm-workspace.yaml` to
+`%TEMP%\dsh-omdp-backup-<stamp>`, runs `pnpm update`, then **verifies**:
+`&path:` present in the lockfile for both packages, both `node_modules` folders
+contain the right code (not cross-resolved), and no duplicate ids. Exit 0 = good.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File C:\Users\xj\.dsh\profiles\web\update-omdp.ps1
+```
+
+> pnpm exits 1 on `ERR_PNPM_IGNORED_BUILDS` — that is a *warning* for these
+> pure-JS packages (the `allowBuilds` gate), not a failure; the script treats
+> exit 0/1 as success and reports real failures with exit 2/3/4.
+
 ## Why local `link:` installs are recommended
 
 GitHub installs (`dsh plugin add github:XJungit/omdp#path:<plugin>`) work but hit
