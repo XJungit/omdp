@@ -1,4 +1,5 @@
 name: Publish to npm
+# workflow-scope verified: push of this file works via gh keyring token
 
 on:
   push:
