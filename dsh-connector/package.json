@@ -36,6 +36,11 @@
     "cordis"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/XJungit/omdp.git",
+    "directory": "dsh-connector"
+  },
   "dependencies": {
     "yaml": "^2.9.0"
   }

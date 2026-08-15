@@ -1,0 +1,36 @@
+name: Publish to npm
+
+# Trigger: pushing a version tag (e.g. v0.1.0) publishes both @omdp packages.
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # required for npm provenance
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org/
+
+      # Publish both monorepo packages. The repo root package.json is a bare
+      # mirror (named @omdp/dsh-connector) and must NOT be published; we cd
+      # into each real plugin subdirectory and publish there.
+      - name: Publish @omdp/dsh-connector
+        working-directory: dsh-connector
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @omdp/dsh-vision-bridge
+        working-directory: dsh-vision-bridge
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
