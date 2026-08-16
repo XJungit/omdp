@@ -1,7 +1,8 @@
 # 发布到 npm（GitHub Actions 自动发包）
 
-本仓库的两个插件（`@omdp/dsh-connector`、`@omdp/dsh-vision-bridge`）通过
-**GitHub Actions 在 push tag 时自动发布到 npm**。本机不需要 npm 登录。
+本仓库的三个插件（`@omdp/dsh-connector`、`@omdp/dsh-vision-bridge`、
+`@omdp/dsh-gitbash-win`）通过 **GitHub Actions 在 push tag 时自动发布到 npm**。
+本机不需要 npm 登录。
 
 ---
 
@@ -40,8 +41,72 @@ git push origin v0.1.0
 GitHub Actions 自动执行 `publish.yml`：
 - `dsh-connector/` → `npm publish` → `@omdp/dsh-connector@0.1.0`
 - `dsh-vision-bridge/` → `npm publish` → `@omdp/dsh-vision-bridge@0.1.0`
+- `dsh-gitbash-win/` → `npm publish` → `@omdp/dsh-gitbash-win@0.1.0`
 
 到 https://github.com/XJungit/omdp/actions 看运行结果，绿色 = 发布成功。
+
+---
+
+## 为什么单仓库 + GitHub 安装会出问题（务必读）
+
+本仓库把三个包放在**同一个仓库**（`XJungit/omdp`）的不同子目录里。如果你
+**不用 npm 发布，而是从 GitHub 远程安装**，命令长这样：
+
+```sh
+# 必须用 #path: 指定子目录（因为 3 个包在同一个仓库）
+dsh plugin --profile web add github:XJungit/omdp#path:dsh-connector
+dsh plugin --profile web add github:XJungit/omdp#path:dsh-vision-bridge
+dsh plugin --profile web add github:XJungit/omdp#path:dsh-gitbash-win
+```
+
+**这不是简单的"命令长一点"——它埋着三个致命坑：**
+
+### 坑 1：`#path:` 被 pnpm 规范化丢弃（最致命）
+
+pnpm 的依赖解析器对 `github:...#path:xxx` 会做**规范化/重写**。实测：
+`pnpm update` 会把 `github:XJungit/omdp#path:dsh-connector` **规范化成
+`github:XJungit/omdp`**（丢掉 `#path:` 部分）。
+
+结果：
+- `@omdp/dsh-connector` 和 `@omdp/dsh-vision-bridge` **都解析到仓库根**
+- 仓库根的 package.json 是 `@omdp/dsh-connector`（bare mirror）
+- → **两个包都装成 connector 的代码**（交叉解析）
+- 表现：vision-bridge 里是 connector 的逻辑、ID 错误、嵌套、崩溃
+
+**这是本仓库曾经遇到的核心问题**，也是你迁移到 npm 的根本原因。
+
+### 坑 2：pnpm 嵌套 + 依赖提升
+
+单仓库的 `#path:` 安装还会触发 pnpm 的**嵌套依赖**行为：子目录的
+package.json 依赖可能被提升/嵌套到奇怪的位置，导致 `require` 解析失败、
+`Cannot find module`、`ERR_MODULE_NOT_FOUND`。
+
+### 坑 3：scoped 包 + git 源版本不稳定
+
+`@omdp/*` 是 scoped 包。从 git 源安装时：
+- 版本号解析成 **git commit hash**（不是 semver）→ `pnpm update` 行为不可预测
+- `@omdp/dsh-connector` 这种 scope 名 + git 源，npm/pnpm 的处理规则特殊
+
+### 对比：为什么 npm 安装就没事
+
+| | GitHub 安装（单仓库） | NPM 安装（现在） |
+|---|---|---|
+| 命令 | `github:XJungit/omdp#path:dsh-connector`（长、易错） | `@omdp/dsh-connector`（简洁） |
+| `#path:` 规范化 | ❌ 会被 pnpm 丢弃 → 交叉解析 | ✅ 无此问题 |
+| 子目录定位 | 靠 `#path:`（脆弱） | 包本身就是一个 unit |
+| 版本 | git hash（不稳定） | semver（稳定） |
+| 多包同仓库 | ❌ 容易串 | ✅ 每个包独立 |
+
+**结论**：**单仓库 + `#path:` + GitHub = 天然脆弱**。npm 发布让每个包成为
+独立 unit，彻底绕开 `#path:` 问题。**这是本仓库采用 npm 发布的根本原因。**
+
+### 什么时候 GitHub 安装才安全？
+
+只有**每个包单独一个仓库**（无 `#path:`）才适合 GitHub 安装：
+```sh
+dsh plugin add github:XJungit/dsh-connector      # 单独仓库，无 #path:
+```
+但本仓库是单仓库，所以 **GitHub 安装注定要 `#path:`、注定脆弱**——保持 npm 发布。
 
 ---
 
@@ -53,7 +118,8 @@ GitHub Actions 自动执行 `publish.yml`：
 // ~/.dsh/profiles/web/package.json
 "dependencies": {
   "@omdp/dsh-connector": "^0.1.0",
-  "@omdp/dsh-vision-bridge": "^0.1.0"
+  "@omdp/dsh-vision-bridge": "^0.1.0",
+  "@omdp/dsh-gitbash-win": "^0.1.0"
 }
 ```
 
@@ -76,7 +142,7 @@ pnpm install
 1. 改代码 → 提交推送到 GitHub
 2. 升版本 + 打 tag：
    ```sh
-   # 改 dsh-connector/package.json 和 dsh-vision-bridge/package.json 的 version
+   # 改各子目录 package.json 的 version（三个包一起升）
    git add -A && git commit -m "release v0.1.1"
    git tag v0.1.1
    git push origin master && git push origin v0.1.1
@@ -85,19 +151,22 @@ pnpm install
 4. 本机更新：
    ```sh
    cd ~/.dsh/profiles/web
-   pnpm update @omdp/dsh-connector @omdp/dsh-vision-bridge
+   pnpm update @omdp/dsh-connector @omdp/dsh-vision-bridge @omdp/dsh-gitbash-win
    ```
 
 ---
 
 ## 注意事项
 
-- **版本号**：`dsh-connector/package.json` 和 `dsh-vision-bridge/package.json`
-  的 `version` 决定 npm 版本。tag 名（`v0.1.0`）只是触发条件，不影响包版本。
+- **版本号**：三个子目录的 `package.json` 的 `version` 决定 npm 版本。tag 名
+  （`v0.1.0`）只是触发条件，不影响包版本。三个包通常一起升（workflow 每次
+  都发全部三个，已存在的版本会被容错跳过）。
 - **tag 名**：必须匹配 `v*`（workflow 触发条件）。
-- **重复发布**：npm 不允许同版本号重复发布。升版本再打 tag，或先 `npm unpublish`（慎用）。
+- **重复发布**：npm 不允许同版本号重复发布。workflow 已加
+  `|| echo "skip: version already published"` 容错，但**正式发布时仍建议三个
+  包版本同步升**，避免某个包漏发。
 - **provenance**：workflow 用了 `--provenance`（npm 来源证明），需要 GitHub 的
   `id-token: write` 权限（已配置）。若你的 npm 账号不支持 provenance，可去掉
   `--provenance` 参数。
 - **根 package.json**：仓库根的 `package.json` 是裸镜像（名字是
-  `@omdp/dsh-connector`），**不要发布它**——workflow 只在两个子目录里 publish。
+  `@omdp/dsh-connector`），**不要发布它**——workflow 只在三个子目录里 publish。
