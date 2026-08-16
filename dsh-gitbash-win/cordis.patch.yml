@@ -1,0 +1,5 @@
+# @omdp/dsh-gitbash-win — bundle patch: activation row for the profile layer.
+# Registers a global `gitbash` tool on Windows (Git for Windows bash.exe).
+- insert:
+    - id: tool-gitbash
+      name: '@omdp/dsh-gitbash-win'
