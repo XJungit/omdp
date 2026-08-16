@@ -20,6 +20,13 @@ omdp/
 │   ├── cordis.patch.yml # bundle activation row
 │   ├── package.json
 │   └── README.md
+├── dsh-gitbash-win/     # global Git Bash tool for Windows (POSIX shell for the model)
+│   ├── lib/
+│   │   ├── index.js     # host half (dynamically loads @deepseek-ai/* at apply time)
+│   │   └── client.js    # client half (toolview terminal card)
+│   ├── cordis.patch.yml # bundle activation row
+│   ├── package.json
+│   └── README.md
 ├── _skeleton-client/    # copy-paste template: client + host bundle (Web UI plugin)
 ├── _skeleton-host/      # copy-paste template: host-only bundle
 ├── docs/                # research notes, e.g. AI-DSH-plugin-quality.md (community findings)
@@ -57,6 +64,24 @@ Install into a profile via a **local `link:` dependency**:
 
 See its own `README.md` for the full config reference.
 
+### `dsh-gitbash-win` → npm name `@omdp/dsh-gitbash-win`
+
+A lightweight **global Git Bash tool** for Windows. Registers a `gitbash` model
+tool that runs every command via Git for Windows `bash.exe` (`bash -c`), giving
+the model a real POSIX shell (grep/sed/awk/pipes/globs) without WSL and without
+node-pty. Sandbox-aware, with timeout / background jobs / output-spill / a
+toolview terminal card. On Windows, Git Bash is the recommended shell for the
+model: POSIX semantics transfer well to Linux and macOS.
+
+Install into a profile from npm:
+
+```sh
+dsh plugin --profile web add @omdp/dsh-gitbash-win
+```
+
+Requires Git for Windows installed (`C:\Program Files\Git\bin\bash.exe`).
+See its own `README.md` for config, sandbox notes, and troubleshooting.
+
 ## Remote installs from GitHub (alternative)
 
 Each plugin is a standalone npm package in its own subdirectory, so it can also
@@ -65,6 +90,7 @@ be installed straight from GitHub without a local checkout:
 ```sh
 dsh plugin --profile web add github:XJungit/omdp#path:dsh-connector
 dsh plugin --profile web add github:XJungit/omdp#path:dsh-vision-bridge
+dsh plugin --profile web add github:XJungit/omdp#path:dsh-gitbash-win
 ```
 
 The `#path:<subdir>` selector tells pnpm which workspace subdirectory to install
