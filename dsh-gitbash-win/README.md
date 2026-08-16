@@ -65,6 +65,43 @@ DSH 官方 `code`/`standard` 预设里，`tool-bash` 带有
 
 可选：`GIT_BASH` 环境变量指向自定义的 `bash.exe`（默认自动探测常见安装路径）。
 
+## 兼容性
+
+### 架构：为抗崩溃而设计
+
+本插件采用**三层保护**，确保 DSH 更新时**绝不导致 DSH 崩溃**：
+
+| 层 | 做法 | 效果 |
+|---|---|---|
+| **顶层零依赖** | 模块顶层只 `import` Node 内置模块（`node:*`），不静态引用任何 `@deepseek-ai/*` | DSH 怎么更新都不会在**加载阶段**失败 |
+| **动态加载依赖** | 所有 `@deepseek-ai/*` 在 `apply()` 内 `await import()` 按序加载 | 依赖解析失败时**干净报错，插件不加载，DSH 照常运行** |
+| **失败隔离** | 每个依赖加载都 try/catch，失败仅影响 gitbash 工具 | 单个 API 变化不会拖垮 DSH 或影响其他插件 |
+
+### 依赖的 DSH 接口
+
+运行时会动态使用以下 `@deepseek-ai/*` 包（均为 DSH 内部 API，版本锁定 `^0.1.0-rc.6`）：
+
+| 包 | 用到的 API |
+|---|---|
+| `dsh-tools` | `defineTool` / `TOOL_ABORTED`（工具定义） |
+| `dsh-sandbox` | `confine` / `approveEscalation` / `ESCALATION_TARGETS`（沙箱与权限） |
+| `dsh-llm` | `HarnessError`（错误类型） |
+| `dsh-shell` | `parseExitStatus`（退出码解析） |
+| `dsh-timeout` | `clampTimeout` / `deadline` / `timeoutOf`（超时） |
+
+另外通过 `ctx` 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.collect`、`ctx.systemPrompt.section`、`ctx.get('sandbox')` / `ctx.get('sandboxPolicy')` / `ctx.get('jobs')`。
+
+### 兼容性结论
+
+| 场景 | 是否会导致崩溃 |
+|---|---|
+| DSH 小更新 / 补丁（rc.6 → rc.7） | ✅ 不会崩（API 兼容，且失败隔离兜底） |
+| DSH 大版本（0.1 → 0.2） | ✅ **DSH 不崩**；gitbash 工具可能需适配新 API（更新插件版本即可） |
+| `@deepseek-ai/*` 解析失败 | ✅ 干净失败，插件不加载，DSH 正常启动 |
+| 其他插件（connector / vision-bridge / undo） | ✅ 互不影响（各自独立加载） |
+
+**一句话**：实现把"崩溃"降级为"功能不可用"——DSH 永远不会因为本插件崩溃（硬保证），最坏情况只是 gitbash 工具需要跟随 DSH 版本更新适配。已知的 Windows 沙箱问题（`dsh-sandbox-windows-acl` 的 koffi bug）为 DSH 上游问题，与本插件无关；沙箱修复后本插件自动受益（动态跟随 `ctx.sandbox` 服务）。
+
 ## License
 
 MIT

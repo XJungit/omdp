@@ -162,3 +162,19 @@ allowBuilds:
 - 粘贴路由：Content-Type 检查 + magic-byte 校验 + 25MB 上限 + 私有临时目录（0600）+ TTL 清理。
 - 本地文件读取 25MB 上限，防超大图内存占用。
 - 图片会发送到你配置的多模态端点，注意隐私。
+
+
+## 兼容性
+
+本插件采用**抗崩溃架构**，DSH 更新时不会导致 DSH 崩溃（硬保证）。
+
+- **纯静态依赖**：只 `import node:*`，**零第三方依赖、零 `@deepseek-ai/*` 依赖**（最稳）。
+- **DSH 硬依赖**：`ctx.tools` / `ctx.attachments` / `ctx.llm` / `ctx.credentials`（`inject` 声明）。
+- **防御性编码**：所有 DSH 服务调用都有 `?.` / `typeof` 检查（如 `ctx.credentials?.resolve?.()`、
+  `typeof ctx.llm?.registerAdapter !== 'function'` → 提前 return），**API 缺失时优雅降级**，不崩溃。
+
+| 场景 | 崩溃？ |
+|---|---|
+| DSH 小更新/补丁 | ✅ 不会崩 |
+| DSH 大版本（`ctx.llm` API 变化） | ✅ DSH 不崩；LLM 相关功能可能降级（适配器/流式），需适配 |
+| DSH 服务缺失 | ✅ 优雅降级（防御性编码） |

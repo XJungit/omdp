@@ -119,6 +119,20 @@ allowBuilds:
 - 本插件的 API（`/connector/api/*`）与 DSH GUI 同源，无额外鉴权——仅限本机使用，不要暴露到公网。
 - Skills 内容与 MCP 配置都属于本地敏感数据，改动会直接写入磁盘。
 
+## 兼容性
+
+本插件采用**抗崩溃架构**，DSH 更新时不会导致 DSH 崩溃（硬保证）。
+
+- **纯静态依赖**：只 `import node:*` + `yaml`（唯一第三方依赖，版本 `^2.9.0`），**零 `@deepseek-ai/*` 依赖**。
+- **唯一的 DSH 硬依赖**：`ctx.webServer`（`inject: ['webServer']`），用于注册 `/connector/api/*` HTTP 路由。
+- **失败隔离**：webServer 不可用/变化时插件**干净失败不加载**，DSH 照常运行；内部多处 try/catch 防御。
+
+| 场景 | 崩溃？ |
+|---|---|
+| DSH 小更新/补丁 | ✅ 不会崩 |
+| DSH 大版本（`webServer` API 变化） | ✅ DSH 不崩；connector 需适配更新 |
+| yaml 版本 | ✅ 独立 npm 包，不受 DSH 更新影响 |
+
 ## License
 
 MIT
