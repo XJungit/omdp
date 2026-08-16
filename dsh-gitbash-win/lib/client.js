@@ -1,5 +1,5 @@
 window.__ModuleLoader__.load({
-	id: "dsh-gitbash-win",
+	id: "@omdp/dsh-gitbash-win",
 	factory: (require) => {
 		var module = { exports: {} };
 		var exports = module.exports;
