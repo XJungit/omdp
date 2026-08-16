@@ -1,5 +1,7 @@
 # @omdp/dsh-gitbash-win
 
+## Overview
+
 DSH (DeepSeek Harness) 全局 Git Bash 工具插件（Windows）。
 
 注册一个全局 `gitbash` 工具：通过 Git for Windows 的 `bash.exe`（`bash -c`）执行命令，
@@ -7,6 +9,26 @@ DSH (DeepSeek Harness) 全局 Git Bash 工具插件（Windows）。
 
 > Windows 上推荐使用 Git Bash：提供标准的 grep/sed/awk/管道/通配符等 POSIX 环境，
 > 模型在这种环境下训练效果更好（对齐 Unix 语义，可迁移到 Linux/macOS）。
+
+适合：Windows 用户想让 DSH 模型用真正的 POSIX shell（而非 PowerShell），
+且不想要 WSL / node-pty 的重量级方案。
+
+## Quick start
+
+```sh
+# 1. 安装（npm）
+dsh plugin --profile web add @omdp/dsh-gitbash-win
+
+# 2. 确认 Git for Windows 已装（bash.exe 存在，插件自动探测）
+#    C:\Program Files\Git\bin\bash.exe
+
+# 3. 重启 dsh web
+# 4. 在任意会话里，模型即可调用 gitbash 工具
+```
+
+最小可复现：安装 + 重启后，让模型执行
+`gitbash(command: "echo hello from git bash", description: "Test git bash")`
+→ 应返回 `hello from git bash`。
 
 ## 特性
 
@@ -32,6 +54,18 @@ dsh plugin --profile web add @omdp/dsh-gitbash-win
 
 - `C:\Program Files\Git\bin\bash.exe`
 - `C:\Program Files\Git\usr\bin\bash.exe`
+
+## 卸载
+
+```sh
+# 1. 从依赖移除
+dsh plugin --profile web remove @omdp/dsh-gitbash-win
+
+# 2. 若 bundles 里还有残留，手动从 profiles/web/package.json 的 dsh.profile.bundles 删掉
+```
+
+**禁用（临时）**：从 `dsh.profile.bundles` 移除后重启（无需删包），
+或在 `cordis.patch.yml` 加 `- id: tool-gitbash\n  disabled: true`。
 
 ## 使用
 
@@ -64,6 +98,48 @@ DSH 官方 `code`/`standard` 预设里，`tool-bash` 带有
 ## 配置
 
 可选：`GIT_BASH` 环境变量指向自定义的 `bash.exe`（默认自动探测常见安装路径）。
+
+## Troubleshooting
+
+| 问题 | 原因 / 解决 |
+|---|---|
+| `Git Bash not found` | 未装 Git for Windows，或 `bash.exe` 不在常见路径。装 Git 或设 `GIT_BASH` |
+| workspace-write 下报 `CreateFileMapping` / `fatal error` | **已知限制**：MSYS 运行时无法在 Windows ACL 受限令牌沙箱内启动（官方 dsh-gitbash-preset 同）。用 `sandbox_permissions: "danger-full-access"` 升级，或把会话切到完全访问 |
+| 之前报 `windows-acl-run: --temp is not an existing directory` | DSH 上游 bug（Discussion #758）：手动重建同名目录即可恢复 |
+| 工具不出现在模型工具列表 | bundle 未挂载：确认 `dsh.profile.bundles` 含 `@omdp/dsh-gitbash-win`，重启 dsh |
+| 命令无输出 / 被截断 | 输出超 64KB 会截断并写 spill 文件，看完整输出需读 spill 路径 |
+
+日志：DSH 启动的 stderr（profile 下 `dsh-boot.err`）。回滚：卸载/禁用（见上）。
+
+## Permissions & data
+
+| 数据 | 访问方式 | 说明 |
+|---|---|---|
+| `bash.exe`（Git for Windows） | **执行** | 每次调用 `bash -c <command>` |
+| 工作区 / 指定 workdir | 读写（取决于命令） | 命令在沙箱策略下运行（受限或全权限） |
+| 环境变量 | 读取 | `$DSH_*` 环境事实 + 继承的环境 |
+| 沙箱 / 审批 | 调用 DSH 服务 | `ctx.sandbox` / `ctx.sandboxPolicy` / `approval` |
+
+**不收集**：无遥测、无外部网络请求（gitbash 只执行本地命令，不联网）。
+**注意**：命令**完全按模型意图执行**——沙箱/审批是唯一防线；`danger-full-access` 下命令拥有完整权限。
+
+## Development
+
+```sh
+# 本地开发：link: 安装，改源码 → 重启 dsh 即生效
+cd ~/.dsh/profiles/web
+pnpm add "link:D:/WorkSpace/omdp/dsh-gitbash-win"
+
+# 语法检查
+node --check D:/WorkSpace/omdp/dsh-gitbash-win/lib/index.js
+node --check D:/WorkSpace/omdp/dsh-gitbash-win/lib/client.js
+
+# 发布（GitHub Actions 自动发包）
+# 改 dsh-gitbash-win/package.json 的 version → git tag vX.Y.Z → push
+```
+
+结构：`lib/index.js`（host，动态加载 @deepseek-ai/*）/ `lib/client.js`（toolview 卡片）/ `cordis.patch.yml`。
+贡献：PR 到 https://github.com/XJungit/omdp。
 
 ## 兼容性
 
@@ -102,6 +178,9 @@ DSH 官方 `code`/`standard` 预设里，`tool-bash` 带有
 
 **一句话**：实现把"崩溃"降级为"功能不可用"——DSH 永远不会因为本插件崩溃（硬保证），最坏情况只是 gitbash 工具需要跟随 DSH 版本更新适配。已知的 Windows 沙箱问题（`dsh-sandbox-windows-acl` 的 koffi bug）为 DSH 上游问题，与本插件无关；沙箱修复后本插件自动受益（动态跟随 `ctx.sandbox` 服务）。
 
-## License
+**最后验证**：DSH `0.1.0-rc.6`（2026-08-16）。
 
-MIT
+## License & security
+
+MIT License。安全问题请通过 GitHub Issues 私密报告（https://github.com/XJungit/omdp/issues）。
+本插件执行模型提供的任意命令——请确保沙箱/审批策略已配置（尤其 `danger-full-access` 下）。

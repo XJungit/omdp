@@ -1,6 +1,10 @@
 # @omdp/dsh-connector
 
-一个 DeepSeek Harness (`dsh`) 插件，把 **MCP 服务器** 和 **用户 Skills** 的管理合并到 Web UI 的同一个设置页里（设置页标签：**Connector**）。
+## Overview
+
+把 **MCP 服务器** 和 **用户 Skills** 的管理合并到 DSH Web UI 的同一个设置页
+（设置页标签：**Connector**）。适合需要在 DSH 里频繁增删改 MCP server / skills、
+又不想手改 `cordis.patch.yml` 的用户。
 
 - **MCP**：读取/编辑 `profiles/web/cordis.patch.yml` 中的 `mcp-*` 块（结构化表单）。保存后**重启 `dsh` 生效**。
 - **Skills**：列出/查看/编辑/删除 `~/.dsh/skills` 下的 `SKILL.md`。保存**即时生效**（filesystem provider 自动重新发现）。
@@ -8,6 +12,24 @@
 设计上复用官方两款参考插件的方式：
 - 设置页槽位注册方式参照 [`dsh-mcp-manager`](https://github.com/hyqhyq3/dsh-mcp-manager)（`settings.section` + Package 私有 HTTP API）。
 - Skills 的 frontmatter 解析/序列化参照 [`dsh-skill-manager`](https://github.com/bitterSmilezzz/dsh-skill-manager)。
+
+## Quick start
+
+```sh
+# 1. 安装（npm）
+cd ~/.dsh/profiles/web
+pnpm add @omdp/dsh-connector
+
+# 2. 确认 bundle 挂载
+node "$env:APPDATA\npm\node_modules\@deepseek-ai\dsh\lib\bin.js" --profile web --dump-config | grep connector
+
+# 3. 重启 dsh
+# 4. 打开 Web UI → 设置 → Connector，即可看到 MCP 服务器和 Skills 两个区
+```
+
+最小可复现：安装后打开设置页 → Connector → 在 MCP 区点「＋添加」→ 填一个
+stdio server（如 `cmd /c npx -y @upstash/context7-mcp`）→ 保存 → 重启 dsh → 该
+MCP server 可用。
 
 ### SSE(MCP over SSE) 如何处理
 
@@ -80,6 +102,23 @@ allowBuilds:
 本地 link 模式下**没有"拉取"这一步**：直接 `git pull` 或编辑 `D:/WorkSpace/omdp`，
 然后**重启 `dsh --profile web`** 加载新代码（运行中的进程仍用旧代码）。
 
+## 卸载
+
+```sh
+# 1. 从依赖移除
+cd ~/.dsh/profiles/web
+pnpm remove @omdp/dsh-connector
+
+# 2. 从 bundles 移除（pnpm remove 会重写 package.json，若 bundles 里还有则手动删）
+#    编辑 profiles/web/package.json，从 dsh.profile.bundles 删掉 "@omdp/dsh-connector"
+
+# 3. （可选）还原被插件改写的 MCP 块
+#    插件改写过 cordis.patch.yml 里的 mcp-* 块；若想彻底还原，从备份恢复或手动编辑
+```
+
+**禁用（临时）**：在 `cordis.patch.yml` 加一行 `- id: connector\n  disabled: true`
+（或从 bundles 移除后重启），无需删除包。
+
 ## 使用
 
 打开 Web UI 的 **设置 → Connector**：
@@ -108,6 +147,42 @@ allowBuilds:
 - MCP 块解析为结构化提取，复杂嵌套 YAML（如多 env 变量）在表单里以单字段呈现；极复杂配置请直接在 `cordis.patch.yml` 编辑。
 - 不桥接 MCP 的 resources/prompts，只管理 server 配置。
 
+## Troubleshooting
+
+| 问题 | 原因 / 解决 |
+|---|---|
+| 设置页看不到 Connector 标签 | bundle 未挂载：确认 `dsh.profile.bundles` 含 `@omdp/dsh-connector`，重启 dsh |
+| 保存 MCP 被拒（HTTP 400） | 配置不合法（transport/serverName/command/url 校验失败），按提示修正——插件不会写入坏配置 |
+| MCP server 保存后不生效 | 需**重启 dsh**（`dsh-mcp-client` 静态加载） |
+| `/connector/api/*` 404 | client/host 边界异常：确认插件 host 半边已加载（重启），浏览器强刷缓存 |
+| 改动丢失 | 检查是否误用了旧版（`link:` 模式下改仓库源码需重启才生效） |
+
+日志：插件错误会进入 dsh 启动的 stderr 日志（profile 下的 `dsh-boot.err`）。
+回滚：MCP 块改动前先备份 `cordis.patch.yml`；或直接用 `dsh-undo-savepoint` 快照回滚。
+
+## Development
+
+```sh
+# 本地开发：用 link: 安装（README 顶部方式一），改仓库源码 → 重启 dsh 即生效
+cd ~/.dsh/profiles/web
+pnpm add "link:D:/WorkSpace/omdp/dsh-connector"
+
+# 语法检查
+node --check D:/WorkSpace/omdp/dsh-connector/index.js
+node --check D:/WorkSpace/omdp/dsh-connector/client.js
+
+# 发布（GitHub Actions 自动发包，见 docs/npm-publish.md）
+# 改 dsh-connector/package.json 的 version → git tag vX.Y.Z → push
+```
+
+结构：`index.js`（host，HTTP API）/ `client.js`（Web UI 设置页）/ `cordis.patch.yml`（bundle 激活行）。
+贡献：PR 到 https://github.com/XJungit/omdp。
+
+## License & security
+
+MIT License。安全问题请通过 GitHub Issues 私密报告（https://github.com/XJungit/omdp/issues），
+或直接联系维护者。涉及 token 的配置（README「安全实践」）请勿提交到公开仓库。
+
 ## 安全实践
 
 - **不要在 `cordis.patch.yml` 里写明文 token**。MCP server 需要密钥时，用环境变量引用（`!!js process.env.XXX`），例如：
@@ -118,6 +193,18 @@ allowBuilds:
   token 明文只存在于 `.env` / 系统环境变量，不落进配置文件（同 `dsh-mcp-manager` 的 `tokenEnv` 理念）。
 - 本插件的 API（`/connector/api/*`）与 DSH GUI 同源，无额外鉴权——仅限本机使用，不要暴露到公网。
 - Skills 内容与 MCP 配置都属于本地敏感数据，改动会直接写入磁盘。
+
+## Permissions & data
+
+| 数据 | 访问方式 | 说明 |
+|---|---|---|
+| `profiles/web/cordis.patch.yml` | **读写** | MCP 块的结构化编辑（保留 `!!js`/env 原样） |
+| `~/.dsh/skills/**/SKILL.md` | **读写** | 用户技能文件的查看/编辑/删除/新建 |
+| `~/.dsh/settings.yaml` 等 | 只读 | 不主动读写 |
+| HTTP `/connector/api/*` | 本机监听 | 与 DSH GUI 同源，无外部网络请求（不调用外部 API） |
+| 环境变量 | 只读引用 | 只读 `process.env.*`，不持久化 |
+
+**不收集**：无遥测、无外部上报、无用户数据离开本机。
 
 ## 兼容性
 
@@ -133,6 +220,4 @@ allowBuilds:
 | DSH 大版本（`webServer` API 变化） | ✅ DSH 不崩；connector 需适配更新 |
 | yaml 版本 | ✅ 独立 npm 包，不受 DSH 更新影响 |
 
-## License
-
-MIT
+**最后验证**：DSH `0.1.0-rc.6`（2026-08-16）。
