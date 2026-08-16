@@ -4,66 +4,27 @@
 // Every command runs via Git for Windows bash.exe (`bash -c`), giving the
 // model a real POSIX shell without WSL and without node-pty.
 //
-// IMPORTANT — dependency loading strategy (dsh-undo-savepoint pattern):
-// This package MUST NOT statically import any @deepseek-ai/* package. In a
-// pnpm profile layout the plugin's node_modules does not contain them, so a
-// static import crashes the whole DSH boot. Instead we statically import only
-// Node builtins, then resolve @deepseek-ai/* at module load via
-// createRequire(import.meta.url), walking up to the DSH install tree (where
-// those packages live). If resolution fails we throw a clear message and the
-// plugin simply does not load — DSH stays up.
-//
-// Sandbox / approval / timeout / background all mirror the official shell-tool
-// family (dsh-tool-bash / dsh-bash-terminal) but through the dynamically
-// resolved APIs, so Git Bash gets the same security surface as PowerShell.
+// DEPENDENCY LOADING STRATEGY (critical — do not change casually):
+// This module MUST keep its top level free of any @deepseek-ai import —
+// static OR synchronous require(). DSH's plugin loader imports every bundle
+// concurrently (Promise.allSettled); a synchronous require() of an ESM
+// @deepseek-ai package from module scope races the loader's own import() and
+// dies with ERR_REQUIRE_ESM_RACE_CONDITION, taking the whole DSH boot down
+// (this is exactly what crashed 0.1.1). Instead we:
+//   1. statically import only Node builtins;
+//   2. resolve @deepseek-ai/* lazily INSIDE apply() via await import(),
+//      after the loader's concurrent import storm has settled.
+// A resolution failure throws a clear message and the plugin simply does not
+// load — DSH stays up (same contract as dsh-undo-savepoint).
 // ============================================================
 
 import { createRequire } from 'node:module'
-import { existsSync, lstatSync } from 'node:fs'
+import { lstatSync } from 'node:fs'
 import { isAbsolute, join, resolve } from 'node:path'
-
-const DSH_ROOT = process.env.DSH_ROOT ?? ''
-
-/** Resolve a module from the plugin location, falling back to $DSH_ROOT. */
-function makeRequire() {
-  try {
-    const local = createRequire(import.meta.url)
-    local.resolve('@deepseek-ai/dsh-tools')
-    return local
-  } catch { /* not resolvable from the plugin location */ }
-  if (DSH_ROOT !== '') {
-    try {
-      const fromRoot = createRequire(join(DSH_ROOT, 'package.json'))
-      fromRoot.resolve('@deepseek-ai/dsh-tools')
-      return fromRoot
-    } catch { /* not resolvable from DSH_ROOT either */ }
-  }
-  throw new Error('dsh-gitbash-win: cannot resolve "@deepseek-ai/dsh-tools". Install the plugin via `dsh plugin add` or set DSH_ROOT to your DSH install root.')
-}
-const toolsRequire = makeRequire()
-
-// Dynamically pull the APIs we need (all resolve to the DSH install tree).
-const dshTools = toolsRequire('@deepseek-ai/dsh-tools')
-const { defineTool, TOOL_ABORTED } = dshTools
-const dshSandbox = toolsRequire('@deepseek-ai/dsh-sandbox')
-const {
-  ESCALATION_TARGETS,
-  SandboxUnavailableError,
-  approveEscalation,
-  escalationHintMarker,
-  sandboxDenialMarker,
-  validateEscalationArgs,
-} = dshSandbox
-const { HarnessError } = toolsRequire('@deepseek-ai/dsh-llm')
-const { parseExitStatus } = toolsRequire('@deepseek-ai/dsh-shell')
-const { clampTimeout, deadline, timeoutOf } = toolsRequire('@deepseek-ai/dsh-timeout')
+import { pathToFileURL } from 'node:url'
 
 export const name = 'tool-gitbash'
 export const inject = ['tools', 'subprocess', 'systemPrompt', 'shellEnv']
-
-/** Runtime configuration schema (mirrors the shell tool family). */
-const z = toolsRequire('@deepseek-ai/schemastery')
-export const Config = z.object({ enableRunInBackground: z.boolean().default(true) })
 
 const GIT_BASH_CANDIDATES = [
   'C:\\Program Files\\Git\\bin\\bash.exe',
@@ -76,6 +37,28 @@ const MAX_OUTPUT_BYTES = 64 * 1024
 const MAX_SPILL_BYTES = 64 * 1024 * 1024
 const ENV_OVERRIDES = { NO_COLOR: '1', TERM: 'dumb', PAGER: 'cat', GIT_PAGER: 'cat' }
 const TIMEOUT_CODE = 'GITBASH_TIMEOUT'
+
+/** Lazily import an @deepseek-ai/* package from the plugin location, falling
+ * back to $DSH_ROOT. Throws a clear message when unresolvable. */
+async function importDeepseek(specifier) {
+  const DSH_ROOT = process.env.DSH_ROOT ?? ''
+  let fromUrl
+  try {
+    const local = createRequire(import.meta.url)
+    fromUrl = pathToFileURL(local.resolve(specifier)).href
+  } catch {
+    if (DSH_ROOT !== '') {
+      try {
+        const fromRoot = createRequire(join(DSH_ROOT, 'package.json'))
+        fromUrl = pathToFileURL(fromRoot.resolve(specifier)).href
+      } catch { /* fall through to the error below */ }
+    }
+  }
+  if (fromUrl === undefined) {
+    throw new Error(`dsh-gitbash-win: cannot resolve "${specifier}". Install the plugin via \`dsh plugin add\` or set DSH_ROOT to your DSH install root.`)
+  }
+  return import(fromUrl)
+}
 
 function candidateExists(candidate) {
   try {
@@ -120,7 +103,7 @@ function matchesSignature(exitCode, stderr, signatures) {
   return signatures.some((signature) => lowered.includes(signature.toLowerCase()))
 }
 
-function validateArgs(args) {
+function validateArgs(args, validateEscalationArgs) {
   if (typeof args.command !== 'string' || args.command.trim().length === 0) throw new Error('invalid command: expected a non-empty string')
   if (typeof args.description !== 'string' || args.description.trim().length === 0) throw new Error('invalid description: expected a non-empty string')
   if (args.timeoutMs !== undefined && (!Number.isFinite(args.timeoutMs) || args.timeoutMs <= 0)) throw new Error(`invalid timeoutMs: expected a positive number, got ${JSON.stringify(args.timeoutMs)}`)
@@ -141,7 +124,7 @@ function streamText(output) {
   return `${output.text}\n[output truncated; full output: ${output.spillPath ?? '(unavailable)'}]`
 }
 
-function renderResult(result, escalationModes) {
+function renderResult(result, escalationModes, markers) {
   const out = streamText(result.stdout)
   const err = streamText(result.stderr)
   let body = out
@@ -150,20 +133,20 @@ function renderResult(result, escalationModes) {
     body += `[stderr]\n${err}`
   }
   if (body.length === 0) body = '(no output)'
-  const markers = []
+  const m = []
   if (result.sandbox?.denied) {
-    markers.push(sandboxDenialMarker(result.sandbox.mode))
-    if (escalationModes.length > 0) markers.push(escalationHintMarker('command'))
+    m.push(markers.sandboxDenialMarker(result.sandbox.mode))
+    if (escalationModes.length > 0) m.push(markers.escalationHintMarker('command'))
   }
-  if (result.timedOut) markers.push(`[timed out after ${result.timeoutMs}ms]`)
-  if (result.signal !== null) markers.push(`[killed by signal: ${result.signal}]`)
-  else if (result.exitCode !== 0) markers.push(`[exit code: ${result.exitCode}]`)
-  if (markers.length === 0) return body
+  if (result.timedOut) m.push(`[timed out after ${result.timeoutMs}ms]`)
+  if (result.signal !== null) m.push(`[killed by signal: ${result.signal}]`)
+  else if (result.exitCode !== 0) m.push(`[exit code: ${result.exitCode}]`)
+  if (m.length === 0) return body
   if (!body.endsWith('\n')) body += '\n'
-  return body + markers.join('\n')
+  return body + m.join('\n')
 }
 
-function renderProcessRead(read, sandbox, escalationModes) {
+function renderProcessRead(read, sandbox, escalationModes, markers) {
   const notices = []
   if (read.lossy) {
     const paths = [read.stdoutSpillPath, read.stderrSpillPath].filter((path) => path !== undefined)
@@ -171,8 +154,8 @@ function renderProcessRead(read, sandbox, escalationModes) {
   }
   if (sandbox?.runnerFailed) notices.push(`[sandbox: the sandbox runner itself failed under ${sandbox.mode} mode — the command did not run; this is a sandbox problem, not a command failure]`)
   else if (sandbox?.denied) {
-    notices.push(sandboxDenialMarker(sandbox.mode))
-    if (escalationModes.length > 0) notices.push(escalationHintMarker('command'))
+    notices.push(markers.sandboxDenialMarker(sandbox.mode))
+    if (escalationModes.length > 0) notices.push(markers.escalationHintMarker('command'))
   }
   if (notices.length === 0) return read.delta
   return `${read.delta}${read.delta.length > 0 && !read.delta.endsWith('\n') ? '\n' : ''}${notices.join('\n')}`
@@ -185,7 +168,36 @@ function gitBashDescription(escalationModes) {
   return base + ' Attempting a command the sandbox may deny is safe and expected: run it and read the marker rather than assuming the denial. When a command is denied and a wider mode would let it succeed, escalate immediately in the same turn — the one sanctioned exception to a denial: retry the exact same command once with `sandbox_permissions` (the narrowest wider mode that suffices) plus a one-sentence `justification`. Do not detour through chat to ask permission first — the approval prompt raised by that retry is how the user consents. If the session states approval prompts are disabled, there is no exception: a denial is final — do not set `sandbox_permissions`. Never escalate speculatively: ground the request in a real denial — normally the one this command just hit; escalating up front is fine only when this session already denied the same access. A rejected escalation is final for that command — stop and explain, never work around it — but it does not forbid attempting or escalating other commands later.'
 }
 
-export function apply(ctx, config = {}) {
+export async function apply(ctx, config = {}) {
+  // ---- lazy-load all @deepseek-ai/* AFTER the loader's concurrent import
+  // storm — this is the whole point of this file's structure. ----
+  let defineTool, TOOL_ABORTED, ESCALATION_TARGETS, SandboxUnavailableError,
+    approveEscalation, escalationHintMarker, sandboxDenialMarker, validateEscalationArgs,
+    HarnessError, parseExitStatus, clampTimeout, deadline, timeoutOf
+  try {
+    const tools = await importDeepseek('@deepseek-ai/dsh-tools')
+    defineTool = tools.defineTool
+    TOOL_ABORTED = tools.TOOL_ABORTED
+    const sandbox = await importDeepseek('@deepseek-ai/dsh-sandbox')
+    ESCALATION_TARGETS = sandbox.ESCALATION_TARGETS
+    SandboxUnavailableError = sandbox.SandboxUnavailableError
+    approveEscalation = sandbox.approveEscalation
+    escalationHintMarker = sandbox.escalationHintMarker
+    sandboxDenialMarker = sandbox.sandboxDenialMarker
+    validateEscalationArgs = sandbox.validateEscalationArgs
+    const llm = await importDeepseek('@deepseek-ai/dsh-llm')
+    HarnessError = llm.HarnessError
+    const shell = await importDeepseek('@deepseek-ai/dsh-shell')
+    parseExitStatus = shell.parseExitStatus
+    const timeout = await importDeepseek('@deepseek-ai/dsh-timeout')
+    clampTimeout = timeout.clampTimeout
+    deadline = timeout.deadline
+    timeoutOf = timeout.timeoutOf
+  } catch (error) {
+    ctx.logger?.error?.('tool-gitbash: failed to load @deepseek-ai deps: ' + String(error?.message ?? error))
+    throw new Error('tool-gitbash: cannot load @deepseek-ai dependencies — ' + String(error?.message ?? error))
+  }
+
   const backgroundEnabled = config.enableRunInBackground ?? true
   const bash = resolveGitBashStrict()
   if (bash === undefined) {
@@ -372,7 +384,7 @@ export function apply(ctx, config = {}) {
   }
 
   async function execute(args, exec) {
-    validateArgs(args)
+    validateArgs(args, validateEscalationArgs)
     const jobs = ctx.get('jobs')
     const standingPolicy = confining ? sandboxPolicyService.resolve(exec.agent === undefined ? {} : { session: exec.agent.session }) : undefined
     let approvedMode
@@ -433,7 +445,7 @@ export function apply(ctx, config = {}) {
             return {
               cancel: () => void proc.kill(),
               done: proc.done.then(() => processOutcome(proc)),
-              readOutput: () => renderProcessRead(proc.readOutput(), proc.sandbox, escalationModes),
+              readOutput: () => renderProcessRead(proc.readOutput(), proc.sandbox, escalationModes, { sandboxDenialMarker, escalationHintMarker }),
             }
           },
         }),
@@ -495,7 +507,7 @@ export function apply(ctx, config = {}) {
         }],
       },
       render(_args, value) {
-        return [{ type: 'text', text: value.kind === 'background' ? `started background job ${value.jobId}` : renderResult(value, escalationModes) }]
+        return [{ type: 'text', text: value.kind === 'background' ? `started background job ${value.jobId}` : renderResult(value, escalationModes, { sandboxDenialMarker, escalationHintMarker }) }]
       },
     },
     execute,
