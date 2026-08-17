@@ -1,6 +1,6 @@
 {
   "name": "@omdp/dsh-gitbash-win",
-  "version": "0.1.3",
+  "version": "0.1.5",
   "description": "Git Bash tool plugin for DeepSeek Harness on Windows: registers a global `gitbash` tool that runs commands via Git for Windows bash.exe. Lightweight, no node-pty, no WSL, sandbox-aware.",
   "type": "module",
   "main": "lib/index.js",
