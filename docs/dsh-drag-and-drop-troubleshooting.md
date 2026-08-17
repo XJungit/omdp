@@ -109,3 +109,50 @@ return lines(new TextDecoder('gbk').decode(rawOut));
 3. **不要硬编码中文路径**——Everything 等工具应装英文路径
 4. **GUI 程序被命令行调用会弹窗**——插件应只调 CLI（es.exe），绝不调 GUI（Everything.exe）
 5. **测试 mock 掩盖真实 bug**——作者测试 mock 了 es.exe，从未真实验证，导致"测试通过但真实失败"
+
+## 别人怎么安装 Everything（标准方式）
+
+**不需要复制 es.exe、不需要特殊操作**。插件只要求 **`es.exe` 在 PATH 里**（`commandExists` 用 `where.exe` 查 PATH）。
+
+### 推荐（官方安装器 + 服务）
+
+```sh
+# 1. 下载官方安装器
+#    https://www.voidtools.com/downloads/ → Everything-1.4.1.1032.x64.msi
+
+# 2. 安装（会装到 C:\Program Files\Everything）
+#    安装过程中选择"安装 Everything 服务"（后台常驻 + 索引 NTFS，推荐）
+
+# 3. 下载 ES 命令行工具（官方安装器不带 es.exe！）
+#    https://www.voidtools.com/downloads/ → ES-1.1.0.37.x64.zip
+
+# 4. 解压 es.exe 到官方推荐位置（自动在 PATH）
+#    %LOCALAPPDATA%\Microsoft\WindowsApps\es.exe
+```
+
+### 注意点
+
+| 项 | 说明 |
+|---|---|
+| **官方安装器不带 es.exe** | 必须**单独下载 ES 工具**（独立 zip） |
+| **es.exe 官方推荐位置** | `%LOCALAPPDATA%\Microsoft\WindowsApps`（Windows 默认 PATH，无需手动加） |
+| **路径避免中文** | 用英文路径（`C:\Program Files` 或用户目录英文路径） |
+| **首次需 GUI 确认索引** | 装完打开 Everything → Tools → Options → Indexes → NTFS → 勾选卷（一次即可） |
+| **服务模式** | 后台常驻 + 开机自启，es.exe 秒级连接 |
+
+### 其他方式
+
+| 方式 | 能用吗 | 额外操作 |
+|---|---|---|
+| 官方安装器（.msi） | ✅ | 需单独装 ES 到 WindowsApps |
+| 便携版（zip） | ✅ | 需把目录加进 PATH，或复制 es.exe 到 WindowsApps |
+| ES 单独安装 | ✅ | 官方推荐直接放 WindowsApps |
+
+## Issue 核查结论（确保不污染开源项目）
+
+| Issue | 准确性 | 处理 |
+|---|---|---|
+| djt889/dsh-drag-to-attachment #1 | ✅ **完全准确**（spawn 崩溃 + vendor 缺失，均代码实证） | 保留，无需修改 |
+| bill9109/dsh-drag-and-drop #4 | ✅ **核心准确**（-whole-filename 参数 bug 实测成立），但初始表述有 2 处不完整：指错文件位置、漏 GBK 核心 bug | 已追加评论补充（GBK 核心 bug + 正确文件位置 + Everything.exe 弹窗） |
+
+**结论**：两个 issue 的关键断言均经代码或实测验证，**无虚假/误导信息**，不会污染开源项目。Issue 4 的不完整处已通过追加评论修正。
