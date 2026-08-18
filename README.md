@@ -79,6 +79,9 @@ Install into a profile from npm:
 dsh plugin --profile web add @omdp/dsh-gitbash-win
 ```
 
+> **安装命令前提**：上面的 `dsh plugin add` 需要 `dsh` 已在 PATH。若你是按官方文档用 `npx` 运行 dsh（没有全局 `dsh` 命令），上面这行会报 `command not found: dsh` —— 改用等价命令：
+> `npx @deepseek-ai/dsh plugin --profile web add @omdp/dsh-gitbash-win`（不要求 `dsh` 在 PATH）。
+
 Requires Git for Windows installed (`C:\Program Files\Git\bin\bash.exe`).
 See its own `README.md` for config, sandbox notes, and troubleshooting.
 
@@ -92,6 +95,9 @@ dsh plugin --profile web add github:XJungit/omdp#path:dsh-connector
 dsh plugin --profile web add github:XJungit/omdp#path:dsh-vision-bridge
 dsh plugin --profile web add github:XJungit/omdp#path:dsh-gitbash-win
 ```
+
+> **安装命令前提**：上面的 `dsh plugin add` 需要 `dsh` 已在 PATH。若你是按官方文档用 `npx` 运行 dsh（没有全局 `dsh` 命令），上面这几行会报 `command not found: dsh` —— 每行前面加 `npx @deepseek-ai/dsh` 即可（不要求 `dsh` 在 PATH），例如：
+> `npx @deepseek-ai/dsh plugin --profile web add github:XJungit/omdp#path:dsh-gitbash-win`。
 
 The `#path:<subdir>` selector tells pnpm which workspace subdirectory to install
 (it resolves to that subpackage's `package.json`, not the repo root).

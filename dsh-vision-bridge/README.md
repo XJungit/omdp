@@ -132,6 +132,9 @@ pnpm install
 dsh plugin --profile web add github:XJungit/omdp#path:dsh-vision-bridge
 ```
 
+> **安装命令前提**：上面的 `dsh plugin add` 需要 `dsh` 已在 PATH。若你是按官方文档用 `npx` 运行 dsh（没有全局 `dsh` 命令），上面这行会报 `command not found: dsh` —— 改用等价命令：
+> `npx @deepseek-ai/dsh plugin --profile web add github:XJungit/omdp#path:dsh-vision-bridge`（不要求 `dsh` 在 PATH）。
+
 pnpm ≥10 默认拒绝运行 git 依赖的构建脚本，首次 `add` 会失败，需在
 `profiles/web/pnpm-workspace.yaml` 加白名单后重试：
 

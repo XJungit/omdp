@@ -18,6 +18,8 @@ DSH (DeepSeek Harness) 全局 Git Bash 工具插件（Windows）。
 ```sh
 # 1. 安装（npm）
 dsh plugin --profile web add @omdp/dsh-gitbash-win
+#    如果 dsh 不在 PATH（例如用 npx 装的 dsh），改用：
+#    npx @deepseek-ai/dsh plugin --profile web add @omdp/dsh-gitbash-win
 
 # 2. 确认 Git for Windows 已装（bash.exe 存在，插件自动探测）
 #    C:\Program Files\Git\bin\bash.exe
@@ -45,6 +47,13 @@ dsh plugin --profile web add @omdp/dsh-gitbash-win
 ```bash
 dsh plugin --profile web add @omdp/dsh-gitbash-win
 ```
+
+> **安装命令前提**：上面的 `dsh plugin add` 需要 `dsh` 已在 PATH（即全局安装过 `npm i -g @deepseek-ai/dsh`）。
+> 如果你是按**官方文档用 `npx` 运行 dsh**（没有全局 `dsh` 命令），上面这行会报 `command not found: dsh`。
+> 改用下面这行等价命令即可（不要求 `dsh` 在 PATH）：
+> ```sh
+> npx @deepseek-ai/dsh plugin --profile web add @omdp/dsh-gitbash-win
+> ```
 
 然后重启 `dsh web`。插件通过 `dsh.bundle`（包内 `cordis.patch.yml`）自动挂载，
 无需手动改 profile 配置。
