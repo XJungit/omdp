@@ -1,6 +1,6 @@
 {
   "name": "@omdp/dsh-gitbash-win",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Git Bash tool plugin for DeepSeek Harness on Windows: registers a global `gitbash` tool that runs commands via Git for Windows bash.exe. Lightweight, no node-pty, no WSL, sandbox-aware.",
   "type": "module",
   "main": "lib/index.js",
@@ -36,11 +36,11 @@
   "license": "MIT",
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-tools": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-llm": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-sandbox": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-shell": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-timeout": "^0.1.0-rc.6"
+    "@deepseek-ai/dsh-tools": "^0.1.0-rc.8",
+    "@deepseek-ai/dsh-llm": "^0.1.0-rc.8",
+    "@deepseek-ai/dsh-sandbox": "^0.1.0-rc.8",
+    "@deepseek-ai/dsh-shell": "^0.1.0-rc.8",
+    "@deepseek-ai/dsh-timeout": "^0.1.0-rc.8"
   },
   "repository": {
     "type": "git",

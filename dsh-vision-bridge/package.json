@@ -1,6 +1,6 @@
 {
   "name": "@omdp/dsh-vision-bridge",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "DSH 视觉桥插件：自动区分多模态/文本模型。多模态模型直接看图；文本模型通过可配置的多模态端点（baseUrl + apiKey + model）代看，支持粘贴图片、read_image 工具、请求时图片转证据。",
   "type": "module",
   "main": "index.js",

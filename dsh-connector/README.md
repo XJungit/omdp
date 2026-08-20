@@ -223,4 +223,4 @@ MIT License。安全问题请通过 GitHub Issues 私密报告（https://github.
 | DSH 大版本（`webServer` API 变化） | ✅ DSH 不崩；connector 需适配更新 |
 | yaml 版本 | ✅ 独立 npm 包，不受 DSH 更新影响 |
 
-**最后验证**：DSH `0.1.0-rc.6`（2026-08-16）。
+**最后验证**：DSH `0.1.0-rc.8`（2026-08-20，已在本机运行实例活体验证 `/connector/api/skills` 返回 200）。

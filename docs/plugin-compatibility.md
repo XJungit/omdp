@@ -8,7 +8,7 @@
 
 ---
 
-## 1. @omdp/dsh-gitbash-win（v0.1.3）
+## 1. @omdp/dsh-gitbash-win（v0.1.6）
 
 ### 架构
 
@@ -18,7 +18,7 @@
 | 动态加载依赖 | 所有 `@deepseek-ai/*` 在 `apply()` 内 `await import()` | 解析失败→干净报错，插件不加载，DSH 照常 |
 | 失败隔离 | 每个依赖加载 try/catch | 单个 API 变化只影响 gitbash 工具 |
 
-### 依赖的 DSH 接口（动态，版本 `^0.1.0-rc.6`）
+### 依赖的 DSH 接口（动态，版本 `^0.1.0-rc.8`）
 
 | 包 | API | 变更风险 |
 |---|---|---|
@@ -35,7 +35,7 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 
 - **`dsh-sandbox` 是最大变数**：Windows ACL 沙箱（koffi）当前有上游 bug（`windows-acl-run` 临时目录失败）。
   这是 DSH 上游问题，与本插件无关；插件动态跟随 `ctx.sandbox`，上游修复后自动受益。
-- **peerDependencies 声明了 6 个 `@deepseek-ai/*`**（`^0.1.0-rc.6`），但**不实际安装**（动态加载），
+- **peerDependencies 声明了 6 个 `@deepseek-ai/*`**（`^0.1.0-rc.8`），但**不实际安装**（动态加载），
   所以不会因版本不匹配而启动失败。
 
 ### 结论
@@ -48,7 +48,7 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 
 ---
 
-## 2. @omdp/dsh-connector（v0.1.1）
+## 2. @omdp/dsh-connector（v0.1.2）
 
 ### 架构
 
@@ -81,7 +81,7 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 
 ---
 
-## 3. @omdp/dsh-vision-bridge（v0.1.1）
+## 3. @omdp/dsh-vision-bridge（v0.1.2）
 
 ### 架构
 

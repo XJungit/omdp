@@ -10,7 +10,7 @@ DSH 视觉桥插件：让**纯文本模型也能"看图"**。自动区分多模�
 
 适合：主力模型是文本模型（deepseek-v4-flash 等）、但需要处理图片（粘贴截图、本地图、URL）的用户。
 
-**已实测验证**（Windows + DSH rc.6 + Agnes agnes-2.5-flash）：
+**已实测验证**（Windows + DSH rc.8 + Agnes agnes-2.5-flash）：
 
 - 粘贴图片 → 自动截获为临时路径文本 → 模型调 `vision_bridge_read_image` → Agnes 返回文字描述 OK
 - 本地图片 → 转 data URL → 识别成功 OK
@@ -256,4 +256,4 @@ MIT License。安全问题请通过 GitHub Issues 私密报告（https://github.
 | DSH 大版本（`ctx.llm` API 变化） | ✅ DSH 不崩；LLM 相关功能可能降级（适配器/流式），需适配 |
 | DSH 服务缺失 | ✅ 优雅降级（防御性编码） |
 
-**最后验证**：DSH `0.1.0-rc.6`（2026-08-16）。
+**最后验证**：DSH `0.1.0-rc.8`（2026-08-20，已在本机运行实例活体验证 paste 路由；autoRead 改用 rc.8 pre-step 载荷的 `payload.agent` 获取当前路由模型）。rc.8 起 DeepSeek 适配器支持原生图片请求，多模态模型场景下 autoRead 会自动放行不再代看。

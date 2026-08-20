@@ -575,8 +575,10 @@ function registerAutoRead(ctx, appConfig) {
     const decision = await next()
     if (decision.kind !== 'enter') return decision
     if (!decision.messages.some((message) => contentHasImage(message.content))) return decision
-    // 检测当前路由模型是否支持图片输入
-    const sessionCfg = decision.session?.requestHeader?.()?.config
+    // 检测当前路由模型是否支持图片输入。
+    // rc.7+ 的 pre-step 载荷带 `agent`（rc.8 文档化签名），这是拿到当前路由
+    // provider/model 的正确途径；decision.session 从来不存在，保留为兜底。
+    const sessionCfg = payload.agent?.session?.requestHeader?.()?.config ?? decision.session?.requestHeader?.()?.config
     const provider = sessionCfg?.provider
     const model = sessionCfg?.model
     let capable = false
