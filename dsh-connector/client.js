@@ -102,7 +102,8 @@ window.__ModuleLoader__.load({
       '.pm_chips{display:flex;gap:6px;flex-wrap:wrap}' +
       '.pm_chip{cursor:pointer;font:inherit;font-size:11.5px;padding:4px 12px;border-radius:999px;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.35));background:transparent;color:var(--dsw-alias-label-secondary,#9aa);transition:all .12s}' +
       '.pm_chip:hover{color:var(--dsw-alias-label-primary,#ddd);border-color:var(--dsw-alias-brand-primary,#5b8cff)}' +
-      '.pm_chip.active{background:var(--dsw-alias-brand-primary,#5b8cff);border-color:transparent;color:#fff}'
+      '.pm_chip.active{background:var(--dsw-alias-brand-primary,#5b8cff);border-color:transparent;color:#fff}' +
+      '.pm_chipToggle{color:var(--dsw-alias-brand-primary,#5b8cff);border-style:dashed}'
 
     if (typeof document !== 'undefined' && document.querySelector('style[data-plugin-css="@omdp/dsh-connector/section"]') === null) {
       var tag = document.createElement('style')
@@ -654,6 +655,13 @@ window.__ModuleLoader__.load({
       var _o = react.useState([])
       var mcpCats = _o[0]
       var setMcpCats = _o[1]
+      var _p = react.useState(false)
+      var mcpCatsOpen = _p[0]
+      var setMcpCatsOpen = _p[1]
+      // Collapsed state shows "all" + the top popular categories (the dolphin
+      // category table arrives in count-descending order); the toggle reveals
+      // the full taxonomy.
+      var visibleMcpCats = mcpCatsOpen || !mcpCats.length ? mcpCats : mcpCats.slice(0, 12)
 
       function findMcp(term, cat, page, append) {
         var q = (term !== undefined ? term : mcpSearch).trim()
@@ -774,13 +782,20 @@ window.__ModuleLoader__.load({
                   className: 'pm_chip' + (!mcpCat ? ' active' : ''),
                   onClick: function () { setMcpCat(''); findMcp(undefined, '', 1, false) },
                 }, '全部 ' + (mcpResult && mcpResult.total ? mcpResult.total.toLocaleString() : '')),
-                mcpCats.map(function (c) {
+                visibleMcpCats.map(function (c) {
                   return createElement('button', {
                     key: c.id,
                     className: 'pm_chip' + (mcpCat === c.id ? ' active' : ''),
                     onClick: function () { setMcpCat(c.id); findMcp(undefined, c.id, 1, false) },
                   }, MCP_CAT_LABEL_OF(c.id) + ' ' + c.count.toLocaleString())
                 }),
+                mcpCats.length > 12
+                  ? createElement('button', {
+                      key: 'toggle',
+                      className: 'pm_chip pm_chipToggle',
+                      onClick: function () { setMcpCatsOpen(!mcpCatsOpen) },
+                    }, mcpCatsOpen ? '收起 ▴' : '展开全部 ' + mcpCats.length + ' ▾')
+                  : null,
               ),
               mcpResult && mcpResult.total
                 ? createElement('div', { className: 'pm_meta' },
