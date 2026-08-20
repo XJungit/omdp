@@ -57,7 +57,7 @@ window.__ModuleLoader__.load({
       '.pm_badge.err{color:var(--dsw-alias-state-error-primary,#f87171)}' +
       /* buttons */
       '.pm_actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}' +
-      '.pm_btn{cursor:pointer;font:inherit;font-size:12px;padding:5px 12px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.4));background:transparent;color:inherit;transition:background .12s}' +
+      '.pm_btn{cursor:pointer;font:inherit;font-size:12px;padding:5px 12px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.4));background:transparent;color:inherit;transition:background .12s;flex:none}' +
       '.pm_btn:hover:not(:disabled){background:var(--dsw-alias-bg-layer-2,rgba(128,128,128,.14))}' +
       '.pm_btn:disabled{opacity:.45;cursor:default}' +
       '.pm_btn.primary{border-color:transparent;background:var(--dsw-alias-brand-primary,#5b8cff);color:#fff}' +
@@ -86,7 +86,7 @@ window.__ModuleLoader__.load({
       '.pm_empty{font-size:12px;color:var(--dsw-alias-label-secondary,#888);padding:10px 2px}' +
       '.pm_btnrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}' +
       /* market grid & icons */
-      '.pm_grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:2px}' +
+      '.pm_grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:2px;align-items:start}' +
       '@media(max-width:760px){.pm_grid{grid-template-columns:1fr}}' +
       '.pm_mcard{background:var(--dsw-alias-bg-layer-1,rgba(255,255,255,.035));border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.22));border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:8px;transition:background .15s,border-color .15s}' +
       '.pm_mcard:hover{background:var(--dsw-alias-bg-layer-2,rgba(255,255,255,.06));border-color:var(--dsw-alias-border-l2,rgba(128,128,128,.4))}' +
@@ -651,7 +651,15 @@ window.__ModuleLoader__.load({
             var d = mcpDetail[s.id]
             return createElement(McpMarketItem, {
               key: s.id, item: s, detail: d,
-              onOpen: function () { if (!d) openMcp(s.id) },
+              onOpen: function () {
+                if (d) {
+                  var next = Object.assign({}, mcpDetail)
+                  delete next[s.id]
+                  setMcpDetail(next)
+                } else {
+                  openMcp(s.id)
+                }
+              },
             })
           })
         : []
@@ -661,7 +669,15 @@ window.__ModuleLoader__.load({
             var d = skillDetail[s.id]
             return createElement(SkillMarketItem, {
               key: s.id, item: s, detail: d, skills: props.skills,
-              onOpen: function () { if (!d) openSkill(s.id) },
+              onOpen: function () {
+                if (d) {
+                  var next = Object.assign({}, skillDetail)
+                  delete next[s.id]
+                  setSkillDetail(next)
+                } else {
+                  openSkill(s.id)
+                }
+              },
               onChanged: props.onChanged,
             })
           })
@@ -761,14 +777,14 @@ window.__ModuleLoader__.load({
           createElement('button', { className: 'pm_btn', onClick: props.onOpen }, d ? '收起' : '详情'),
           d && configs.length
             ? createElement('button', { className: 'pm_btn primary', onClick: function () { copied.copy(cfgText) } },
-                copied.copied || '复制配置 Copy')
+                copied.copied || '复制配置')
             : null,
         ),
         d ? createElement('div', { className: 'pm_section', style: { marginTop: '4px' } },
           createElement('div', { className: 'pm_actions' },
             d.hosted ? badge('Hosted 官方托管', 'brand') : null,
             d.verified ? badge('已认证 Verified', 'brand') : null,
-            d.stars !== undefined && d.stars !== null ? badge('★ ' + fmtNum(d.stars), 'muted') : null,
+            d.stars > 0 ? badge('★ ' + fmtNum(d.stars), 'muted') : null,
           ),
           (d.envSchema && d.envSchema.length)
             ? createElement('div', { className: 'pm_meta' },
