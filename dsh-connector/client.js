@@ -566,6 +566,32 @@ window.__ModuleLoader__.load({
       return createElement('div', { className: 'pm_avatar' }, (props.label || '?').charAt(0))
     }
 
+    // Official ModelScope MCP plaza categories (mirrors the modelscope.cn/mcp
+// sidebar taxonomy; the open API returns them per item as lowercase ids).
+    var MCP_CATEGORIES = [
+      { id: '', label: '全部' },
+      { id: 'browser-automation', label: '浏览器自动化' },
+      { id: 'search', label: '搜索工具' },
+      { id: 'communication', label: '交流协作' },
+      { id: 'developer-tools', label: '开发者工具' },
+      { id: 'entertainment-and-media', label: '娱乐与媒体' },
+      { id: 'file-systems', label: '文件系统' },
+      { id: 'finance', label: '金融' },
+      { id: 'knowledge-and-memory', label: '知识与记忆' },
+      { id: 'location-services', label: '位置服务' },
+      { id: 'art-and-culture', label: '文化与艺术' },
+      { id: 'databases', label: '数据库' },
+      { id: 'version-control', label: '版本控制' },
+      { id: 'research-and-data', label: '数据研究' },
+      { id: 'image-and-video-processing', label: '图像视频' },
+      { id: 'calendar-management', label: '日历管理' },
+      { id: 'travel-and-transportation', label: '出行交通' },
+      { id: 'aigc', label: 'AIGC' },
+      { id: 'other', label: '其他' },
+    ]
+    var MCP_CAT_LABEL = {}
+    MCP_CATEGORIES.forEach(function (c) { if (c.id) MCP_CAT_LABEL[c.id] = c.label })
+
     function MarketPane(props) {
       var _a = react.useState('')
       var mcpSearch = _a[0]
@@ -600,26 +626,39 @@ window.__ModuleLoader__.load({
       var _k = react.useState('mcp')
       var sub = _k[0]
       var setSub = _k[1]
+      var _l = react.useState('')
+      var mcpCat = _l[0]
+      var setMcpCat = _l[1]
+      var _m = react.useState(1)
+      var mcpPage = _m[0]
+      var setMcpPage = _m[1]
+      var _n = react.useState(1)
+      var skillPage = _n[0]
+      var setSkillPage = _n[1]
 
-      function findMcp(term) {
+      function findMcp(term, page, append) {
         var q = (term !== undefined ? term : mcpSearch).trim()
+        var p = page || 1
         setMcpBusy(true)
         setErr('')
-        api('/market/mcp?search=' + encodeURIComponent(q), { method: 'GET' }).then(function (r) {
+        api('/market/mcp?search=' + encodeURIComponent(q) + '&page=' + p, { method: 'GET' }).then(function (r) {
           if (r && r.error) { setErr(r.error); setMcpResult(null); return }
-          setMcpResult(r)
+          setMcpResult(append && mcpResult ? Object.assign({}, r, { items: mcpResult.items.concat(r.items) }) : r)
+          setMcpPage(p)
         }).finally(function () { setMcpBusy(false) })
       }
-      function findSkills(term, cat) {
+      function findSkills(term, cat, page, append) {
         var q = (term !== undefined ? term : skillSearch).trim()
         var c = cat !== undefined ? cat : category
+        var p = page || 1
         setSkillBusy(true)
         setErr('')
-        var qs = '/market/skills?search=' + encodeURIComponent(q)
+        var qs = '/market/skills?search=' + encodeURIComponent(q) + '&page=' + p
         if (c) qs += '&category=' + encodeURIComponent(c)
         api(qs, { method: 'GET' }).then(function (r) {
           if (r && r.error) { setErr(r.error); setSkillResult(null); return }
-          setSkillResult(r)
+          setSkillResult(append && skillResult ? Object.assign({}, r, { items: skillResult.items.concat(r.items) }) : r)
+          setSkillPage(p)
         }).finally(function () { setSkillBusy(false) })
       }
       function openMcp(id) {
@@ -641,28 +680,34 @@ window.__ModuleLoader__.load({
 
       // Load the default (hot) lists right away so the tab never opens empty.
       react.useEffect(function () {
-        findMcp('')
-        findSkills('', '')
+        findMcp('', 1, false)
+        findSkills('', '', 1, false)
         // eslint-disable-next-line react-hooks/exhaustive-deps
       }, [])
 
-      var mcpRows = mcpResult && mcpResult.items
-        ? mcpResult.items.map(function (s) {
-            var d = mcpDetail[s.id]
-            return createElement(McpMarketItem, {
-              key: s.id, item: s, detail: d,
-              onOpen: function () {
-                if (d) {
-                  var next = Object.assign({}, mcpDetail)
-                  delete next[s.id]
-                  setMcpDetail(next)
-                } else {
-                  openMcp(s.id)
-                }
-              },
-            })
+      // Category filter for MCP happens client-side on the loaded pages: the
+      // open API has no server-side category filter (verified), so the badge
+      // below states the covered range honestly.
+      var loadedMcp = mcpResult && mcpResult.items ? mcpResult.items : []
+      var mcpRows = loadedMcp
+        .filter(function (s) {
+          return !mcpCat || (s.categories || []).some(function (c) { return String(c).toLowerCase() === mcpCat })
+        })
+        .map(function (s) {
+          var d = mcpDetail[s.id]
+          return createElement(McpMarketItem, {
+            key: s.id, item: s, detail: d,
+            onOpen: function () {
+              if (d) {
+                var next = Object.assign({}, mcpDetail)
+                delete next[s.id]
+                setMcpDetail(next)
+              } else {
+                openMcp(s.id)
+              }
+            },
           })
-        : []
+        })
 
       var skillRows = skillResult && skillResult.items
         ? skillResult.items.map(function (s) {
@@ -701,13 +746,34 @@ window.__ModuleLoader__.load({
                   placeholder: '搜索 MCP 服务，如 map / github / fetch Search…',
                   value: mcpSearch,
                   onChange: function (e) { setMcpSearch(e.target.value) },
-                  onKeyDown: function (e) { if (e.key === 'Enter') findMcp() },
+                  onKeyDown: function (e) { if (e.key === 'Enter') findMcp(undefined, 1, false) },
                 }),
-                createElement('button', { className: 'pm_btn primary', disabled: mcpBusy, onClick: function () { findMcp() } }, mcpBusy ? '搜索中…' : '搜索'),
+                createElement('button', { className: 'pm_btn primary', disabled: mcpBusy, onClick: function () { findMcp(undefined, 1, false) } }, mcpBusy ? '搜索中…' : '搜索'),
               ),
+              createElement('div', { className: 'pm_chips' },
+                MCP_CATEGORIES.map(function (c) {
+                  return createElement('button', {
+                    key: c.id || 'all',
+                    className: 'pm_chip' + (mcpCat === c.id ? ' active' : ''),
+                    onClick: function () { setMcpCat(c.id) },
+                  }, c.label)
+                }),
+              ),
+              mcpResult && mcpResult.total
+                ? createElement('div', { className: 'pm_meta' },
+                    '共 ' + mcpResult.total.toLocaleString() + ' 个 MCP 服务，已加载 ' + loadedMcp.length + ' 条' +
+                    (mcpCat ? ' · 分类筛选（已加载范围内）：' + MCP_CAT_LABEL[mcpCat] : '') +
+                    (mcpCat ? '，命中 ' + mcpRows.length + ' 条' : ''),
+                  )
+                : null,
               createElement('div', { className: 'pm_grid' }, mcpRows),
-              mcpResult && mcpResult.items && !mcpResult.items.length
+              mcpResult && mcpResult.items && !loadedMcp.length
                 ? createElement('div', { className: 'pm_empty' }, '没有匹配的 MCP 服务。No matching MCP servers.')
+                : null,
+              mcpResult && mcpResult.hasMore
+                ? createElement('div', { className: 'pm_actions', style: { justifyContent: 'center' } },
+                    createElement('button', { className: 'pm_btn', disabled: mcpBusy, onClick: function () { findMcp(mcpSearch, mcpPage + 1, true) } }, '加载更多 ' + mcpResult.total.toLocaleString() + ' 中已看 ' + loadedMcp.length),
+                  )
                 : null,
             )
           : createElement('div', { className: 'pm_section' },
@@ -716,22 +782,32 @@ window.__ModuleLoader__.load({
                   placeholder: '搜索技能，如 code-review / deploy Search…',
                   value: skillSearch,
                   onChange: function (e) { setSkillSearch(e.target.value) },
-                  onKeyDown: function (e) { if (e.key === 'Enter') findSkills() },
+                  onKeyDown: function (e) { if (e.key === 'Enter') findSkills(undefined, undefined, 1, false) },
                 }),
-                createElement('button', { className: 'pm_btn primary', disabled: skillBusy, onClick: function () { findSkills() } }, skillBusy ? '搜索中…' : '搜索'),
+                createElement('button', { className: 'pm_btn primary', disabled: skillBusy, onClick: function () { findSkills(undefined, undefined, 1, false) } }, skillBusy ? '搜索中…' : '搜索'),
               ),
               createElement('div', { className: 'pm_chips' },
                 SKILL_CATEGORIES.map(function (c) {
                   return createElement('button', {
                     key: c.id || 'all',
                     className: 'pm_chip' + (category === c.id ? ' active' : ''),
-                    onClick: function () { setCategory(c.id); findSkills(skillSearch, c.id) },
+                    onClick: function () { setCategory(c.id); setSkillPage(1); findSkills(skillSearch, c.id, 1, false) },
                   }, c.label)
                 }),
               ),
+              skillResult && skillResult.total
+                ? createElement('div', { className: 'pm_meta' },
+                    '共 ' + skillResult.total.toLocaleString() + ' 个技能，已加载 ' + (skillResult.items ? skillResult.items.length : 0) + ' 条',
+                  )
+                : null,
               createElement('div', { className: 'pm_grid' }, skillRows),
               skillResult && skillResult.items && !skillResult.items.length
                 ? createElement('div', { className: 'pm_empty' }, '没有匹配的技能。No matching skills.')
+                : null,
+              skillResult && skillResult.hasMore
+                ? createElement('div', { className: 'pm_actions', style: { justifyContent: 'center' } },
+                    createElement('button', { className: 'pm_btn', disabled: skillBusy, onClick: function () { findSkills(skillSearch, category, skillPage + 1, true) } }, '加载更多 ' + skillResult.total.toLocaleString() + ' 中已看 ' + skillResult.items.length),
+                  )
                 : null,
             ),
       )

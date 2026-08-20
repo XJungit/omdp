@@ -474,7 +474,7 @@ async function marketSkillsList(req, res, params) {
   const search = params.get('search')?.trim()
   const category = params.get('category')?.trim()
   const page = Math.max(1, Number(params.get('page')) || 1)
-  const qs = new URLSearchParams({ page_number: String(page), page_size: '20' })
+  const qs = new URLSearchParams({ page_number: String(page), page_size: '50' })
   if (search) qs.set('search', search)
   if (category) qs.set('filter.category', category)
   let data
@@ -497,7 +497,8 @@ async function marketSkillsList(req, res, params) {
     logo: s.logo_url,
     installed: local.some((l) => l.source === s.id),
   }))
-  return json(res, 200, { ok: true, items })
+  const total = Number(data?.data?.total) || items.length
+  return json(res, 200, { ok: true, items, total, page, hasMore: page * 50 < total })
 }
 
 // GET /api/market/skills/:id  (id is `@author/name`, may contain a slash)
@@ -543,7 +544,7 @@ async function marketSkillDetail(res, id) {
 async function marketMcpList(req, res, params) {
   const search = params.get('search')?.trim()
   const page = Math.max(1, Number(params.get('page')) || 1)
-  const body = { page_number: page, page_size: 20 }
+  const body = { page_number: page, page_size: 50 }
   if (search) body.search = search
   const key = `mcp?${JSON.stringify(body)}`
   let data
@@ -580,7 +581,8 @@ async function marketMcpList(req, res, params) {
     categories: s.categories,
     configured: localMatches.some((local) => local.includes(s.id.toLowerCase())),
   }))
-  return json(res, 200, { ok: true, items })
+  const total = Number(data?.data?.total_count) || items.length
+  return json(res, 200, { ok: true, items, total, page, hasMore: page * 50 < total })
 }
 
 // Reduce a JSONSchema env block to its variable list (never ship the raw
