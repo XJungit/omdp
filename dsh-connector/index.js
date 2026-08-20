@@ -26,6 +26,7 @@ import { spawnSync } from 'node:child_process'
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
+import { JSDOM, VirtualConsole } from 'jsdom'
 
 const API_PREFIX = '/connector/api'
 const SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
@@ -444,6 +445,7 @@ async function removeUserSkill(home, name) {
  * ───────────────────────────────────────────────────────────────────────── */
 
 const MARKET_BASE = process.env.DSH_CONNECTOR_MARKET ?? 'https://modelscope.cn/openapi/v1'
+const MARKET_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36'
 const MARKET_TTL = 30 * 60 * 1000 // 30 minutes in-process cache
 const marketCache = new Map()
 
@@ -463,6 +465,84 @@ async function marketFetch(key, path, init) {
 
 function marketError(res, error) {
   return json(res, 502, { error: `market unavailable: ${String(error?.message ?? error)}` })
+}
+
+/* ── ModelScope dolphin MCP API (the engine behind modelscope.cn/mcp) ──────
+ *
+ * The official plaza is a SPA whose data endpoint is
+ *   PUT https://www.modelscope.cn/api/v1/dolphin/mcpServers
+ * with body { PageSize, PageNumber, Query, Criterion } where category
+ * filtering is  Criterion: [{ Category:'Category', Predicate:'contains',
+ * StringValues:[categoryId] }]. The response carries
+ *   Data.McpServer.{McpServers[], TotalCount}   — paged list + exact total
+ *   Data.FiledAgg.Category                      — every category + exact count
+ * (this is what the sidebar numbers on the official site are).
+ *
+ * The endpoint sits behind an Alibaba WAF JS challenge (acw_sc__v2). A plain
+ * server request gets a challenge page back; the cookie is produced by
+ * executing that page. We run it in jsdom (deterministic, no browser needed)
+ * and cache the cookie for 30 minutes (the WAF's own max-age is 3600s).
+ */
+const DOLPHIN_URL = 'https://www.modelscope.cn/api/v1/dolphin/mcpServers'
+const WAF_TTL = 30 * 60 * 1000
+const dolphinCache = new Map()
+let wafCookie = null // { value, at }
+
+// Solve the acw_sc__v2 cookie by executing the challenge page in jsdom. The
+// challenge HTML arrives as the body of the WAF-blocked request itself (the
+// SPA shell on /mcp is NOT a challenge page and yields no cookie).
+async function solveWafFromChallenge(html) {
+  if (wafCookie && Date.now() - wafCookie.at < WAF_TTL) return wafCookie.value
+  const vc = new VirtualConsole()
+  vc.on('jsdomError', () => {}) // jsdom navigation is not implemented — that is expected here
+  const dom = new JSDOM(html, {
+    runScripts: 'dangerously',
+    pretendToBeVisual: true,
+    virtualConsole: vc,
+    url: 'https://www.modelscope.cn/',
+    beforeParse(window) {
+      for (const k of ['reload', 'replace', 'assign']) {
+        try { Object.defineProperty(window.location, k, { configurable: true, writable: true, value: () => {} }) } catch { /* noop */ }
+      }
+      window.open = () => null
+    },
+  })
+  await new Promise((resolve) => setTimeout(resolve, 1500))
+  const cookie = dom.window.document.cookie.match(/acw_sc__v2=([^;]+)/)
+  dom.window.close()
+  if (!cookie) throw new Error('WAF challenge did not yield a cookie')
+  wafCookie = { value: cookie[1], at: Date.now() }
+  return wafCookie.value
+}
+
+async function dolphinPut(body) {
+  const key = 'dolphin?' + JSON.stringify(body)
+  const hit = dolphinCache.get(key)
+  if (hit !== undefined && Date.now() - hit.at < MARKET_TTL) return hit.value
+  const attempt = async (cookie) => {
+    const res = await fetch(DOLPHIN_URL, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', 'user-agent': MARKET_UA, ...(cookie ? { cookie: `acw_sc__v2=${cookie}` } : {}) },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(15000),
+    })
+    const text = await res.text()
+    if (text.includes('acw_sc__v2') || text.includes('aliyunwaf')) return { challenge: text }
+    if (!res.ok) throw new Error(`dolphin returned HTTP ${res.status}`)
+    return JSON.parse(text)
+  }
+  // First try with the cached cookie; on a challenge page, solve from its HTML
+  // and retry exactly once with the fresh cookie.
+  let data = await attempt(wafCookie && Date.now() - wafCookie.at < WAF_TTL ? wafCookie.value : undefined)
+  if (data && data.challenge) {
+    wafCookie = null
+    const fresh = await solveWafFromChallenge(data.challenge)
+    data = await attempt(fresh)
+    if (data && data.challenge) throw new Error('WAF challenge loop (every attempt blocked)')
+  }
+  if (!data) throw new Error('dolphin request failed')
+  dolphinCache.set(key, { at: Date.now(), value: data })
+  return data
 }
 
 // Skill ids come back as `@author/name` and appear in URLs verbatim. Only
@@ -540,20 +620,20 @@ async function marketSkillDetail(res, id) {
   })
 }
 
-// GET /api/market/mcp?search=&page=
+// GET /api/market/mcp?search=&category=&page=
 async function marketMcpList(req, res, params) {
-  const search = params.get('search')?.trim()
+  const search = params.get('search')?.trim() ?? ''
+  const category = params.get('category')?.trim()
   const page = Math.max(1, Number(params.get('page')) || 1)
-  const body = { page_number: page, page_size: 50 }
-  if (search) body.search = search
-  const key = `mcp?${JSON.stringify(body)}`
+  const body = {
+    PageSize: 30,
+    PageNumber: page,
+    Query: search,
+    Criterion: category ? [{ Category: 'Category', Predicate: 'contains', StringValues: [category] }] : [],
+  }
   let data
   try {
-    data = await marketFetch(key, '/mcp/servers', {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    })
+    data = await dolphinPut(body)
   } catch (error) {
     return marketError(res, error)
   }
@@ -570,19 +650,27 @@ async function marketMcpList(req, res, params) {
   } catch {
     // patch missing/unreadable: no configured markers, market still works
   }
-  const items = (data?.data?.mcp_server_list ?? []).map((s) => ({
-    id: s.id,
-    name: s.chinese_name || s.name,
-    description: s.description,
-    publisher: s.publisher,
-    tags: s.tags,
-    logo: s.logo_url,
-    views: s.view_count,
-    categories: s.categories,
-    configured: localMatches.some((local) => local.includes(s.id.toLowerCase())),
+  const servers = data?.Data?.McpServer?.McpServers ?? []
+  const items = servers.map((s) => ({
+    id: s.Publisher, // `@author/name` — same shape the detail endpoint expects
+    name: s.ChineseName || s.Name || s.Publisher,
+    description: s.AbstractCN || s.Abstract || '',
+    publisher: s.Publisher,
+    tags: Array.isArray(s.Tags) ? s.Tags : [],
+    logo: s.FromSiteIcon || '',
+    views: s.ViewCount,
+    stars: s.Stars,
+    license: s.License || '',
+    hosted: !!s.Hosted,
+    verified: !!s.Verifed,
+    categories: Array.isArray(s.Category) ? s.Category : [],
+    configured: localMatches.some((local) => typeof s.Publisher === 'string' && local.includes(s.Publisher.toLowerCase())),
   }))
-  const total = Number(data?.data?.total_count) || items.length
-  return json(res, 200, { ok: true, items, total, page, hasMore: page * 50 < total })
+  const total = Number(data?.Data?.McpServer?.TotalCount) || items.length
+  const categories = (data?.Data?.FiledAgg?.Category ?? [])
+    .map((c) => ({ id: String(c.Value), count: Number(c.Count) || 0 }))
+    .filter((c) => c.id)
+  return json(res, 200, { ok: true, items, total, page, pageSize: 30, hasMore: page * 30 < total, categories })
 }
 
 // Reduce a JSONSchema env block to its variable list (never ship the raw

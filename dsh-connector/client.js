@@ -566,31 +566,47 @@ window.__ModuleLoader__.load({
       return createElement('div', { className: 'pm_avatar' }, (props.label || '?').charAt(0))
     }
 
-    // Official ModelScope MCP plaza categories (mirrors the modelscope.cn/mcp
-// sidebar taxonomy; the open API returns them per item as lowercase ids).
-    var MCP_CATEGORIES = [
-      { id: '', label: '全部' },
-      { id: 'browser-automation', label: '浏览器自动化' },
-      { id: 'search', label: '搜索工具' },
-      { id: 'communication', label: '交流协作' },
-      { id: 'developer-tools', label: '开发者工具' },
-      { id: 'entertainment-and-media', label: '娱乐与媒体' },
-      { id: 'file-systems', label: '文件系统' },
-      { id: 'finance', label: '金融' },
-      { id: 'knowledge-and-memory', label: '知识与记忆' },
-      { id: 'location-services', label: '位置服务' },
-      { id: 'art-and-culture', label: '文化与艺术' },
-      { id: 'databases', label: '数据库' },
-      { id: 'version-control', label: '版本控制' },
-      { id: 'research-and-data', label: '数据研究' },
-      { id: 'image-and-video-processing', label: '图像视频' },
-      { id: 'calendar-management', label: '日历管理' },
-      { id: 'travel-and-transportation', label: '出行交通' },
-      { id: 'aigc', label: 'AIGC' },
-      { id: 'other', label: '其他' },
-    ]
-    var MCP_CAT_LABEL = {}
-    MCP_CATEGORIES.forEach(function (c) { if (c.id) MCP_CAT_LABEL[c.id] = c.label })
+    // Chinese labels for the official ModelScope MCP plaza taxonomy (the
+    // dolphin API returns ~90 category ids with exact counts via FiledAgg;
+    // labels below are the sidebar names where they exist, sensible
+    // translations elsewhere, and the raw id as a fallback).
+    var MCP_CAT_LABEL = {
+      'developer-tools': '开发者工具', search: '搜索工具', 'calendar-management': '日程管理',
+      other: '其他', 'browser-automation': '浏览器自动化', 'knowledge-and-memory': '知识管理',
+      communication: '交流协作', 'research-and-data': '学术研究', databases: '数据库',
+      'app-automation': '应用自动化', finance: '金融', 'file-systems': '文件系统',
+      'entertainment-and-media': '娱乐与多媒体', 'cloud-platforms': '云平台', 'os-automation': '系统自动化',
+      'rag-systems': 'RAG 系统', 'image-and-video-processing': '图像视频', 'autonomous-agents': '自主智能体',
+      'note-taking': '笔记记录', 'version-control': '版本控制', 'location-services': '位置服务',
+      monitoring: '监控', 'agent-orchestration': 'Agent 编排', 'security-and-iam': '安全与身份',
+      'code-execution': '代码执行', 'web-scraping': '网页抓取', 'content-management-systems': '内容管理',
+      'documentation-access': '文档访问', 'art-and-culture': '文化与艺术', 'social-media': '社交媒体',
+      virtualization: '虚拟化', 'project-management': '项目管理', 'code-analysis': '代码分析',
+      'ecommerce-and-retail': '电商零售', 'multimedia-processing': '多媒体处理',
+      'travel-and-transportation': '出行交通', 'customer-data-platforms': '客户数据平台',
+      marketing: '营销', 'cloud-storage': '云存储', 'education-and-learning-tools': '教育学习',
+      'testing-and-qa-tools': '测试质检', 'home-automation-and-iot': '家居物联网', 'shell-access': 'Shell 访问',
+      'command-line': '命令行', 'api-testing': 'API 测试', 'ci-cd': 'CI/CD', 'vector-databases': '向量数据库',
+      'games-and-gamification': '游戏化', 'speech-processing': '语音处理', 'health-and-wellness': '健康',
+      'text-summarization': '文本摘要', 'customer-and-marketing': '客户营销', 'weather-services': '天气服务',
+      observability: '可观测性', 'data-platforms': '数据平台', 'customer-support': '客户支持',
+      'open-data': '开放数据', blockchain: '区块链', 'government-data': '政务数据',
+      'coding-agents': '编程智能体', 'audio-processing': '音频处理', 'penetration-testing': '渗透测试',
+      cryptocurrency: '加密货币', 'language-translation': '语言翻译', 'text-to-speech': '语音合成',
+      'erp-systems': '企业 ERP', 'fitness-tracking': '健身追踪', 'legal-and-compliance': '法律合规',
+      'biology-and-medicine': '生物医学', 'software-architecture': '软件架构', AIGC: 'AIGC',
+      bioinformatics: '生物信息', 'home-automation': '家居自动化', security: '安全', sports: '体育',
+      transportation: '交通运输', productivity: '生产力工具', 'feature-flags': '特性开关', education: '教育',
+      'weather-and-climate': '天气气候', 'health-and-fitness': '健康健身', 'real-estate': '房地产',
+      'fitness-and-sports': '健身运动', 'network-services': '网络服务', healthcare: '医疗保健',
+      'sports-and-recreation': '运动休闲', 'Knowledge&Memory': '知识管理', weather: '天气', travel: '出行',
+      DeveloperTools: '开发者工具', 'network-monitoring': '网络监控', fitness: '健身',
+      'Research&Data': '学术研究', 'travel-services': '出行服务', health: '健康',
+      'research-an-data': '学术研究', 'aerospace-and-astrodynamics': '航空航天', data: '数据',
+      'security-and-compliance': '安全合规', gaming: '游戏', 'workplace-and-productivity': '工作生产力',
+      web3: 'Web3',
+    }
+    var MCP_CAT_LABEL_OF = function (id) { return MCP_CAT_LABEL[id] || id }
 
     function MarketPane(props) {
       var _a = react.useState('')
@@ -635,14 +651,19 @@ window.__ModuleLoader__.load({
       var _n = react.useState(1)
       var skillPage = _n[0]
       var setSkillPage = _n[1]
+      var _o = react.useState([])
+      var mcpCats = _o[0]
+      var setMcpCats = _o[1]
 
-      function findMcp(term, page, append) {
+      function findMcp(term, cat, page, append) {
         var q = (term !== undefined ? term : mcpSearch).trim()
+        var c = cat !== undefined ? cat : mcpCat
         var p = page || 1
         setMcpBusy(true)
         setErr('')
-        api('/market/mcp?search=' + encodeURIComponent(q) + '&page=' + p, { method: 'GET' }).then(function (r) {
+        api('/market/mcp?search=' + encodeURIComponent(q) + '&page=' + p + (c ? '&category=' + encodeURIComponent(c) : ''), { method: 'GET' }).then(function (r) {
           if (r && r.error) { setErr(r.error); setMcpResult(null); return }
+          if (!c) setMcpCats(r.categories || []) // unfiltered responses carry the global category table
           setMcpResult(append && mcpResult ? Object.assign({}, r, { items: mcpResult.items.concat(r.items) }) : r)
           setMcpPage(p)
         }).finally(function () { setMcpBusy(false) })
@@ -680,19 +701,16 @@ window.__ModuleLoader__.load({
 
       // Load the default (hot) lists right away so the tab never opens empty.
       react.useEffect(function () {
-        findMcp('', 1, false)
+        findMcp('', '', 1, false)
         findSkills('', '', 1, false)
         // eslint-disable-next-line react-hooks/exhaustive-deps
       }, [])
 
-      // Category filter for MCP happens client-side on the loaded pages: the
-      // open API has no server-side category filter (verified), so the badge
-      // below states the covered range honestly.
+      // Category filtering is server-side (dolphin Criterion); the response
+      // total already reflects the chosen category and the item list arrives
+      // pre-filtered with exact counts (FiledAgg) mirrored on the chips.
       var loadedMcp = mcpResult && mcpResult.items ? mcpResult.items : []
       var mcpRows = loadedMcp
-        .filter(function (s) {
-          return !mcpCat || (s.categories || []).some(function (c) { return String(c).toLowerCase() === mcpCat })
-        })
         .map(function (s) {
           var d = mcpDetail[s.id]
           return createElement(McpMarketItem, {
@@ -746,24 +764,29 @@ window.__ModuleLoader__.load({
                   placeholder: '搜索 MCP 服务，如 map / github / fetch Search…',
                   value: mcpSearch,
                   onChange: function (e) { setMcpSearch(e.target.value) },
-                  onKeyDown: function (e) { if (e.key === 'Enter') findMcp(undefined, 1, false) },
+                  onKeyDown: function (e) { if (e.key === 'Enter') findMcp(undefined, undefined, 1, false) },
                 }),
-                createElement('button', { className: 'pm_btn primary', disabled: mcpBusy, onClick: function () { findMcp(undefined, 1, false) } }, mcpBusy ? '搜索中…' : '搜索'),
+                createElement('button', { className: 'pm_btn primary', disabled: mcpBusy, onClick: function () { findMcp(undefined, undefined, 1, false) } }, mcpBusy ? '搜索中…' : '搜索'),
               ),
               createElement('div', { className: 'pm_chips' },
-                MCP_CATEGORIES.map(function (c) {
+                createElement('button', {
+                  key: 'all',
+                  className: 'pm_chip' + (!mcpCat ? ' active' : ''),
+                  onClick: function () { setMcpCat(''); findMcp(undefined, '', 1, false) },
+                }, '全部 ' + (mcpResult && mcpResult.total ? mcpResult.total.toLocaleString() : '')),
+                mcpCats.map(function (c) {
                   return createElement('button', {
-                    key: c.id || 'all',
+                    key: c.id,
                     className: 'pm_chip' + (mcpCat === c.id ? ' active' : ''),
-                    onClick: function () { setMcpCat(c.id) },
-                  }, c.label)
+                    onClick: function () { setMcpCat(c.id); findMcp(undefined, c.id, 1, false) },
+                  }, MCP_CAT_LABEL_OF(c.id) + ' ' + c.count.toLocaleString())
                 }),
               ),
               mcpResult && mcpResult.total
                 ? createElement('div', { className: 'pm_meta' },
-                    '共 ' + mcpResult.total.toLocaleString() + ' 个 MCP 服务，已加载 ' + loadedMcp.length + ' 条' +
-                    (mcpCat ? ' · 分类筛选（已加载范围内）：' + MCP_CAT_LABEL[mcpCat] : '') +
-                    (mcpCat ? '，命中 ' + mcpRows.length + ' 条' : ''),
+                    (mcpCat
+                      ? '分类 ' + MCP_CAT_LABEL_OF(mcpCat) + '：共 ' + mcpResult.total.toLocaleString() + ' 个 MCP 服务'
+                      : '共 ' + mcpResult.total.toLocaleString() + ' 个 MCP 服务，已加载 ' + loadedMcp.length + ' 条'),
                   )
                 : null,
               createElement('div', { className: 'pm_grid' }, mcpRows),
@@ -772,7 +795,7 @@ window.__ModuleLoader__.load({
                 : null,
               mcpResult && mcpResult.hasMore
                 ? createElement('div', { className: 'pm_actions', style: { justifyContent: 'center' } },
-                    createElement('button', { className: 'pm_btn', disabled: mcpBusy, onClick: function () { findMcp(mcpSearch, mcpPage + 1, true) } }, '加载更多 ' + mcpResult.total.toLocaleString() + ' 中已看 ' + loadedMcp.length),
+                    createElement('button', { className: 'pm_btn', disabled: mcpBusy, onClick: function () { findMcp(mcpSearch, mcpCat, mcpPage + 1, true) } }, '加载更多 ' + mcpResult.total.toLocaleString() + ' 中已看 ' + loadedMcp.length),
                   )
                 : null,
             )
