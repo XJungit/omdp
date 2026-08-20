@@ -84,7 +84,25 @@ window.__ModuleLoader__.load({
       '.pm_err{color:var(--dsw-alias-state-error-primary,#f87171);font-size:12px}' +
       '.pm_ok{color:var(--dsw-alias-state-success-primary,#4ade80);font-size:12px}' +
       '.pm_empty{font-size:12px;color:var(--dsw-alias-label-secondary,#888);padding:10px 2px}' +
-      '.pm_btnrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}'
+      '.pm_btnrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}' +
+      /* market grid & icons */
+      '.pm_grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:2px}' +
+      '@media(max-width:760px){.pm_grid{grid-template-columns:1fr}}' +
+      '.pm_mcard{background:var(--dsw-alias-bg-layer-1,rgba(255,255,255,.035));border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.22));border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:8px;transition:background .15s,border-color .15s}' +
+      '.pm_mcard:hover{background:var(--dsw-alias-bg-layer-2,rgba(255,255,255,.06));border-color:var(--dsw-alias-border-l2,rgba(128,128,128,.4))}' +
+      '.pm_mhead{display:flex;align-items:center;gap:10px;min-width:0}' +
+      '.pm_icon{width:38px;height:38px;border-radius:10px;flex:none;object-fit:cover;background:var(--dsw-alias-bg-layer-2,#333);border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.25))}' +
+      '.pm_avatar{width:38px;height:38px;border-radius:10px;flex:none;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px;color:#fff;background:linear-gradient(135deg,var(--dsw-alias-brand-primary,#5b8cff),#a06bff);text-transform:uppercase}' +
+      '.pm_mtitle{min-width:0;flex:1}' +
+      '.pm_mname{font-weight:600;font-size:13.5px;color:var(--dsw-alias-label-primary,#eee);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:6px}' +
+      '.pm_mid{font-size:11px;color:var(--dsw-alias-label-secondary,#9aa);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+      '.pm_stats{display:flex;gap:12px;flex-wrap:wrap}' +
+      '.pm_stat{font-size:11.5px;color:var(--dsw-alias-label-secondary,#9aa);display:inline-flex;align-items:center;gap:4px}' +
+      '.pm_stat b{font-weight:600;color:var(--dsw-alias-label-primary,#ddd)}' +
+      '.pm_chips{display:flex;gap:6px;flex-wrap:wrap}' +
+      '.pm_chip{cursor:pointer;font:inherit;font-size:11.5px;padding:4px 12px;border-radius:999px;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.35));background:transparent;color:var(--dsw-alias-label-secondary,#9aa);transition:all .12s}' +
+      '.pm_chip:hover{color:var(--dsw-alias-label-primary,#ddd);border-color:var(--dsw-alias-brand-primary,#5b8cff)}' +
+      '.pm_chip.active{background:var(--dsw-alias-brand-primary,#5b8cff);border-color:transparent;color:#fff}'
 
     if (typeof document !== 'undefined' && document.querySelector('style[data-plugin-css="@omdp/dsh-connector/section"]') === null) {
       var tag = document.createElement('style')
@@ -502,6 +520,52 @@ window.__ModuleLoader__.load({
 
     /* ─────────────────────────── marketplace ─────────────────────────── */
 
+    // 12 official ModelScope skill categories (skills-center.md taxonomy).
+    var SKILL_CATEGORIES = [
+      { id: '', label: '全部' },
+      { id: 'developer-tools', label: '开发者工具' },
+      { id: 'code-quality-testing', label: '代码质量' },
+      { id: 'ai-media', label: 'AI 媒体' },
+      { id: 'frontend-development', label: '前端开发' },
+      { id: 'cloud-devops', label: '云与运维' },
+      { id: 'ai-automation', label: 'AI 自动化' },
+      { id: 'analytics', label: '数据分析' },
+      { id: 'doc-processing', label: '文档处理' },
+      { id: 'skill-management', label: '技能管理' },
+      { id: 'mobile-development', label: '移动开发' },
+      { id: 'marketing-seo', label: '营销 SEO' },
+      { id: 'other', label: '其他' },
+    ]
+
+    // 12438 -> "12.4k", 987654 -> "987.7k", 1.2e7 -> "12.0M"
+    function fmtNum(n) {
+      var v = Number(n)
+      if (!isFinite(v)) return ''
+      if (v >= 1e8) return (v / 1e8).toFixed(1).replace(/\.0$/, '') + '亿'
+      if (v >= 1e6) return (v / 1e6).toFixed(1).replace(/\.0$/, '') + 'M'
+      if (v >= 1e3) return (v / 1e3).toFixed(1).replace(/\.0$/, '') + 'k'
+      return String(v)
+    }
+
+    var SKILL_CAT_LABEL = {}
+    SKILL_CATEGORIES.forEach(function (c) { if (c.id) SKILL_CAT_LABEL[c.id] = c.label })
+    function catLabel(id) { return SKILL_CAT_LABEL[id] || id }
+
+    function MarketIcon(props) {
+      var _a = react.useState(true)
+      var ok = _a[0]
+      var setOk = _a[1]
+      if (props.logo && ok) {
+        return createElement('img', {
+          className: 'pm_icon',
+          src: props.logo,
+          alt: '',
+          onError: function () { setOk(false) },
+        })
+      }
+      return createElement('div', { className: 'pm_avatar' }, (props.label || '?').charAt(0))
+    }
+
     function MarketPane(props) {
       var _a = react.useState('')
       var mcpSearch = _a[0]
@@ -530,19 +594,30 @@ window.__ModuleLoader__.load({
       var _i = react.useState('')
       var err = _i[0]
       var setErr = _i[1]
+      var _j = react.useState('')
+      var category = _j[0]
+      var setCategory = _j[1]
+      var _k = react.useState('mcp')
+      var sub = _k[0]
+      var setSub = _k[1]
 
-      function findMcp() {
+      function findMcp(term) {
+        var q = (term !== undefined ? term : mcpSearch).trim()
         setMcpBusy(true)
         setErr('')
-        api('/market/mcp?search=' + encodeURIComponent(mcpSearch.trim()), { method: 'GET' }).then(function (r) {
+        api('/market/mcp?search=' + encodeURIComponent(q), { method: 'GET' }).then(function (r) {
           if (r && r.error) { setErr(r.error); setMcpResult(null); return }
           setMcpResult(r)
         }).finally(function () { setMcpBusy(false) })
       }
-      function findSkills() {
+      function findSkills(term, cat) {
+        var q = (term !== undefined ? term : skillSearch).trim()
+        var c = cat !== undefined ? cat : category
         setSkillBusy(true)
         setErr('')
-        api('/market/skills?search=' + encodeURIComponent(skillSearch.trim()), { method: 'GET' }).then(function (r) {
+        var qs = '/market/skills?search=' + encodeURIComponent(q)
+        if (c) qs += '&category=' + encodeURIComponent(c)
+        api(qs, { method: 'GET' }).then(function (r) {
           if (r && r.error) { setErr(r.error); setSkillResult(null); return }
           setSkillResult(r)
         }).finally(function () { setSkillBusy(false) })
@@ -563,6 +638,13 @@ window.__ModuleLoader__.load({
           setSkillDetail(next)
         })
       }
+
+      // Load the default (hot) lists right away so the tab never opens empty.
+      react.useEffect(function () {
+        findMcp('')
+        findSkills('', '')
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+      }, [])
 
       var mcpRows = mcpResult && mcpResult.items
         ? mcpResult.items.map(function (s) {
@@ -591,33 +673,55 @@ window.__ModuleLoader__.load({
           '浏览魔搭社区（ModelScope）技能中心与 MCP 广场。列表数据缓存在 DSH 进程内存（30 分钟），不写任何文件；安装/部署请复制命令自行执行。Browse ModelScope Skills Center & MCP Plaza; cached in-process only, nothing saved to disk.'),
         err ? createElement('div', { className: 'pm_err' }, err) : null,
 
-        createElement('div', { className: 'pm_groupHead' }, 'MCP 市场 MCP Plaza'),
-        createElement('div', { className: 'pm_search' },
-          createElement('input', {
-            placeholder: '搜索 MCP 服务，如 map / github / fetch Search…',
-            value: mcpSearch,
-            onChange: function (e) { setMcpSearch(e.target.value) },
-            onKeyDown: function (e) { if (e.key === 'Enter') findMcp() },
-          }),
-          createElement('button', { className: 'pm_btn primary', disabled: mcpBusy, onClick: findMcp }, mcpBusy ? '搜索中…' : '搜索'),
+        createElement('div', { className: 'pm_chips', style: { margin: '2px 0 4px' } },
+          createElement('button', { className: 'pm_chip' + (sub === 'mcp' ? ' active' : ''), onClick: function () { setSub('mcp') } }, 'MCP 市场'),
+          createElement('button', { className: 'pm_chip' + (sub === 'skills' ? ' active' : ''), onClick: function () { setSub('skills') } }, 'Skills 市场'),
         ),
-        mcpRows.length ? mcpRows : (mcpResult ? createElement('div', { className: 'pm_empty' }, '没有匹配的 MCP 服务。No matching MCP servers.') : null),
 
-        createElement('div', { className: 'pm_groupHead', style: { marginTop: '18px' } }, 'Skills 市场 Skills Center'),
-        createElement('div', { className: 'pm_search' },
-          createElement('input', {
-            placeholder: '搜索技能，如 code-review / deploy Search…',
-            value: skillSearch,
-            onChange: function (e) { setSkillSearch(e.target.value) },
-            onKeyDown: function (e) { if (e.key === 'Enter') findSkills() },
-          }),
-          createElement('button', { className: 'pm_btn primary', disabled: skillBusy, onClick: findSkills }, skillBusy ? '搜索中…' : '搜索'),
-        ),
-        skillRows.length ? skillRows : (skillResult ? createElement('div', { className: 'pm_empty' }, '没有匹配的技能。No matching skills.') : null),
+        sub === 'mcp'
+          ? createElement('div', { className: 'pm_section' },
+              createElement('div', { className: 'pm_search' },
+                createElement('input', {
+                  placeholder: '搜索 MCP 服务，如 map / github / fetch Search…',
+                  value: mcpSearch,
+                  onChange: function (e) { setMcpSearch(e.target.value) },
+                  onKeyDown: function (e) { if (e.key === 'Enter') findMcp() },
+                }),
+                createElement('button', { className: 'pm_btn primary', disabled: mcpBusy, onClick: function () { findMcp() } }, mcpBusy ? '搜索中…' : '搜索'),
+              ),
+              createElement('div', { className: 'pm_grid' }, mcpRows),
+              mcpResult && mcpResult.items && !mcpResult.items.length
+                ? createElement('div', { className: 'pm_empty' }, '没有匹配的 MCP 服务。No matching MCP servers.')
+                : null,
+            )
+          : createElement('div', { className: 'pm_section' },
+              createElement('div', { className: 'pm_search' },
+                createElement('input', {
+                  placeholder: '搜索技能，如 code-review / deploy Search…',
+                  value: skillSearch,
+                  onChange: function (e) { setSkillSearch(e.target.value) },
+                  onKeyDown: function (e) { if (e.key === 'Enter') findSkills() },
+                }),
+                createElement('button', { className: 'pm_btn primary', disabled: skillBusy, onClick: function () { findSkills() } }, skillBusy ? '搜索中…' : '搜索'),
+              ),
+              createElement('div', { className: 'pm_chips' },
+                SKILL_CATEGORIES.map(function (c) {
+                  return createElement('button', {
+                    key: c.id || 'all',
+                    className: 'pm_chip' + (category === c.id ? ' active' : ''),
+                    onClick: function () { setCategory(c.id); findSkills(skillSearch, c.id) },
+                  }, c.label)
+                }),
+              ),
+              createElement('div', { className: 'pm_grid' }, skillRows),
+              skillResult && skillResult.items && !skillResult.items.length
+                ? createElement('div', { className: 'pm_empty' }, '没有匹配的技能。No matching skills.')
+                : null,
+            ),
       )
     }
 
-    // One MCP market entry with a lazy detail panel.
+    // One MCP market entry — 2-col grid card with icon, lazy detail panel.
     function McpMarketItem(props) {
       var item = props.item
       var d = props.detail
@@ -632,30 +736,39 @@ window.__ModuleLoader__.load({
         cfgText = JSON.stringify(sel, null, 2)
       }
 
-      return createElement('div', { className: 'pm_card', key: item.id },
-        createElement('div', { className: 'pm_cardHead' },
-          createElement('span', { className: 'pm_name' }, item.name || item.id),
-          item.configured ? badge('已配置', 'ok') : null,
-          badge(item.id, 'muted'),
+      return createElement('div', { className: 'pm_mcard', key: item.id },
+        createElement('div', { className: 'pm_mhead' },
+          createElement(MarketIcon, { logo: item.logo, label: (item.name || item.id).charAt(0) }),
+          createElement('div', { className: 'pm_mtitle' },
+            createElement('div', { className: 'pm_mname' },
+              item.name || item.id,
+              item.configured ? badge('已配置', 'ok') : null,
+            ),
+            createElement('div', { className: 'pm_mid' }, item.id),
+          ),
         ),
         createElement('div', { className: 'pm_desc' }, item.description || ''),
-        createElement('div', { className: 'pm_meta' },
-          'by ' + (item.publisher || '—'),
-          item.views !== undefined ? ' · ' + item.views + ' 浏览' : '',
+        createElement('div', { className: 'pm_stats' },
+          createElement('span', { className: 'pm_stat' }, 'by ', createElement('b', null, item.publisher || '—')),
+          item.views !== undefined
+            ? createElement('span', { className: 'pm_stat' }, '👁 ', createElement('b', null, fmtNum(item.views)))
+            : null,
+          (item.categories && item.categories.length)
+            ? createElement('span', { className: 'pm_stat' }, createElement('b', null, item.categories.slice(0, 2).join(' / ')))
+            : null,
         ),
         createElement('div', { className: 'pm_actions' },
           createElement('button', { className: 'pm_btn', onClick: props.onOpen }, d ? '收起' : '详情'),
           d && configs.length
             ? createElement('button', { className: 'pm_btn primary', onClick: function () { copied.copy(cfgText) } },
-                copied.copied || '复制配置 Copy config')
+                copied.copied || '复制配置 Copy')
             : null,
         ),
         d ? createElement('div', { className: 'pm_section', style: { marginTop: '4px' } },
           createElement('div', { className: 'pm_actions' },
             d.hosted ? badge('Hosted 官方托管', 'brand') : null,
             d.verified ? badge('已认证 Verified', 'brand') : null,
-            d.stars !== undefined && d.stars !== null ? badge('★ ' + d.stars, 'muted') : null,
-            (d.categories && d.categories.length) ? badge(d.categories.slice(0, 3).join(' / '), 'muted') : null,
+            d.stars !== undefined && d.stars !== null ? badge('★ ' + fmtNum(d.stars), 'muted') : null,
           ),
           (d.envSchema && d.envSchema.length)
             ? createElement('div', { className: 'pm_meta' },
@@ -671,7 +784,12 @@ window.__ModuleLoader__.load({
           configs.length
             ? createElement('div', { className: 'pm_section' },
                 configs.length > 1
-                  ? selectField('配置变体 Config variant', variant === null ? 0 : variant, configs.map(function (_, i) { return 'variant ' + (i + 1) }), function (i) { setVariant(Number(i)) })
+                  ? createElement('label', null,
+                      '配置变体 Config variant',
+                      createElement('select', { value: variant === null ? 0 : variant, onChange: function (e) { setVariant(Number(e.target.value)) } },
+                        configs.map(function (_, i) { return createElement('option', { value: i, key: i }, 'variant ' + (i + 1)) }),
+                      ),
+                    )
                   : null,
                 createElement('div', { className: 'pm_code' }, cfgText),
               )
@@ -682,7 +800,7 @@ window.__ModuleLoader__.load({
       )
     }
 
-    // One market skill entry with install commands and local "record source".
+    // One market skill entry — grid card, install commands, record-source link.
     function SkillMarketItem(props) {
       var item = props.item
       var d = props.detail
@@ -714,26 +832,34 @@ window.__ModuleLoader__.load({
         })
       }
 
-      return createElement('div', { className: 'pm_card', key: item.id },
-        createElement('div', { className: 'pm_cardHead' },
-          createElement('span', { className: 'pm_name' }, item.name || item.id),
-          item.installed || alreadyLinked ? badge('已安装', 'ok') : null,
-          item.developer ? badge('by ' + item.developer, 'muted') : null,
-          item.category ? badge(item.category, 'muted') : null,
+      return createElement('div', { className: 'pm_mcard', key: item.id },
+        createElement('div', { className: 'pm_mhead' },
+          createElement(MarketIcon, { logo: item.logo, label: (item.name || item.id).charAt(0) }),
+          createElement('div', { className: 'pm_mtitle' },
+            createElement('div', { className: 'pm_mname' },
+              item.name || item.id,
+              item.installed || alreadyLinked ? badge('已安装', 'ok') : null,
+              d && d.updateAvailable ? badge('有更新', 'warn') : null,
+            ),
+            createElement('div', { className: 'pm_mid' }, item.id),
+          ),
         ),
         createElement('div', { className: 'pm_desc' }, item.description || ''),
-        createElement('div', { className: 'pm_meta' },
-          item.downloads !== undefined ? item.downloads + ' 下载' : '',
-          item.views !== undefined ? ' · ' + item.views + ' 浏览' : '',
-          item.license ? ' · ' + item.license : '',
+        createElement('div', { className: 'pm_stats' },
+          item.downloads !== undefined
+            ? createElement('span', { className: 'pm_stat' }, '⬇ ', createElement('b', null, fmtNum(item.downloads)), ' 下载')
+            : createElement('span', { className: 'pm_stat' }, 'by ', createElement('b', null, item.developer || '—')),
+          item.views !== undefined
+            ? createElement('span', { className: 'pm_stat' }, '👁 ', createElement('b', null, fmtNum(item.views)))
+            : null,
+          item.category ? createElement('span', { className: 'pm_stat' }, createElement('b', null, catLabel(item.category))) : null,
         ),
         createElement('div', { className: 'pm_actions' },
           createElement('button', { className: 'pm_btn', onClick: props.onOpen }, d ? '收起' : '详情'),
-          d && d.updateAvailable ? badge('有更新', 'warn') : null,
         ),
         d ? createElement('div', { className: 'pm_section', style: { marginTop: '4px' } },
           createElement('div', { className: 'pm_meta' },
-            '市场更新时间 Market modified: ' + (d.fileModified || '—'),
+            '市场更新 Market modified: ' + (d.fileModified || '—'),
             d.localSkill ? ' · 本地记录: ' + d.localSkill.sourceUpdated : '',
           ),
           installs.length
@@ -750,7 +876,12 @@ window.__ModuleLoader__.load({
           alreadyLinked
             ? createElement('div', { className: 'pm_ok' }, '已关联到本地技能 ✓ Linked to a local skill.')
             : createElement('div', { className: 'pm_btnrow' },
-                selectField('关联本地技能 Link to local skill', target || '', props.skills.map(function (s) { return s.name }), setTarget),
+                createElement('label', { style: { fontSize: 12, color: 'var(--dsw-alias-label-secondary,#9aa)' } },
+                  '关联本地技能 Link to local skill',
+                  createElement('select', { value: target || '', onChange: function (e) { setTarget(e.target.value) } },
+                    props.skills.map(function (s) { return createElement('option', { value: s.name, key: s.name }, s.name) }),
+                  ),
+                ),
                 createElement('button', { className: 'pm_btn', onClick: recordSource }, '记录来源 Record source'),
               ),
           linkErr ? createElement('div', { className: 'pm_err' }, linkErr) : null,
