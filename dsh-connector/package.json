@@ -1,7 +1,7 @@
 {
   "name": "@omdp/dsh-connector",
-  "version": "0.1.2",
-  "description": "Unified DeepSeek Harness connector: edit MCP servers (cordis.patch.yml) and user skills (~/.dsh/skills) from one Web UI settings page.",
+  "version": "0.2.0",
+  "description": "Unified DeepSeek Harness connector: edit MCP servers (cordis.patch.yml), user skills (~/.dsh/skills) and browse the ModelScope MCP/Skills marketplaces from one Web UI settings page.",
   "type": "module",
   "main": "index.js",
   "exports": {

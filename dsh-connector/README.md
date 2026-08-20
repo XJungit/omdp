@@ -2,12 +2,18 @@
 
 ## Overview
 
-把 **MCP 服务器** 和 **用户 Skills** 的管理合并到 DSH Web UI 的同一个设置页
-（设置页标签：**Connector**）。适合需要在 DSH 里频繁增删改 MCP server / skills、
-又不想手改 `cordis.patch.yml` 的用户。
+把 **MCP 服务器**、**用户 Skills** 的管理和 **魔搭（ModelScope）市场浏览**
+合并到 DSH Web UI 的同一个设置页（设置页标签：**Connector**）。适合需要在
+DSH 里频繁增删改 MCP server / skills、又不想手改 `cordis.patch.yml` 的用户。
 
 - **MCP**：读取/编辑 `profiles/web/cordis.patch.yml` 中的 `mcp-*` 块（结构化表单）。保存后**重启 `dsh` 生效**。
 - **Skills**：列出/查看/编辑/删除 `~/.dsh/skills` 下的 `SKILL.md`。保存**即时生效**（filesystem provider 自动重新发现）。
+- **市场探索（0.2.0 新增）**：只读浏览魔搭社区 [Skills 中心](https://modelscope.cn/skills) 与 [MCP 广场](https://modelscope.cn/mcp)（匿名 OpenAPI，无需密钥）。
+  - 列表/详情：名称、作者、分类、下载/浏览数、认证标识（Hosted 官方托管 / 已认证）
+  - **一键复制** skill 安装命令（`npx / curl / modelscope` 三种）与 MCP 配置片段（`server_config` 的 `mcpServers` JSON）
+  - **Skill 更新提示**：把本地 skill 关联市场条目（写入 frontmatter 的 `source`/`sourceUpdated`）后，「检查更新」比对市场 `file_last_modified` 标出"有更新/最新"
+  - **零落盘**：市场数据只存在 DSH 进程内存（30 分钟 TTL 缓存），重启即清，从不写文件
+  - MCP 为部署模式、无版本概念，不提供更新提示（仅浏览与复制配置）
 
 设计上复用官方两款参考插件的方式：
 - 设置页槽位注册方式参照 [`dsh-mcp-manager`](https://github.com/hyqhyq3/dsh-mcp-manager)（`settings.section` + Package 私有 HTTP API）。
@@ -133,6 +139,13 @@ pnpm remove @omdp/dsh-connector
 2. **Skills** 区：
    - 列出 `~/.dsh/skills` 下的用户技能
    - 「编辑」改 frontmatter 与正文；「删除」移除目录；「＋ 新建」创建
+   - 「检查更新」：对已关联市场来源的 skill 比对魔搭更新时间，显示"有更新/最新"徽标
+3. **市场探索** 区：
+   - MCP 市场：输入关键词搜索魔搭 MCP 广场；条目显示作者/浏览数与"已配置"徽标；展开详情看
+     Hosted / 认证 / 环境变量 / 配置变体，**「复制配置」** 一键复制 `mcpServers` JSON 片段
+   - Skills 市场：搜索魔搭技能中心；展开详情看三条安装命令（逐个**复制**，自行执行），
+     「记录来源」把本地技能关联到该市场条目（写 frontmatter `source`/`sourceUpdated`）
+   - 全部数据经 host 30 分钟内存缓存代理，仅本机内存，不写盘
 
 ## 工作原理
 
@@ -149,6 +162,9 @@ pnpm remove @omdp/dsh-connector
 - 保存时按 `dsh-mcp-client` 的契约**校验**：`transport` 只能是 `stdio`/`streamable-http`；`serverName` 必须匹配 `[A-Za-z0-9_-]{1,32}`；stdio 的 `command` 必须是单个词且能在 PATH 中找到（或为绝对路径）；streamable-http 的 `url` 必须是合法 http(s)（`!!js` 表达式除外）；命令/URL/参数中不允许控制字符。任何一项不合法，保存会被拒绝（HTTP 400）并提示原因，**不会写入** `cordis.patch.yml`——坏配置永远到不了下次启动。
 - MCP 块解析为结构化提取，复杂嵌套 YAML（如多 env 变量）在表单里以单字段呈现；极复杂配置请直接在 `cordis.patch.yml` 编辑。
 - 不桥接 MCP 的 resources/prompts，只管理 server 配置。
+- **市场只读**：不做 MCP 部署、不做 skill 安装（MCP 部署/部分 skill 安装不是简单改配置）。安装命令/配置片段请复制后自行执行。
+- **版本提示仅限 skill**：魔搭 MCP 是部署模式、无版本概念，不提供更新提示；skill 的"有更新"以市场 `file_last_modified` 对比本地 `sourceUpdated` 判定（需先「记录来源」）。
+- 市场依赖 `modelscope.cn` 可达性；不可达时接口返回 502 提示，不影响 MCP/skill 本地管理。
 
 ## Troubleshooting
 
@@ -202,9 +218,10 @@ MIT License。安全问题请通过 GitHub Issues 私密报告（https://github.
 | 数据 | 访问方式 | 说明 |
 |---|---|---|
 | `profiles/web/cordis.patch.yml` | **读写** | MCP 块的结构化编辑（保留 `!!js`/env 原样） |
-| `~/.dsh/skills/**/SKILL.md` | **读写** | 用户技能文件的查看/编辑/删除/新建 |
+| `~/.dsh/skills/**/SKILL.md` | **读写** | 用户技能文件的查看/编辑/删除/新建；「记录来源」会写 `source`/`sourceUpdated` frontmatter |
 | `~/.dsh/settings.yaml` 等 | 只读 | 不主动读写 |
-| HTTP `/connector/api/*` | 本机监听 | 与 DSH GUI 同源，无外部网络请求（不调用外部 API） |
+| HTTP `/connector/api/*` | 本机监听 | 与 DSH GUI 同源，无额外鉴权 |
+| 魔搭 `modelscope.cn/openapi/v1` | **只读外部** | 市场浏览代理（匿名）；结果仅存进程内存（30 分钟 TTL），**不写文件、不落盘** |
 | 环境变量 | 只读引用 | 只读 `process.env.*`，不持久化 |
 
 **不收集**：无遥测、无外部上报、无用户数据离开本机。
@@ -222,5 +239,8 @@ MIT License。安全问题请通过 GitHub Issues 私密报告（https://github.
 | DSH 小更新/补丁 | ✅ 不会崩 |
 | DSH 大版本（`webServer` API 变化） | ✅ DSH 不崩；connector 需适配更新 |
 | yaml 版本 | ✅ 独立 npm 包，不受 DSH 更新影响 |
+| 魔搭市场不可达 | ✅ 市场接口报 502，本地 MCP/skill 管理不受影响 |
 
-**最后验证**：DSH `0.1.0-rc.8`（2026-08-20，已在本机运行实例活体验证 `/connector/api/skills` 返回 200）。
+**最后验证**：DSH `0.1.0-rc.8`（2026-08-20）；0.2.0 市场功能以 `node --check` +
+真实 HTTP 集成测试通过（11 项：skills/mcp 列表与详情、证书/Hosted 标识、安装命令、
+记录来源回写、更新判定），未改动 DSH 实例。

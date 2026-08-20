@@ -348,6 +348,10 @@ function serializeSkill(skill) {
   if (skill.whenToUse !== undefined) fm.whenToUse = skill.whenToUse
   if (skill.modelInvocable !== undefined) fm.modelInvocable = skill.modelInvocable
   if (skill.userInvocable !== undefined) fm.userInvocable = skill.userInvocable
+  // Marketplace provenance: set by "record source" in the UI, consumed by the
+  // update check (compares market file_last_modified against sourceUpdated).
+  if (skill.source !== undefined) fm.source = skill.source
+  if (skill.sourceUpdated !== undefined) fm.sourceUpdated = skill.sourceUpdated
   const head = '---\n' + stringifyYaml(fm) + '---\n'
   return head + (skill.content || '')
 }
@@ -369,6 +373,9 @@ async function readUserSkill(home, name) {
     whenToUse: fm.data.whenToUse,
     modelInvocable: fm.data.modelInvocable,
     userInvocable: fm.data.userInvocable,
+    // Marketplace provenance survives read so edits keep it unless replaced.
+    source: fm.data.source,
+    sourceUpdated: fm.data.sourceUpdated,
     content: fm.body,
   }
 }
@@ -386,7 +393,7 @@ async function listUserSkills() {
   for (const entry of entries) {
     if (!entry.isDirectory()) continue
     const skill = await readUserSkill(resolveHome(), entry.name)
-    if (skill) out.push({ name: skill.name, description: skill.description || '' })
+    if (skill) out.push({ name: skill.name, description: skill.description || '', source: skill.source, sourceUpdated: skill.sourceUpdated })
   }
   return out
 }
@@ -400,9 +407,18 @@ async function saveUserSkill(home, skill) {
   if (skill.content && /(^|\n)\s*---\s*(\n|$)/.test(skill.content)) {
     throw new Error('skill content must not contain a standalone "---" line')
   }
+  // Keep marketplace provenance when an edit does not carry it: the editor
+  // round-trips content only, so dropping source here would silently sever
+  // the update-check link on every save.
+  const existing = await readUserSkill(home, skill.name).catch(() => undefined)
+  const merged = {
+    ...skill,
+    source: skill.source !== undefined ? skill.source : existing?.source,
+    sourceUpdated: skill.sourceUpdated !== undefined ? skill.sourceUpdated : existing?.sourceUpdated,
+  }
   const dir = join(skillsRoot(), skill.name)
   const file = join(dir, 'SKILL.md')
-  const serialized = serializeSkill(skill)
+  const serialized = serializeSkill(merged)
   // Round-trip check: the file we are about to write must parse back into a
   // valid skill (name + at least one closing delimiter). If not, refuse.
   if (!parseFrontmatter(serialized)) {
@@ -416,6 +432,247 @@ async function saveUserSkill(home, skill) {
 async function removeUserSkill(home, name) {
   if (!SKILL_NAME.test(name)) throw new Error(`invalid skill name "${name}"`)
   await rm(join(skillsRoot(), name), { recursive: true, force: true })
+}
+
+/* ──────────────────── ModelScope marketplace proxy ───────────────────────
+ * Read-only browsing of the ModelScope Skills Center and MCP Plaza. All
+ * market data lives in a 30-minute in-process cache — nothing is written to
+ * disk, no files ever accumulate, and a restart clears it. Install / deploy
+ * are NOT performed: the UI only lists entries and copies install commands /
+ * server config for the user to run themselves. Browsing uses anonymous
+ * endpoints; no MODELSCOPE_API_KEY is required.
+ * ───────────────────────────────────────────────────────────────────────── */
+
+const MARKET_BASE = process.env.DSH_CONNECTOR_MARKET ?? 'https://modelscope.cn/openapi/v1'
+const MARKET_TTL = 30 * 60 * 1000 // 30 minutes in-process cache
+const marketCache = new Map()
+
+async function marketFetch(key, path, init) {
+  const hit = marketCache.get(key)
+  if (hit !== undefined && Date.now() - hit.at < MARKET_TTL) return hit.value
+  const res = await fetch(MARKET_BASE + path, {
+    ...init,
+    headers: { accept: 'application/json', ...(init?.headers ?? {}) },
+    signal: AbortSignal.timeout(15000),
+  })
+  if (!res.ok) throw new Error(`market returned HTTP ${res.status}`)
+  const data = await res.json()
+  marketCache.set(key, { at: Date.now(), value: data })
+  return data
+}
+
+function marketError(res, error) {
+  return json(res, 502, { error: `market unavailable: ${String(error?.message ?? error)}` })
+}
+
+// Skill ids come back as `@author/name` and appear in URLs verbatim. Only
+// accept the safe alphabet so a crafted id can never escape the path.
+const MARKET_ID = /^@?[a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+$/
+
+// GET /api/market/skills?search=&category=&page=
+async function marketSkillsList(req, res, params) {
+  const search = params.get('search')?.trim()
+  const category = params.get('category')?.trim()
+  const page = Math.max(1, Number(params.get('page')) || 1)
+  const qs = new URLSearchParams({ page_number: String(page), page_size: '20' })
+  if (search) qs.set('search', search)
+  if (category) qs.set('filter.category', category)
+  let data
+  try {
+    data = await marketFetch(`skills?${qs}`, `/skills?${qs}`)
+  } catch (error) {
+    return marketError(res, error)
+  }
+  const local = await listUserSkills().catch(() => [])
+  const items = (data?.data?.skills ?? []).map((s) => ({
+    id: s.id,
+    name: s.display_name,
+    description: s.description,
+    developer: s.developer,
+    category: s.category,
+    license: s.license,
+    views: s.view_count,
+    downloads: s.downloads,
+    source: s.source_url,
+    logo: s.logo_url,
+    installed: local.some((l) => l.source === s.id),
+  }))
+  return json(res, 200, { ok: true, items })
+}
+
+// GET /api/market/skills/:id  (id is `@author/name`, may contain a slash)
+async function marketSkillDetail(res, id) {
+  let data
+  try {
+    data = await marketFetch(`skills/${id}`, `/skills/${id}`)
+  } catch (error) {
+    return marketError(res, error)
+  }
+  const d = data?.data ?? {}
+  const local = (await listUserSkills().catch(() => [])).find((l) => l.source === id)
+  let updateAvailable = false
+  if (local && d.file_last_modified && local.sourceUpdated) {
+    updateAvailable = new Date(d.file_last_modified).getTime() > new Date(local.sourceUpdated).getTime()
+  }
+  return json(res, 200, {
+    ok: true,
+    item: {
+      id: d.id,
+      name: d.display_name,
+      description: d.description,
+      owner: d.owner || d.developer,
+      developer: d.developer,
+      category: d.category,
+      license: d.license,
+      tags: Array.isArray(d.tags) ? d.tags.filter((t) => !t.startsWith('category:') && !t.startsWith('developer:') && !t.startsWith('custom_tag:')) : [],
+      views: d.view_count,
+      downloads: d.downloads,
+      source: d.source_url,
+      logo: d.logo_url,
+      private: d.private === true,
+      installCommand: Array.isArray(d.install_command) ? d.install_command : [],
+      fileModified: d.file_last_modified ?? null,
+      lastModified: d.last_modified ?? null,
+      updateAvailable,
+      localSkill: local ? { name: local.name, sourceUpdated: local.sourceUpdated ?? null } : null,
+    },
+  })
+}
+
+// GET /api/market/mcp?search=&page=
+async function marketMcpList(req, res, params) {
+  const search = params.get('search')?.trim()
+  const page = Math.max(1, Number(params.get('page')) || 1)
+  const body = { page_number: page, page_size: 20 }
+  if (search) body.search = search
+  const key = `mcp?${JSON.stringify(body)}`
+  let data
+  try {
+    data = await marketFetch(key, '/mcp/servers', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+  } catch (error) {
+    return marketError(res, error)
+  }
+  // "configured" = already present in the local patch's mcp-* block (matched
+  // by the server's own id/args/url text appearing in a local entry).
+  let localMatches = []
+  try {
+    const text = await readFile(patchPath(), 'utf8')
+    const found = findMcpBlock(text)
+    if (found) {
+      const configured = parseMcpServers(found.blockText).map((s) => (s.command + ' ' + (Array.isArray(s.args) ? s.args.join(' ') : s.args || '') + ' ' + (s.url || '')).toLowerCase())
+      localMatches = configured.filter(Boolean)
+    }
+  } catch {
+    // patch missing/unreadable: no configured markers, market still works
+  }
+  const items = (data?.data?.mcp_server_list ?? []).map((s) => ({
+    id: s.id,
+    name: s.chinese_name || s.name,
+    description: s.description,
+    publisher: s.publisher,
+    tags: s.tags,
+    logo: s.logo_url,
+    views: s.view_count,
+    categories: s.categories,
+    configured: localMatches.some((local) => local.includes(s.id.toLowerCase())),
+  }))
+  return json(res, 200, { ok: true, items })
+}
+
+// Reduce a JSONSchema env block to its variable list (never ship the raw
+// schema wholesale — it can be large and contains no browsing value).
+function envSchemaSummary(schema) {
+  if (!schema || typeof schema !== 'object' || !schema.properties || typeof schema.properties !== 'object') return undefined
+  const required = Array.isArray(schema.required) ? schema.required : []
+  return Object.entries(schema.properties).map(([key, v]) => ({
+    key,
+    required: required.includes(key),
+    hint: typeof v === 'object' && v ? (v.title || v.description || '') : '',
+  }))
+}
+
+// GET /api/market/mcp/:id
+async function marketMcpDetail(res, id) {
+  let data
+  try {
+    data = await marketFetch(`mcp/${id}`, `/mcp/servers/${id}`)
+  } catch (error) {
+    return marketError(res, error)
+  }
+  const d = data?.data ?? {}
+  return json(res, 200, {
+    ok: true,
+    item: {
+      id: d.id,
+      name: d.chinese_name || d.name,
+      description: d.description,
+      author: d.author,
+      publisher: d.publisher,
+      owner: d.owner,
+      hosted: d.is_hosted === true, // "Hosted" tick on the plaza page
+      verified: d.is_verified === true, // certification tick
+      stars: d.github_stars,
+      source: d.source_url,
+      logo: d.logo_url,
+      categories: d.categories,
+      tags: d.tags,
+      envSchema: envSchemaSummary(d.env_schema),
+      // server_config holds ready-to-paste { mcpServers: {...} } variants.
+      serverConfig: Array.isArray(d.server_config) ? d.server_config : undefined,
+      readme: typeof d.readme === 'string' ? d.readme.slice(0, 2000) : '',
+    },
+  })
+}
+
+// GET /api/skills/check-updates
+// For every installed skill that carries a `source`, pull the market detail
+// (cache-backed) and compare its file_last_modified against the locally
+// recorded sourceUpdated. No files are touched.
+async function checkSkillUpdates(res) {
+  const local = (await listUserSkills().catch(() => [])).filter((s) => s.source)
+  const out = []
+  for (const skill of local) {
+    const id = skill.source
+    let marketModified = null
+    let updateAvailable = false
+    try {
+      const data = await marketFetch(`skills/${id}`, `/skills/${id}`)
+      marketModified = data?.data?.file_last_modified ?? null
+      if (marketModified && skill.sourceUpdated) {
+        updateAvailable = new Date(marketModified).getTime() > new Date(skill.sourceUpdated).getTime()
+      }
+    } catch {
+      // market unreachable: report the entry without an update verdict
+    }
+    out.push({
+      name: skill.name,
+      source: id,
+      sourceUpdated: skill.sourceUpdated ?? null,
+      marketModified,
+      updateAvailable,
+    })
+  }
+  return json(res, 200, { ok: true, items: out })
+}
+
+// POST /api/skills/:name/source  { marketId, modified }
+// Links an installed skill to its marketplace entry by writing `source` and
+// `sourceUpdated` into that skill's own frontmatter — the only disk write in
+// the whole market feature, and it happens only on an explicit user action.
+async function recordSkillSource(res, name, body) {
+  if (!SKILL_NAME.test(name)) return json(res, 400, { error: 'invalid skill name' })
+  const marketId = typeof body?.marketId === 'string' && MARKET_ID.test(body.marketId) ? body.marketId : null
+  if (!marketId) return json(res, 400, { error: 'invalid marketId (expect @author/name)' })
+  const skill = await readUserSkill(resolveHome(), name)
+  if (!skill) return json(res, 404, { error: 'skill not found' })
+  skill.source = marketId
+  skill.sourceUpdated = typeof body.modified === 'string' && body.modified ? body.modified : new Date().toISOString().slice(0, 19) + 'Z'
+  await saveUserSkill(resolveHome(), skill)
+  return json(res, 200, { ok: true, source: marketId })
 }
 
 /* ─────────────────────── MCP server validation ─────────────────────────
@@ -617,6 +874,46 @@ export function apply(ctx) {
         }
         const written = await saveUserSkill(resolveHome(), body)
         return json(res, 200, { ok: true, path: written.path })
+      }
+
+      // GET /api/skills/check-updates — update hints for sourced skills
+      if (req.method === 'GET' && path === API_PREFIX + '/skills/check-updates') {
+        return checkSkillUpdates(res)
+      }
+
+      // POST /api/skills/:name/source — link an installed skill to a market id
+      const srcMatch = path.match(new RegExp('^' + API_PREFIX + '/skills/([^/]+)/source$'))
+      if (req.method === 'POST' && srcMatch) {
+        const body = await readBody(req)
+        return recordSkillSource(res, decodeURIComponent(srcMatch[1]), body)
+      }
+
+      /* ── marketplace (read-only ModelScope proxy) ── */
+
+      // GET /api/market/skills?search=&category=&page=
+      if (req.method === 'GET' && path === API_PREFIX + '/market/skills') {
+        return marketSkillsList(req, res, new URL(req.url, 'http://localhost').searchParams)
+      }
+
+      // GET /api/market/skills/:id  (id `@author/name` contains a slash)
+      const mktSkill = path.match(new RegExp('^' + API_PREFIX + '/market/skills/(.+)$'))
+      if (req.method === 'GET' && mktSkill) {
+        const id = decodeURIComponent(mktSkill[1])
+        if (!MARKET_ID.test(id)) return json(res, 400, { error: 'invalid market id' })
+        return marketSkillDetail(res, id)
+      }
+
+      // GET /api/market/mcp?search=&page=
+      if (req.method === 'GET' && path === API_PREFIX + '/market/mcp') {
+        return marketMcpList(req, res, new URL(req.url, 'http://localhost').searchParams)
+      }
+
+      // GET /api/market/mcp/:id
+      const mktMcp = path.match(new RegExp('^' + API_PREFIX + '/market/mcp/(.+)$'))
+      if (req.method === 'GET' && mktMcp) {
+        const id = decodeURIComponent(mktMcp[1])
+        if (!MARKET_ID.test(id)) return json(res, 400, { error: 'invalid market id' })
+        return marketMcpDetail(res, id)
       }
 
       const skMatch = path.match(new RegExp('^' + API_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/skills/([^/]+)$'))

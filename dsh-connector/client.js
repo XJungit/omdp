@@ -4,13 +4,20 @@
  * Installed-package client bundle: the harness serves this file at
  * /plugins/<id>/client.js and expects a single window.__ModuleLoader__.load
  * handoff whose factory receives `require`. We register one unified settings
- * tab ("Connector") that manages two things in a single page:
+ * tab ("Connector") with three panes:
  *   - MCP servers: read/edit the mcp-* block of cordis.patch.yml
  *   - user skills:  list/view/edit/remove SKILL.md files under ~/.dsh/skills
+ *   - marketplace:  read-only ModelScope Skills Center + MCP Plaza browser
+ *                   (30-min in-process cache on the host, nothing on disk)
  *
  * It talks to the host half over the Package-private HTTP API the host mounts
  * on the DSH GUI webserver (/connector/api/*), exactly like
  * dsh-mcp-manager's client does with fetch — not the dynamic-only host.call.
+ *
+ * Visual language follows the DSH theme tokens (--dsw-alias-*): surfaces use
+ * layer-1/2 backgrounds, borders use border-l1/l2, accents use brand-primary,
+ * and badges reuse the state success/warn colors so the panel blends into the
+ * GUI in both light and dark themes.
  *
  * @module @omdp/dsh-connector/client
  */
@@ -25,29 +32,59 @@ window.__ModuleLoader__.load({
     var createElement = react.createElement
 
     var css =
-      '.pm_root{display:flex;flex-direction:column;gap:20px;padding:0 24px 24px}' +
-      '.pm_tabs{display:flex;gap:8px;padding:0 24px}' +
+      /* layout */
+      '.pm_root{display:flex;flex-direction:column;gap:18px;padding:0 24px 28px}' +
+      '.pm_tabs{display:flex;gap:4px;padding:2px 24px 0;border-bottom:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.22));margin:0 -24px 4px}' +
+      '.pm_tab{cursor:pointer;font:inherit;font-size:13px;padding:8px 14px 10px;border:none;background:transparent;color:var(--dsw-alias-label-secondary,#9aa);border-bottom:2px solid transparent;margin-bottom:-1px}' +
+      '.pm_tab:hover{color:var(--dsw-alias-label-primary,#ddd)}' +
+      '.pm_tab.active{color:var(--dsw-alias-label-primary,#f4f4f4);border-bottom-color:var(--dsw-alias-brand-primary,#5b8cff);font-weight:600}' +
       '.pm_section{display:flex;flex-direction:column;gap:12px}' +
-      '.pm_sectionHead{font-weight:600;font-size:15px}' +
-      '.pm_row{display:flex;flex-direction:column;gap:8px;border:1px solid rgba(128,128,128,.3);border-radius:12px;padding:12px 14px}' +
-      '.pm_rowHead{display:flex;align-items:center;gap:10px}' +
-      '.pm_name{font-weight:600;font-size:14px}' +
-      '.pm_kind{font-size:11px;padding:2px 8px;border-radius:8px;border:1px solid rgba(128,128,128,.4);color:var(--dsw-alias-label-secondary,#888)}' +
-      '.pm_meta{font-size:12px;color:var(--dsw-alias-label-secondary,#888);word-break:break-all}' +
-      '.pm_actions{margin-left:auto;display:flex;gap:8px}' +
-      '.pm_btn{cursor:pointer;font-size:12px;padding:5px 12px;border-radius:8px;border:1px solid rgba(128,128,128,.5);background:transparent;color:inherit}' +
-      '.pm_btn:hover{background:rgba(128,128,128,.12)}' +
-      '.pm_btn:disabled{opacity:.5;cursor:default}' +
-      '.pm_btn.primary{border-color:transparent;background:var(--dsw-alias-interactive-bg-active,#2563eb);color:#fff}' +
-      '.pm_btn.danger{border-color:#c62828;color:#c62828}' +
-      '.pm_err{color:#c62828;font-size:12px}' +
+      '.pm_sectionHead{font-size:13px;font-weight:600;letter-spacing:.02em;color:var(--dsw-alias-label-primary,#eee);display:flex;align-items:center;gap:8px}' +
+      '.pm_sectionHead .pm_hint{margin-left:0}' +
+      /* cards */
+      '.pm_card{background:var(--dsw-alias-bg-layer-1,rgba(255,255,255,.035));border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.22));border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:8px;transition:background .15s,border-color .15s}' +
+      '.pm_card:hover{background:var(--dsw-alias-bg-layer-2,rgba(255,255,255,.06));border-color:var(--dsw-alias-border-l2,rgba(128,128,128,.4))}' +
+      '.pm_cardHead{display:flex;align-items:center;gap:10px;flex-wrap:wrap}' +
+      '.pm_name{font-weight:600;font-size:14px;color:var(--dsw-alias-label-primary,#eee)}' +
+      '.pm_meta{font-size:12px;color:var(--dsw-alias-label-secondary,#9aa);word-break:break-all;line-height:1.5}' +
+      '.pm_desc{font-size:12.5px;color:var(--dsw-alias-label-secondary,#aab);line-height:1.6;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}' +
+      /* badges */
+      '.pm_badge{display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:2px 9px;border-radius:999px;border:1px solid currentColor;line-height:1.6;white-space:nowrap}' +
+      '.pm_badge.muted{color:var(--dsw-alias-label-secondary,#9aa)}' +
+      '.pm_badge.ok{color:var(--dsw-alias-state-success-primary,#4ade80)}' +
+      '.pm_badge.warn{color:var(--dsw-alias-state-warn-primary,#fbbf24)}' +
+      '.pm_badge.brand{color:var(--dsw-alias-brand-primary,#7aa2ff);border-color:var(--dsw-alias-brand-primary,#7aa2ff)}' +
+      '.pm_badge.err{color:var(--dsw-alias-state-error-primary,#f87171)}' +
+      /* buttons */
+      '.pm_actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}' +
+      '.pm_btn{cursor:pointer;font:inherit;font-size:12px;padding:5px 12px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.4));background:transparent;color:inherit;transition:background .12s}' +
+      '.pm_btn:hover:not(:disabled){background:var(--dsw-alias-bg-layer-2,rgba(128,128,128,.14))}' +
+      '.pm_btn:disabled{opacity:.45;cursor:default}' +
+      '.pm_btn.primary{border-color:transparent;background:var(--dsw-alias-brand-primary,#5b8cff);color:#fff}' +
+      '.pm_btn.primary:hover:not(:disabled){filter:brightness(1.08)}' +
+      '.pm_btn.danger{color:var(--dsw-alias-state-error-primary,#f87171);border-color:currentColor}' +
+      '.pm_btn.ghost{border-style:dashed}' +
+      /* form */
       '.pm_form{display:grid;grid-template-columns:1fr 1fr;gap:10px}' +
-      '.pm_form label{display:flex;flex-direction:column;gap:4px;font-size:12px}' +
-      '.pm_form input,.pm_form textarea,.pm_form select{font:inherit;font-size:13px;padding:6px 8px;border-radius:8px;border:1px solid rgba(128,128,128,.4);background:transparent;color:inherit}' +
+      '.pm_form label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--dsw-alias-label-secondary,#9aa)}' +
+      '.pm_form input,.pm_form textarea,.pm_form select{font:inherit;font-size:13px;padding:6px 9px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.35));background:var(--dsw-alias-bg-layer-1,rgba(255,255,255,.03));color:inherit}' +
+      '.pm_form input:focus,.pm_form textarea:focus,.pm_form select:focus{outline:2px solid var(--dsw-alias-brand-primary,rgba(91,140,255,.5));outline-offset:0;border-color:transparent}' +
       '.pm_form .wide{grid-column:1 / -1}' +
-      '.pm_add{border-style:dashed}' +
-      '.pm_hint{font-size:12px;color:var(--dsw-alias-label-secondary,#888)}' +
-      '.pm_textarea{font-family:ui-monospace,Menlo,Consolas,monospace;min-height:140px}'
+      '.pm_textarea{font-family:ui-monospace,Menlo,Consolas,monospace;min-height:140px}' +
+      /* market */
+      '.pm_search{display:flex;gap:8px}' +
+      '.pm_search input{flex:1;font:inherit;font-size:13px;padding:7px 11px;border-radius:9px;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.35));background:var(--dsw-alias-bg-layer-1,rgba(255,255,255,.03));color:inherit}' +
+      '.pm_search input:focus{outline:2px solid var(--dsw-alias-brand-primary,rgba(91,140,255,.5));border-color:transparent}' +
+      '.pm_groupHead{font-size:12px;font-weight:600;color:var(--dsw-alias-label-secondary,#9aa);text-transform:uppercase;letter-spacing:.08em;margin:8px 0 2px}' +
+      '.pm_code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px;line-height:1.55;background:var(--dsw-alias-bg-base,rgba(0,0,0,.25));border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));border-radius:8px;padding:8px 10px;overflow:auto;max-height:220px;white-space:pre-wrap;word-break:break-all;color:var(--dsw-alias-label-secondary,#9aa)}' +
+      '.pm_envRow{display:flex;gap:8px;align-items:baseline;font-size:12px;color:var(--dsw-alias-label-secondary,#9aa)}' +
+      '.pm_envRow code{color:var(--dsw-alias-label-primary,#ddd)}' +
+      '.pm_spinner{display:inline-block;width:12px;height:12px;border:2px solid var(--dsw-alias-border-l2,rgba(128,128,128,.4));border-top-color:var(--dsw-alias-brand-primary,#5b8cff);border-radius:50%;animation:pm_spin .7s linear infinite;vertical-align:-2px}' +
+      '@keyframes pm_spin{to{transform:rotate(360deg)}}' +
+      '.pm_err{color:var(--dsw-alias-state-error-primary,#f87171);font-size:12px}' +
+      '.pm_ok{color:var(--dsw-alias-state-success-primary,#4ade80);font-size:12px}' +
+      '.pm_empty{font-size:12px;color:var(--dsw-alias-label-secondary,#888);padding:10px 2px}' +
+      '.pm_btnrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}'
 
     if (typeof document !== 'undefined' && document.querySelector('style[data-plugin-css="@omdp/dsh-connector/section"]') === null) {
       var tag = document.createElement('style')
@@ -64,6 +101,45 @@ window.__ModuleLoader__.load({
       }).then(function (resp) {
         return resp.json().catch(function () { return {} })
       })
+    }
+
+    // Clipboard with a fallback: 127.0.0.1 is a secure context so
+    // navigator.clipboard normally works; execCommand covers edge cases.
+    function copyText(text, done) {
+      function fallback() {
+        try {
+          var ta = document.createElement('textarea')
+          ta.value = text
+          ta.style.position = 'fixed'
+          ta.style.opacity = '0'
+          document.body.appendChild(ta)
+          ta.focus()
+          ta.select()
+          var ok = document.execCommand('copy')
+          document.body.removeChild(ta)
+          done(ok === true)
+        } catch (e) {
+          done(false)
+        }
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function () { done(true) }, fallback)
+      } else {
+        fallback()
+      }
+    }
+
+    function useCopied() {
+      var _a = react.useState('')
+      var copied = _a[0]
+      var setCopied = _a[1]
+      function copy(text) {
+        copyText(text, function (ok) {
+          setCopied(ok ? '已复制 ✓' : '复制失败')
+          setTimeout(function () { setCopied('') }, 1600)
+        })
+      }
+      return { copied: copied, copy: copy }
     }
 
     // Server ids must stay kebab-case under the fixed `mcp-` prefix: the host
@@ -89,6 +165,10 @@ window.__ModuleLoader__.load({
           opts.map(function (o) { return createElement('option', { value: o, key: o }, o) }),
         ),
       )
+    }
+
+    function badge(text, kind) {
+      return createElement('span', { className: 'pm_badge ' + kind }, text)
     }
 
     function ManageTab() {
@@ -122,15 +202,20 @@ window.__ModuleLoader__.load({
 
       return createElement('div', { className: 'pm_root' },
         createElement('div', { className: 'pm_tabs' },
-          createElement('button', { className: 'pm_btn' + (tab === 'mcp' ? ' primary' : ''), onClick: function () { setTab('mcp') } }, 'MCP 服务器 MCP Servers'),
-          createElement('button', { className: 'pm_btn' + (tab === 'skills' ? ' primary' : ''), onClick: function () { setTab('skills') } }, 'Skills 技能'),
+          createElement('button', { className: 'pm_tab' + (tab === 'mcp' ? ' active' : ''), onClick: function () { setTab('mcp') } }, 'MCP 服务器'),
+          createElement('button', { className: 'pm_tab' + (tab === 'skills' ? ' active' : ''), onClick: function () { setTab('skills') } }, 'Skills 技能'),
+          createElement('button', { className: 'pm_tab' + (tab === 'market' ? ' active' : ''), onClick: function () { setTab('market') } }, '市场探索'),
         ),
         error ? createElement('div', { className: 'pm_err' }, error) : null,
         tab === 'mcp'
           ? createElement(McpPane, { mcp: mcp, busy: busy, onChanged: refresh })
-          : createElement(SkillPane, { skills: skills, busy: busy, onChanged: refresh }),
+          : tab === 'skills'
+            ? createElement(SkillPane, { skills: skills, busy: busy, onChanged: refresh })
+            : createElement(MarketPane, { skills: skills, onChanged: refresh }),
       )
     }
+
+    /* ─────────────────────────── MCP servers ─────────────────────────── */
 
     function McpPane(props) {
       var _a = react.useState(null)
@@ -163,10 +248,10 @@ window.__ModuleLoader__.load({
       }
 
       var rows = props.mcp.servers.map(function (s) {
-        return createElement('div', { className: 'pm_row', key: s.id },
-          createElement('div', { className: 'pm_rowHead' },
+        return createElement('div', { className: 'pm_card', key: s.id },
+          createElement('div', { className: 'pm_cardHead' },
             createElement('span', { className: 'pm_name' }, s.name || s.id),
-            createElement('span', { className: 'pm_kind' }, s.transport || 'stdio'),
+            badge(s.transport || 'stdio', 'muted'),
           ),
           createElement('div', { className: 'pm_meta' }, s.url ? 'url: ' + s.url : (s.command ? 'cmd: ' + s.command : '')),
           createElement('div', { className: 'pm_actions' },
@@ -177,13 +262,16 @@ window.__ModuleLoader__.load({
       })
 
       return createElement('div', { className: 'pm_section' },
-        createElement('div', { className: 'pm_sectionHead' }, 'MCP 服务器 MCP Servers'),
+        createElement('div', { className: 'pm_sectionHead' },
+          'MCP 服务器 MCP Servers',
+          props.busy ? createElement('span', { className: 'pm_spinner' }) : null,
+        ),
         err ? createElement('div', { className: 'pm_err' }, err) : null,
-        createElement('div', { className: 'pm_hint' },
+        createElement('div', { className: 'pm_meta' },
           props.mcp.exists ? '编辑 profiles/web/cordis.patch.yml 中的 mcp-* 块。保存后重启 dsh 生效。Edit the mcp-* block in cordis.patch.yml; restart dsh to apply.' : '未找到 cordis.patch.yml。cordis.patch.yml not found.'),
         rows,
         editing === null
-          ? createElement('button', { className: 'pm_btn pm_add', onClick: function () { setEditing({ id: 'mcp-new', customId: '', name: '', transport: 'stdio', serverName: '', url: '', command: '', args: '' }) } }, '＋ 添加 MCP 服务器 Add MCP Server')
+          ? createElement('button', { className: 'pm_btn pm_btn ghost', onClick: function () { setEditing({ id: 'mcp-new', customId: '', name: '', transport: 'stdio', serverName: '', url: '', command: '', args: '' }) } }, '＋ 添加 MCP 服务器 Add MCP Server')
           : createElement(ServerForm, { value: editing, onSave: save, onCancel: function () { setEditing(null) } }),
       )
     }
@@ -272,7 +360,7 @@ window.__ModuleLoader__.load({
         }
       }
 
-      return createElement('div', { className: 'pm_row' },
+      return createElement('div', { className: 'pm_card' },
         err ? createElement('div', { className: 'pm_err' }, err) : null,
         createElement('div', { className: 'pm_form' },
           field('名称 (serverName) Name', v.serverName, set('serverName')),
@@ -298,6 +386,8 @@ window.__ModuleLoader__.load({
       )
     }
 
+    /* ───────────────────────────── Skills ────────────────────────────── */
+
     function SkillPane(props) {
       var _a = react.useState(null)
       var editing = _a[0]
@@ -305,6 +395,12 @@ window.__ModuleLoader__.load({
       var _b = react.useState('')
       var err = _b[0]
       var setErr = _b[1]
+      var _c = react.useState(null)
+      var updates = _c[0]
+      var setUpdates = _c[1]
+      var _d = react.useState(false)
+      var checking = _d[0]
+      var setChecking = _d[1]
 
       function open(name) {
         api('/skills/' + encodeURIComponent(name), { method: 'GET' }).then(function (skill) {
@@ -328,11 +424,22 @@ window.__ModuleLoader__.load({
           props.onChanged()
         })
       }
+      function checkUpdates() {
+        setChecking(true)
+        setErr('')
+        api('/skills/check-updates', { method: 'GET' }).then(function (r) {
+          if (r && r.error) { setErr(r.error); setUpdates(null); return }
+          setUpdates(r.items || [])
+        }).finally(function () { setChecking(false) })
+      }
 
       var rows = props.skills.map(function (s) {
-        return createElement('div', { className: 'pm_row', key: s.name },
-          createElement('div', { className: 'pm_rowHead' },
+        var update = updates ? updates.find(function (u) { return u.name === s.name }) : null
+        return createElement('div', { className: 'pm_card', key: s.name },
+          createElement('div', { className: 'pm_cardHead' },
             createElement('span', { className: 'pm_name' }, s.name),
+            s.source ? badge('来源 ' + s.source, 'muted') : null,
+            update ? (update.updateAvailable ? badge('有更新', 'warn') : badge('最新', 'ok')) : null,
           ),
           createElement('div', { className: 'pm_meta' }, s.description || ''),
           createElement('div', { className: 'pm_actions' },
@@ -343,12 +450,18 @@ window.__ModuleLoader__.load({
       })
 
       return createElement('div', { className: 'pm_section' },
-        createElement('div', { className: 'pm_sectionHead' }, '用户 Skills (~/.dsh/skills) User Skills'),
+        createElement('div', { className: 'pm_sectionHead' },
+          '用户 Skills (~/.dsh/skills) User Skills',
+          props.busy ? createElement('span', { className: 'pm_spinner' }) : null,
+          createElement('span', { className: 'pm_actions', style: { marginLeft: 'auto' } },
+            createElement('button', { className: 'pm_btn', disabled: checking, onClick: checkUpdates }, checking ? '检查中…' : '检查更新'),
+          ),
+        ),
         err ? createElement('div', { className: 'pm_err' }, err) : null,
-        createElement('div', { className: 'pm_hint' }, '读写用户技能目录，保存即生效（skill catalog 自动刷新）。Read/write user skills; saved changes take effect immediately.'),
+        createElement('div', { className: 'pm_meta' }, '读写用户技能目录，保存即生效（skill catalog 自动刷新）。带来源的 skill 可与魔搭市场比对更新时间。Read/write user skills; saved changes take effect immediately.'),
         rows,
         editing === null
-          ? createElement('button', { className: 'pm_btn pm_add', onClick: function () { setEditing({ name: '', description: '', content: '' }) } }, '＋ 新建 Skill New Skill')
+          ? createElement('button', { className: 'pm_btn pm_btn ghost', onClick: function () { setEditing({ name: '', description: '', content: '' }) } }, '＋ 新建 Skill New Skill')
           : createElement(SkillForm, { value: editing, onSave: save, onCancel: function () { setEditing(null) } }),
       )
     }
@@ -370,7 +483,7 @@ window.__ModuleLoader__.load({
         props.onSave(Object.assign({}, v, { name: name }))
       }
 
-      return createElement('div', { className: 'pm_row' },
+      return createElement('div', { className: 'pm_card' },
         err ? createElement('div', { className: 'pm_err' }, err) : null,
         createElement('div', { className: 'pm_form' },
           field('名称 (kebab-case) Name', v.name, set('name')),
@@ -384,6 +497,266 @@ window.__ModuleLoader__.load({
           createElement('button', { className: 'pm_btn primary', onClick: submit }, '保存 Save'),
           createElement('button', { className: 'pm_btn', onClick: props.onCancel }, '取消 Cancel'),
         ),
+      )
+    }
+
+    /* ─────────────────────────── marketplace ─────────────────────────── */
+
+    function MarketPane(props) {
+      var _a = react.useState('')
+      var mcpSearch = _a[0]
+      var setMcpSearch = _a[1]
+      var _b = react.useState(null)
+      var mcpResult = _b[0]
+      var setMcpResult = _b[1]
+      var _c = react.useState(false)
+      var mcpBusy = _c[0]
+      var setMcpBusy = _c[1]
+      var _d = react.useState({})
+      var mcpDetail = _d[0]
+      var setMcpDetail = _d[1]
+      var _e = react.useState('')
+      var skillSearch = _e[0]
+      var setSkillSearch = _e[1]
+      var _f = react.useState(null)
+      var skillResult = _f[0]
+      var setSkillResult = _f[1]
+      var _g = react.useState(false)
+      var skillBusy = _g[0]
+      var setSkillBusy = _g[1]
+      var _h = react.useState({})
+      var skillDetail = _h[0]
+      var setSkillDetail = _h[1]
+      var _i = react.useState('')
+      var err = _i[0]
+      var setErr = _i[1]
+
+      function findMcp() {
+        setMcpBusy(true)
+        setErr('')
+        api('/market/mcp?search=' + encodeURIComponent(mcpSearch.trim()), { method: 'GET' }).then(function (r) {
+          if (r && r.error) { setErr(r.error); setMcpResult(null); return }
+          setMcpResult(r)
+        }).finally(function () { setMcpBusy(false) })
+      }
+      function findSkills() {
+        setSkillBusy(true)
+        setErr('')
+        api('/market/skills?search=' + encodeURIComponent(skillSearch.trim()), { method: 'GET' }).then(function (r) {
+          if (r && r.error) { setErr(r.error); setSkillResult(null); return }
+          setSkillResult(r)
+        }).finally(function () { setSkillBusy(false) })
+      }
+      function openMcp(id) {
+        api('/market/mcp/' + encodeURIComponent(id), { method: 'GET' }).then(function (r) {
+          if (r && r.error) { setErr(r.error); return }
+          var next = Object.assign({}, mcpDetail)
+          next[id] = r.item
+          setMcpDetail(next)
+        })
+      }
+      function openSkill(id) {
+        api('/market/skills/' + encodeURIComponent(id), { method: 'GET' }).then(function (r) {
+          if (r && r.error) { setErr(r.error); return }
+          var next = Object.assign({}, skillDetail)
+          next[id] = r.item
+          setSkillDetail(next)
+        })
+      }
+
+      var mcpRows = mcpResult && mcpResult.items
+        ? mcpResult.items.map(function (s) {
+            var d = mcpDetail[s.id]
+            return createElement(McpMarketItem, {
+              key: s.id, item: s, detail: d,
+              onOpen: function () { if (!d) openMcp(s.id) },
+            })
+          })
+        : []
+
+      var skillRows = skillResult && skillResult.items
+        ? skillResult.items.map(function (s) {
+            var d = skillDetail[s.id]
+            return createElement(SkillMarketItem, {
+              key: s.id, item: s, detail: d, skills: props.skills,
+              onOpen: function () { if (!d) openSkill(s.id) },
+              onChanged: props.onChanged,
+            })
+          })
+        : []
+
+      return createElement('div', { className: 'pm_section' },
+        createElement('div', { className: 'pm_sectionHead' }, '市场探索 Marketplace'),
+        createElement('div', { className: 'pm_meta' },
+          '浏览魔搭社区（ModelScope）技能中心与 MCP 广场。列表数据缓存在 DSH 进程内存（30 分钟），不写任何文件；安装/部署请复制命令自行执行。Browse ModelScope Skills Center & MCP Plaza; cached in-process only, nothing saved to disk.'),
+        err ? createElement('div', { className: 'pm_err' }, err) : null,
+
+        createElement('div', { className: 'pm_groupHead' }, 'MCP 市场 MCP Plaza'),
+        createElement('div', { className: 'pm_search' },
+          createElement('input', {
+            placeholder: '搜索 MCP 服务，如 map / github / fetch Search…',
+            value: mcpSearch,
+            onChange: function (e) { setMcpSearch(e.target.value) },
+            onKeyDown: function (e) { if (e.key === 'Enter') findMcp() },
+          }),
+          createElement('button', { className: 'pm_btn primary', disabled: mcpBusy, onClick: findMcp }, mcpBusy ? '搜索中…' : '搜索'),
+        ),
+        mcpRows.length ? mcpRows : (mcpResult ? createElement('div', { className: 'pm_empty' }, '没有匹配的 MCP 服务。No matching MCP servers.') : null),
+
+        createElement('div', { className: 'pm_groupHead', style: { marginTop: '18px' } }, 'Skills 市场 Skills Center'),
+        createElement('div', { className: 'pm_search' },
+          createElement('input', {
+            placeholder: '搜索技能，如 code-review / deploy Search…',
+            value: skillSearch,
+            onChange: function (e) { setSkillSearch(e.target.value) },
+            onKeyDown: function (e) { if (e.key === 'Enter') findSkills() },
+          }),
+          createElement('button', { className: 'pm_btn primary', disabled: skillBusy, onClick: findSkills }, skillBusy ? '搜索中…' : '搜索'),
+        ),
+        skillRows.length ? skillRows : (skillResult ? createElement('div', { className: 'pm_empty' }, '没有匹配的技能。No matching skills.') : null),
+      )
+    }
+
+    // One MCP market entry with a lazy detail panel.
+    function McpMarketItem(props) {
+      var item = props.item
+      var d = props.detail
+      var _a = react.useState(null)
+      var variant = _a[0]
+      var setVariant = _a[1]
+      var copied = useCopied()
+      var configs = d && Array.isArray(d.serverConfig) ? d.serverConfig : []
+      var cfgText = ''
+      if (configs.length) {
+        var sel = variant !== null && variant < configs.length ? configs[variant] : configs[0]
+        cfgText = JSON.stringify(sel, null, 2)
+      }
+
+      return createElement('div', { className: 'pm_card', key: item.id },
+        createElement('div', { className: 'pm_cardHead' },
+          createElement('span', { className: 'pm_name' }, item.name || item.id),
+          item.configured ? badge('已配置', 'ok') : null,
+          badge(item.id, 'muted'),
+        ),
+        createElement('div', { className: 'pm_desc' }, item.description || ''),
+        createElement('div', { className: 'pm_meta' },
+          'by ' + (item.publisher || '—'),
+          item.views !== undefined ? ' · ' + item.views + ' 浏览' : '',
+        ),
+        createElement('div', { className: 'pm_actions' },
+          createElement('button', { className: 'pm_btn', onClick: props.onOpen }, d ? '收起' : '详情'),
+          d && configs.length
+            ? createElement('button', { className: 'pm_btn primary', onClick: function () { copied.copy(cfgText) } },
+                copied.copied || '复制配置 Copy config')
+            : null,
+        ),
+        d ? createElement('div', { className: 'pm_section', style: { marginTop: '4px' } },
+          createElement('div', { className: 'pm_actions' },
+            d.hosted ? badge('Hosted 官方托管', 'brand') : null,
+            d.verified ? badge('已认证 Verified', 'brand') : null,
+            d.stars !== undefined && d.stars !== null ? badge('★ ' + d.stars, 'muted') : null,
+            (d.categories && d.categories.length) ? badge(d.categories.slice(0, 3).join(' / '), 'muted') : null,
+          ),
+          (d.envSchema && d.envSchema.length)
+            ? createElement('div', { className: 'pm_meta' },
+                '环境变量 Env vars: ',
+                d.envSchema.map(function (ev) {
+                  return createElement('span', { key: ev.key, className: 'pm_envRow' },
+                    createElement('code', null, ev.key),
+                    ev.required ? badge('必填', 'warn') : null,
+                  )
+                }),
+              )
+            : null,
+          configs.length
+            ? createElement('div', { className: 'pm_section' },
+                configs.length > 1
+                  ? selectField('配置变体 Config variant', variant === null ? 0 : variant, configs.map(function (_, i) { return 'variant ' + (i + 1) }), function (i) { setVariant(Number(i)) })
+                  : null,
+                createElement('div', { className: 'pm_code' }, cfgText),
+              )
+            : null,
+          d.readme ? createElement('div', { className: 'pm_meta' }, d.readme.slice(0, 240) + (d.readme.length > 240 ? ' …' : '')) : null,
+          d.source ? createElement('div', { className: 'pm_meta' }, '来源: ' + d.source) : null,
+        ) : null,
+      )
+    }
+
+    // One market skill entry with install commands and local "record source".
+    function SkillMarketItem(props) {
+      var item = props.item
+      var d = props.detail
+      var copied = useCopied()
+      var _a = react.useState('')
+      var linkErr = _a[0]
+      var setLinkErr = _a[1]
+      var _b = react.useState('')
+      var linkOk = _b[0]
+      var setLinkOk = _b[1]
+      var _c = react.useState(null)
+      var target = _c[0]
+      var setTarget = _c[1]
+
+      var alreadyLinked = props.skills.some(function (s) { return s.source === item.id })
+      var installs = d && Array.isArray(d.installCommand) ? d.installCommand : []
+
+      function recordSource() {
+        setLinkErr('')
+        setLinkOk('')
+        if (!target) { setLinkErr('请先选择一个本地技能 Please pick a local skill'); return }
+        api('/skills/' + encodeURIComponent(target) + '/source', {
+          method: 'POST',
+          body: JSON.stringify({ marketId: item.id, modified: d ? d.fileModified : undefined }),
+        }).then(function (r) {
+          if (r && r.error) { setLinkErr(r.error); return }
+          setLinkOk('已关联 ' + target + ' ✓')
+          props.onChanged()
+        })
+      }
+
+      return createElement('div', { className: 'pm_card', key: item.id },
+        createElement('div', { className: 'pm_cardHead' },
+          createElement('span', { className: 'pm_name' }, item.name || item.id),
+          item.installed || alreadyLinked ? badge('已安装', 'ok') : null,
+          item.developer ? badge('by ' + item.developer, 'muted') : null,
+          item.category ? badge(item.category, 'muted') : null,
+        ),
+        createElement('div', { className: 'pm_desc' }, item.description || ''),
+        createElement('div', { className: 'pm_meta' },
+          item.downloads !== undefined ? item.downloads + ' 下载' : '',
+          item.views !== undefined ? ' · ' + item.views + ' 浏览' : '',
+          item.license ? ' · ' + item.license : '',
+        ),
+        createElement('div', { className: 'pm_actions' },
+          createElement('button', { className: 'pm_btn', onClick: props.onOpen }, d ? '收起' : '详情'),
+          d && d.updateAvailable ? badge('有更新', 'warn') : null,
+        ),
+        d ? createElement('div', { className: 'pm_section', style: { marginTop: '4px' } },
+          createElement('div', { className: 'pm_meta' },
+            '市场更新时间 Market modified: ' + (d.fileModified || '—'),
+            d.localSkill ? ' · 本地记录: ' + d.localSkill.sourceUpdated : '',
+          ),
+          installs.length
+            ? createElement('div', { className: 'pm_section' },
+                createElement('div', { className: 'pm_meta' }, '安装命令 Install command（复制后自行执行）:'),
+                installs.map(function (cmd, i) {
+                  return createElement('div', { key: i, className: 'pm_btnrow' },
+                    createElement('div', { className: 'pm_code', style: { flex: 1 } }, cmd),
+                    createElement('button', { className: 'pm_btn', onClick: function () { copied.copy(cmd) } }, copied.copied || '复制 Copy'),
+                  )
+                }),
+              )
+            : null,
+          alreadyLinked
+            ? createElement('div', { className: 'pm_ok' }, '已关联到本地技能 ✓ Linked to a local skill.')
+            : createElement('div', { className: 'pm_btnrow' },
+                selectField('关联本地技能 Link to local skill', target || '', props.skills.map(function (s) { return s.name }), setTarget),
+                createElement('button', { className: 'pm_btn', onClick: recordSource }, '记录来源 Record source'),
+              ),
+          linkErr ? createElement('div', { className: 'pm_err' }, linkErr) : null,
+          linkOk ? createElement('div', { className: 'pm_ok' }, linkOk) : null,
+          d.source ? createElement('div', { className: 'pm_meta' }, '来源: ' + d.source) : null,
+        ) : null,
       )
     }
 
