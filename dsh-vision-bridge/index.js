@@ -483,6 +483,46 @@ function registerVisionProvider(ctx, config) {
   }
 }
 
+// ---------- 当前模型多模态能力解析（供前端 paste 路由判定） ----------
+
+// 按模型标签（来自前端读到的模型选择器文本）在已注册 provider 中定位模型，
+// 用 llm.resolveModelInfo 读取真实 inputModalities，返回 { known, multimodal }。
+// 名字匹配采用双向子串（忽略大小写/空白），兼容 "选择模型：DeepSeek-V4-Flash"
+// 这类带前缀的 aria-label，也兼容只含模型 id 的短标签。
+const CAP_CACHE = new Map()
+const CAP_TTL_MS = 5 * 60 * 1000
+
+async function resolveMultimodalByLabel(ctx, label) {
+  const llm = ctx.get('llm')
+  if (!llm || typeof llm.listProviders !== 'function') return { known: false }
+  const norm = String(label || '').toLowerCase().replace(/\s+/g, '')
+  if (!norm) return { known: false }
+  const cached = CAP_CACHE.get(norm)
+  if (cached && Date.now() - cached.t < CAP_TTL_MS) return { known: cached.known, multimodal: cached.multimodal }
+  let result = { known: false, multimodal: false }
+  for (const p of llm.listProviders()) {
+    const pid = p?.id
+    if (!pid) continue
+    let models = []
+    try { models = await llm.listModels(pid) } catch { continue }
+    for (const m of models) {
+      const mid = String(m?.id ?? '').toLowerCase()
+      const mname = String(m?.name ?? m?.id ?? '').toLowerCase()
+      const hit = (mid && (norm.includes(mid) || mid.includes(norm))) ||
+        (mname && (norm.includes(mname) || mname.includes(norm)))
+      if (!hit) continue
+      try {
+        const info = await llm.resolveModelInfo(pid, m.id)
+        result = { known: true, multimodal: Array.isArray(info?.inputModalities) && info.inputModalities.includes('image') }
+      } catch { /* 该模型解析失败，继续尝试下一个匹配 */ }
+      break
+    }
+    if (result.known) break
+  }
+  CAP_CACHE.set(norm, { ...result, t: Date.now() })
+  return result
+}
+
 // ---------- 粘贴路由（paste-to-path） ----------
 
 function registerPasteRoute(ctx, config) {
@@ -558,6 +598,23 @@ function registerPasteRoute(ctx, config) {
           } catch (error) {
             res.writeHead(500, { 'content-type': 'application/json' })
             res.end(JSON.stringify({ error: String(error && error.message ? error.message : error) }))
+          }
+        },
+      })
+      scope.webServer.register({
+        name: 'vision-bridge-capabilities',
+        kind: 'exact',
+        path: '/vision-bridge/capabilities',
+        handler: async (req, res) => {
+          try {
+            const url = new URL(req.url, 'http://localhost')
+            const label = url.searchParams.get('label') || ''
+            const result = await resolveMultimodalByLabel(ctx, label)
+            res.writeHead(200, { 'content-type': 'application/json' })
+            res.end(JSON.stringify(result))
+          } catch (error) {
+            res.writeHead(500, { 'content-type': 'application/json' })
+            res.end(JSON.stringify({ known: false, error: String(error && error.message ? error.message : error) }))
           }
         },
       })

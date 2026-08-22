@@ -47,8 +47,10 @@ pnpm add @omdp/dsh-vision-bridge
 
 ### 3. 粘贴 / 拖拽图片（client.js）
 
-- 纯文本模型下：捕获 paste/drop → POST /vision-bridge/paste → 临时文件 → 路径文本入输入框
+- **多模态模型**：粘贴/拖拽图片走 DSH 原生上传，插件不拦截。是否多模态由前端查询 host 的 `/vision-bridge/capabilities`（基于 `llm.resolveModelInfo` 的真实 `inputModalities` 判定），而非名字正则——任意真实视觉模型都会正确放行。
+- **纯文本模型**：捕获 paste/drop → POST /vision-bridge/paste → 临时文件 → 路径文本入输入框
 - 不会触发宿主图片准入（`inputModalities` 拒绝），因此文本模型也能"发图"
+- 前端按当前模型标签缓存能力判定，模型切换后 1 秒内刷新；`pasteToPath: false` 可整体关闭转路径行为。
 
 ### 4. 包装 provider（`(vision bridge)` 模型条目）
 

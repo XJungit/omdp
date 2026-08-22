@@ -90,10 +90,47 @@ window.__ModuleLoader__.load({
       return ''
     }
 
+    // 真实多模态能力缓存：key = 归一化后的模型标签，value = { known, multimodal }。
+    // 由 host 的 /vision-bridge/capabilities 用 llm.resolveModelInfo 判定，
+    // 比名字正则可靠——任意真实多模态模型（名字不在 VISION_HINT）都会走原生上传。
+    var capabilityCache = {}
+    var lastPolledLabel = ''
+
+    function normalizeLabel(label) {
+      return String(label || '').toLowerCase().replace(/\s+/g, '')
+    }
+
+    function fetchCapabilities(label) {
+      var norm = normalizeLabel(label)
+      if (!norm || capabilityCache[norm]) return
+      fetch('/vision-bridge/capabilities?label=' + encodeURIComponent(label))
+        .then(function (r) { return r.ok ? r.json() : null })
+        .then(function (body) {
+          if (body) capabilityCache[norm] = { known: !!body.known, multimodal: !!body.multimodal }
+        })
+        .catch(function () {})
+    }
+
+    function pollModel() {
+      var label = currentModelLabel()
+      if (label && label !== lastPolledLabel) {
+        lastPolledLabel = label
+        fetchCapabilities(label)
+      }
+    }
+
+    function modelIsMultimodal(label) {
+      var cap = capabilityCache[normalizeLabel(label)]
+      // 已知且多模态 -> 原生上传；未知（解析失败）按纯文本兜底，保持现有文本模型行为。
+      return !!(cap && cap.known && cap.multimodal)
+    }
+
     function onPaste(event) {
       var files = imageFilesOf(event)
       if (files.length === 0) return
-      if (VISION_HINT.test(currentModelLabel())) return
+      var label = currentModelLabel()
+      if (VISION_HINT.test(label)) return
+      if (modelIsMultimodal(label)) return
       event.preventDefault()
       event.stopImmediatePropagation()
       var target = event.target
@@ -134,7 +171,9 @@ window.__ModuleLoader__.load({
     function onDrop(event) {
       var files = filesOfDataTransfer(event.dataTransfer)
       if (files.length === 0) return
-      if (VISION_HINT.test(currentModelLabel())) return
+      var label = currentModelLabel()
+      if (VISION_HINT.test(label)) return
+      if (modelIsMultimodal(label)) return
       event.preventDefault()
       event.stopImmediatePropagation()
       Promise.all(files.map(uploadOne))
@@ -149,8 +188,14 @@ window.__ModuleLoader__.load({
     function apply(ctx) {
       document.addEventListener('paste', onPaste, true)
       document.addEventListener('drop', onDrop, true)
+      pollModel() // 立即拉取一次，缩短首次粘贴前的空窗
+      var pollTimer = setInterval(pollModel, 1000)
       if (typeof ctx.effect === 'function') {
-        ctx.effect(() => () => { document.removeEventListener('paste', onPaste, true); document.removeEventListener('drop', onDrop, true) }, 'dsh-vision-bridge: paste/drop-to-path listener')
+        ctx.effect(() => () => {
+          document.removeEventListener('paste', onPaste, true)
+          document.removeEventListener('drop', onDrop, true)
+          clearInterval(pollTimer)
+        }, 'dsh-vision-bridge: paste/drop-to-path listener')
       }
     }
 
