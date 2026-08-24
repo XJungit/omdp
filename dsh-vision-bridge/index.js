@@ -387,7 +387,7 @@ function registerReadImageTool(ctx, config) {
 function registerVisionProvider(ctx, config) {
   if (config?.visionProvider === false) return
   const families = config?.families || ['deepseek', 'glm']
-  const VISION_ID = /(deepseek-(vl|ocr)|janus|glm-[\d.]*v(\b|-))/i
+  const VISION_ID = /(deepseek-(?:v4-flash-vision|vl|ocr)|janus|glm-[\d.]*v(\b|-))/i
   const shouldWrap = (info) => {
     const id = String(info?.id ?? '').toLowerCase()
     if (!families.some((family) => id.startsWith(family))) return false
@@ -492,32 +492,62 @@ function registerVisionProvider(ctx, config) {
 const CAP_CACHE = new Map()
 const CAP_TTL_MS = 5 * 60 * 1000
 
+function normalizeModelText(value) {
+  return String(value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '')
+}
+
+function modelLabelScore(labelNorm, modelId, modelName) {
+  const candidates = [
+    { value: normalizeModelText(modelName), weight: 100 },
+    { value: normalizeModelText(modelId), weight: 90 },
+  ].filter((candidate) => candidate.value)
+  let best = 0
+  for (const candidate of candidates) {
+    const value = candidate.value
+    if (labelNorm === value) best = Math.max(best, 10000 + candidate.weight)
+    else if (labelNorm.includes(value)) best = Math.max(best, 8000 + value.length + candidate.weight)
+    else if (value.includes(labelNorm)) best = Math.max(best, 6000 + labelNorm.length + candidate.weight)
+  }
+  return best
+}
+
 async function resolveMultimodalByLabel(ctx, label) {
   const llm = ctx.get('llm')
   if (!llm || typeof llm.listProviders !== 'function') return { known: false }
-  const norm = String(label || '').toLowerCase().replace(/\s+/g, '')
+  const norm = normalizeModelText(label)
   if (!norm) return { known: false }
   const cached = CAP_CACHE.get(norm)
   if (cached && Date.now() - cached.t < CAP_TTL_MS) return { known: cached.known, multimodal: cached.multimodal }
-  let result = { known: false, multimodal: false }
+
+  // Do not stop at the first substring hit: DSV4F is a prefix of DSV4FV.
+  // Rank all matches first so an exact/longer model name always wins.
+  const candidates = []
   for (const p of llm.listProviders()) {
     const pid = p?.id
     if (!pid) continue
     let models = []
     try { models = await llm.listModels(pid) } catch { continue }
     for (const m of models) {
-      const mid = String(m?.id ?? '').toLowerCase()
-      const mname = String(m?.name ?? m?.id ?? '').toLowerCase()
-      const hit = (mid && (norm.includes(mid) || mid.includes(norm))) ||
-        (mname && (norm.includes(mname) || mname.includes(norm)))
-      if (!hit) continue
-      try {
-        const info = await llm.resolveModelInfo(pid, m.id)
-        result = { known: true, multimodal: Array.isArray(info?.inputModalities) && info.inputModalities.includes('image') }
-      } catch { /* 该模型解析失败，继续尝试下一个匹配 */ }
-      break
+      const modelId = String(m?.id ?? '')
+      const modelName = String(m?.name ?? m?.id ?? '')
+      const score = modelLabelScore(norm, modelId, modelName)
+      if (score > 0 && modelId) candidates.push({ score, pid, modelId })
     }
-    if (result.known) break
+  }
+  candidates.sort((a, b) => b.score - a.score)
+
+  let result = { known: false, multimodal: false }
+  for (const candidate of candidates) {
+    try {
+      const info = await llm.resolveModelInfo(candidate.pid, candidate.modelId)
+      result = {
+        known: true,
+        multimodal: Array.isArray(info?.inputModalities) && info.inputModalities.includes('image'),
+      }
+      break
+    } catch {
+      // Try the next ranked candidate if an adapter cannot resolve this one.
+    }
   }
   CAP_CACHE.set(norm, { ...result, t: Date.now() })
   return result
