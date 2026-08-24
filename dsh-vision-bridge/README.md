@@ -47,10 +47,11 @@ pnpm add @omdp/dsh-vision-bridge
 
 ### 3. 粘贴 / 拖拽图片（client.js）
 
-- **多模态模型**：粘贴/拖拽图片走 DSH 原生上传，插件不拦截。是否多模态由前端查询 host 的 `/vision-bridge/capabilities`（基于 `llm.resolveModelInfo` 的真实 `inputModalities` 判定），而非名字正则——任意真实视觉模型都会正确放行。
-- **纯文本模型**：捕获 paste/drop → POST /vision-bridge/paste → 临时文件 → 路径文本入输入框
-- 不会触发宿主图片准入（`inputModalities` 拒绝），因此文本模型也能"发图"
-- 前端按当前模型标签缓存能力判定，模型切换后 1 秒内刷新；`pasteToPath: false` 可整体关闭转路径行为。
+- **多模态模型**：粘贴图片走 DSH 原生上传，插件不拦截。是否多模态由前端查询 host 的 `/vision-bridge/capabilities`（基于 `llm.resolveModelInfo` 的真实 `inputModalities` 判定）；已知视觉别名（如 DSV4FV）在查询完成前也会快速放行。
+- **纯文本模型**：捕获 paste → POST /vision-bridge/paste → 临时文件 → 路径文本入输入框。
+- **拖拽事件不再由本插件注册**：全局 drop 生命周期交给 DSH 原生图片处理器和文件路径拖拽插件，避免多个插件同时 `stopImmediatePropagation()` 导致拖拽覆盖层卡死。当前版本只负责 paste-to-path；文本模型拖拽路径由已安装的文件拖拽插件处理。
+- 不会触发宿主图片准入（`inputModalities` 拒绝），因此文本模型仍能通过粘贴路径"发图"。
+- 前端按当前模型标签缓存能力判定；能力查询未完成时 fail-open 放行原生事件，避免误拦截；`pasteToPath: false` 可整体关闭转路径行为。
 
 ### 4. 包装 provider（`(vision bridge)` 模型条目）
 
