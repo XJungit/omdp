@@ -79,7 +79,9 @@ window.__ModuleLoader__.load({
     // The takeover is for text-only models: the (vision bridge) variants
     // convert pastes at request time with the thumbnail preserved, and real
     // vision models read images natively — both keep the original paste UX.
-    var VISION_HINT = /\(vision bridge\)|deepseek-(vl|ocr)|janus|glm-[\d.]*v\b|agnes-|sensenova/i
+    // Keep explicit vision aliases here as a fast path while the host capability
+    // lookup is still in flight (for example DSV4FV vs DSV4F).
+    var VISION_HINT = /\(vision bridge\)|dsv4fv\b|deepseek-v4-flash-vision(?:-exp)?\b|deepseek-(vl|ocr)|janus|glm-[\d.]*v\b|agnes-|sensenova/i
 
     function currentModelLabel() {
       var buttons = document.querySelectorAll('button[aria-label]')
@@ -91,24 +93,27 @@ window.__ModuleLoader__.load({
     }
 
     // 真实多模态能力缓存：key = 归一化后的模型标签，value = { known, multimodal }。
-    // 由 host 的 /vision-bridge/capabilities 用 llm.resolveModelInfo 判定，
-    // 比名字正则可靠——任意真实多模态模型（名字不在 VISION_HINT）都会走原生上传。
-    var capabilityCache = {}
+    // 由 host 的 /vision-bridge/capabilities 用 llm.resolveModelInfo 判定。
+    // pending 与 known:false 必须区分：能力查询尚未完成时不能贸然拦截原生图片事件。
+    var capabilityCache = Object.create(null)
+    var capabilityPending = Object.create(null)
     var lastPolledLabel = ''
 
     function normalizeLabel(label) {
-      return String(label || '').toLowerCase().replace(/\s+/g, '')
+      return String(label || '').toLowerCase().replace(/[^a-z0-9]+/g, '')
     }
 
     function fetchCapabilities(label) {
       var norm = normalizeLabel(label)
-      if (!norm || capabilityCache[norm]) return
+      if (!norm || capabilityCache[norm] || capabilityPending[norm]) return
+      capabilityPending[norm] = true
       fetch('/vision-bridge/capabilities?label=' + encodeURIComponent(label))
         .then(function (r) { return r.ok ? r.json() : null })
         .then(function (body) {
           if (body) capabilityCache[norm] = { known: !!body.known, multimodal: !!body.multimodal }
         })
         .catch(function () {})
+        .then(function () { delete capabilityPending[norm] })
     }
 
     function pollModel() {
@@ -119,18 +124,27 @@ window.__ModuleLoader__.load({
       }
     }
 
-    function modelIsMultimodal(label) {
+    // native = leave DSH's original image path untouched
+    // bridge = text model, convert the image to a temporary path
+    // pending = capability lookup has not completed; fail open to native handling
+    function imageDecision(label) {
+      if (VISION_HINT.test(label)) return 'native'
       var cap = capabilityCache[normalizeLabel(label)]
-      // 已知且多模态 -> 原生上传；未知（解析失败）按纯文本兜底，保持现有文本模型行为。
-      return !!(cap && cap.known && cap.multimodal)
+      if (!cap || !cap.known) return 'pending'
+      return cap.multimodal ? 'native' : 'bridge'
     }
 
     function onPaste(event) {
       var files = imageFilesOf(event)
       if (files.length === 0) return
       var label = currentModelLabel()
-      if (VISION_HINT.test(label)) return
-      if (modelIsMultimodal(label)) return
+      var decision = imageDecision(label)
+      if (decision !== 'bridge') {
+        // native and pending both fail open: never block DSH's own image path
+        // while a capability lookup is incomplete or unavailable.
+        if (decision === 'pending') fetchCapabilities(label)
+        return
+      }
       event.preventDefault()
       event.stopImmediatePropagation()
       var target = event.target
@@ -148,54 +162,20 @@ window.__ModuleLoader__.load({
     }
 
 
-    function filesOfDataTransfer(dt) {
-      var files = []
-      if (dt && dt.items) {
-        for (var i = 0; i < dt.items.length; i++) {
-          var item = dt.items[i]
-          if (item.kind === 'file') {
-            var f = item.getAsFile()
-            if (f && /^image\//.test(f.type)) files.push(f)
-          }
-        }
-      }
-      if (files.length === 0 && dt && dt.files) {
-        for (var j = 0; j < dt.files.length; j++) {
-          var df = dt.files[j]
-          if (/^image\//.test(df.type)) files.push(df)
-        }
-      }
-      return files
-    }
-
-    function onDrop(event) {
-      var files = filesOfDataTransfer(event.dataTransfer)
-      if (files.length === 0) return
-      var label = currentModelLabel()
-      if (VISION_HINT.test(label)) return
-      if (modelIsMultimodal(label)) return
-      event.preventDefault()
-      event.stopImmediatePropagation()
-      Promise.all(files.map(uploadOne))
-        .then(function (results) {
-          var text = results.map(function (r) { return r.path }).filter(Boolean).join(' ')
-          if (text) insertText(event.target, text + ' ')
-        })
-        .catch(function (error) {
-          console.error('[dsh-vision-bridge] drop-to-path failed: ' + (error && error.message ? error.message : error))
-        })
-    }
+    // Do not register a drop listener here. The separate file-drop plugin and
+    // DSH's native image intake both own the global drop lifecycle. Capturing
+    // and stopping a drop here can strand their overlay in the "drop" state.
+    // Vision Bridge's text-model path remains available through paste and the
+    // host-side autoRead/read_image flow.
     function apply(ctx) {
       document.addEventListener('paste', onPaste, true)
-      document.addEventListener('drop', onDrop, true)
       pollModel() // 立即拉取一次，缩短首次粘贴前的空窗
       var pollTimer = setInterval(pollModel, 1000)
       if (typeof ctx.effect === 'function') {
         ctx.effect(() => () => {
           document.removeEventListener('paste', onPaste, true)
-          document.removeEventListener('drop', onDrop, true)
           clearInterval(pollTimer)
-        }, 'dsh-vision-bridge: paste/drop-to-path listener')
+        }, 'dsh-vision-bridge: paste listener')
       }
     }
 
