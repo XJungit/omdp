@@ -1,25 +1,19 @@
-'use strict'
-// @omdp/dsh-key-fallback — Host half
+// @omdp/dsh-key-fallback — Host half (ESM)
 // 极简 API Key 回退：请求报错 → 静默换下一个 key 重试同一请求。
-const { readFileSync, existsSync } = require('node:fs')
-const { homedir } = require('node:os')
-const { join } = require('node:path')
-const { load: loadYaml } = (() => {
-  try { return require('js-yaml') }
-  catch { return { load: (s) => { try { return JSON.parse(s) } catch { return {} } } } }
-})()
-// dsh-settings 官方助手：installSettingsSection 挂在 scoped fiber 上，注册命名空间
-// 后 client 的 settings.plugin.item 键槽才能把它 serve 并渲染状态卡。
-// 参考 dshmarket（同款姿势，实证可显示）。schemastery 用于构造命名空间 schema。
-const dshSettings = (() => {
-  try { return require('@deepseek-ai/dsh-settings') } catch { return null }
-})()
-const zs = (() => {
-  try { return require('@deepseek-ai/schemastery') } catch { return null }
-})()
+//
+// 注意：必须 ESM + 静态 import（与 dshmarket / vision-bridge 一致）。
+// DSH 的 bundle loader 对 CommonJS 的 require() 是受限的（先前实测
+// dshSettings=false zs=false），只有 ESM import 能解析 DSH 内部包
+// （@deepseek-ai/dsh-settings / @deepseek-ai/schemastery）。
+import { readFileSync, existsSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+import { load as loadYaml } from 'js-yaml'
+import * as dshSettings from '@deepseek-ai/dsh-settings'
+import * as zs from '@deepseek-ai/schemastery'
 
-const name = 'key-fallback'
-const inject = ['llm', 'settings', 'webServer']
+export const name = 'key-fallback'
+export const inject = ['llm', 'settings', 'webServer']
 const API_BASE = '/dsh-key-fallback'
 const SETTINGS_FILE = join(homedir(), '.dsh', 'settings.yaml')
 // 与客户端 slots.register key 保持一致的命名空间名。
@@ -51,32 +45,25 @@ function readConfig() {
   } catch (e) { return {} }
 }
 
-function apply(ctx) {
+export function apply(ctx) {
   // 注册 settings 命名空间（官方助手 installSettingsSection，与 dshmarket 同款）：
   // 让客户端 Settings → 插件的 keyed slot（settings.plugin.item, key='key-fallback'）
   // 被 serve 并渲染状态卡。状态卡只读；轮换逻辑仍直接读 settings.yaml（原设计）。
-  // 诊断日志：确认注册链路是否真的执行（dsh-err.log 可查）。
-  if (dshSettings && zs) {
-    try {
-      const ns = dshSettings.settingsNamespace(SETTINGS_NS)
-      const schema = zs.object({
-        providers: zs.dict(zs.object({
-          env: zs.string(),
-          keys: zs.array(zs.string()),
-          cooldownMs: zs.natural(),
-        })),
-      })
-      dshSettings.installSettingsSection(ctx, ns, schema, {}, {
-        setSource: () => {},
-        onChange: () => {},
-      })
-      console.log('[key-fallback] settings namespace registered: ' + SETTINGS_NS)
-    } catch (e) {
-      console.log('[key-fallback] settings register FAILED: ' + (e && e.message ? e.message : e))
-      // 命名空间注册失败不影响核心轮换逻辑
-    }
-  } else {
-    console.log('[key-fallback] settings register SKIPPED (dshSettings=' + (!!dshSettings) + ' zs=' + (!!zs) + ')')
+  try {
+    const ns = dshSettings.settingsNamespace(SETTINGS_NS)
+    const schema = zs.object({
+      providers: zs.dict(zs.object({
+        env: zs.string(),
+        keys: zs.array(zs.string()),
+        cooldownMs: zs.natural(),
+      })),
+    })
+    dshSettings.installSettingsSection(ctx, ns, schema, {}, {
+      setSource: () => {},
+      onChange: () => {},
+    })
+  } catch (e) {
+    // 命名空间注册失败不影响核心轮换逻辑
   }
 
   const pools = new Map()
@@ -205,5 +192,3 @@ function apply(ctx) {
 
   ctx.effect(() => () => { lifetime.abort() })
 }
-
-module.exports = { name, inject, apply }
