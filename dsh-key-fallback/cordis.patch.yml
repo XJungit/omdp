@@ -1,5 +1,5 @@
 - insert:
     - id: key-fallback
-      name: dsh-key-fallback
+      name: '@omdp/dsh-key-fallback'
       inject: [llm, settings, webServer]
       config: {}

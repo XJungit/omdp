@@ -8,6 +8,11 @@ const { load: loadYaml } = (() => {
   try { return require('js-yaml') }
   catch { return { load: (s) => { try { return JSON.parse(s) } catch { return {} } } } }
 })()
+// schemastery 用于注册 settings 命名空间占位（served 集合来源）。
+// bundle 环境解析失败时降级为 null，此时仅卡片显示受影响、轮换逻辑照常。
+const zs = (() => {
+  try { return require('@deepseek-ai/schemastery') } catch { return null }
+})()
 
 const name = 'key-fallback'
 const inject = ['llm', 'settings', 'webServer']
@@ -41,12 +46,26 @@ function readConfig() {
 }
 
 function apply(ctx) {
-  // 占位命名空间：让只读状态卡出现在 Settings → 插件（keyed slot 要求 key ∈ served）
-  ctx.inject(['settings'], (sctx) => {
+  // 注册 settings 命名空间（含真实字段 schema）：让客户端 Settings → 插件
+  // 的 keyed slot（settings.plugin.item, key='key-fallback'）被 serve 并渲染状态卡。
+  // 状态卡只读；轮换逻辑仍直接读 settings.yaml（v1.0.0 原设计）。
+  // 注意：1.0.0 版写的是 `if (typeof zs !== 'undefined')` 死代码（zs 从未导入），
+  // 注册实际从未发生；这里用真实 require 修复。
+  if (zs) {
     try {
-      if (typeof zs !== 'undefined') sctx.settings.register('key-fallback', zs.object({}), { base: {} })
-    } catch (e) { /* 命名空间注册失败不影响核心轮换逻辑 */ }
-  })
+      ctx.inject(['settings'], (sctx) => {
+        sctx.settings.register('key-fallback', zs.object({
+          providers: zs.dict(zs.object({
+            env: zs.string(),
+            keys: zs.array(zs.string()),
+            cooldownMs: zs.natural(),
+          })),
+        }), { base: {} })
+      })
+    } catch (e) {
+      // 命名空间注册失败不影响核心轮换逻辑
+    }
+  }
 
   const pools = new Map()
   const attempts = new Map() // `${turn}:${step}` -> 已尝试次数（防止死循环）
