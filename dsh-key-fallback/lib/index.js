@@ -55,6 +55,7 @@ function apply(ctx) {
   // 注册 settings 命名空间（官方助手 installSettingsSection，与 dshmarket 同款）：
   // 让客户端 Settings → 插件的 keyed slot（settings.plugin.item, key='key-fallback'）
   // 被 serve 并渲染状态卡。状态卡只读；轮换逻辑仍直接读 settings.yaml（原设计）。
+  // 诊断日志：确认注册链路是否真的执行（dsh-err.log 可查）。
   if (dshSettings && zs) {
     try {
       const ns = dshSettings.settingsNamespace(SETTINGS_NS)
@@ -69,9 +70,13 @@ function apply(ctx) {
         setSource: () => {},
         onChange: () => {},
       })
+      console.log('[key-fallback] settings namespace registered: ' + SETTINGS_NS)
     } catch (e) {
+      console.log('[key-fallback] settings register FAILED: ' + (e && e.message ? e.message : e))
       // 命名空间注册失败不影响核心轮换逻辑
     }
+  } else {
+    console.log('[key-fallback] settings register SKIPPED (dshSettings=' + (!!dshSettings) + ' zs=' + (!!zs) + ')')
   }
 
   const pools = new Map()
