@@ -121,12 +121,29 @@ window.__ModuleLoader__.load({
       )
     }
 
+    function FallbackSection() {
+      // 同一个 KeyFallbackCard 样式，只是放在 section 页面容器中。
+      return React.createElement('div', { style: { padding: '12px 0' } },
+        React.createElement('h3', { style: { margin: '0 0 8px 0', fontSize: '14px', fontWeight: 600 } }, 'API Key 回退 — 池状态'),
+        React.createElement(KeyFallbackCard))
+    }
+
     function apply(ctx) {
-      // settings.plugin.item 是 root-scope 的 keyed slot，按 settings 命名空间
-      // 分发：host 端 installSettingsSection 注册 key-fallback 命名空间，使它
-      // 进入 served 集合后，本卡片才会被 ConfigurablePluginsTab 渲染。
-      // 参考 dshmarket：注册通过嵌套 settingsScope inject（保持模块级无
-      // settingsScope 硬依赖——旧宿主没有该服务时不至于拖垮整个插件）。
+      var slots = ctx.get('slots')
+      if (slots === undefined) return
+      // 1) 独立设置页：左侧菜单出现“API Key 回退”项（永远可见，不依赖 served）。
+      // 与 dshmarket/connector 的 settings.section 同构。
+      slots.inject('settings.section', function () {
+        return slots.register({
+          name: 'settings.section',
+          id: 'key-fallback',
+          order: 62,
+          label: 'API Key 回退',
+        }, FallbackSection)
+      })
+      // 2) 插件配置标签下的状态卡（served 时显示；上述独立页的补充）。
+      // 我们的 host 已用 installSettingsSection 注册 key-fallback 命名空间使它可 serve；
+      // 这里复用同一 KeyFallbackCard。
       var scopedInject = ctx.inject
       if (typeof scopedInject === 'function') {
         scopedInject(['settingsScope'], function (scoped) {
