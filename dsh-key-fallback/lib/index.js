@@ -13,7 +13,7 @@ import * as dshSettings from '@deepseek-ai/dsh-settings'
 import * as zs from '@deepseek-ai/schemastery'
 
 export const name = 'key-fallback'
-export const inject = ['llm', 'settings', 'webServer']
+export const inject = ['llm', 'settings', 'webServer', 'credentials']
 const API_BASE = '/dsh-key-fallback'
 const SETTINGS_FILE = join(homedir(), '.dsh', 'settings.yaml')
 // 与客户端 slots.register key 保持一致的命名空间名。
@@ -128,6 +128,11 @@ export function apply(ctx) {
     const key = pickKey(provider)
     if (!key) return config
     process.env[pool.env] = key
+    // ninerouter 这类 llm-pi-ai provider 凭据走 credentials 域（apiKeyEnv），
+    // 只写 env 不会生效 — 同步覆盖 credentials，使真实请求用池中 key。
+    if (ctx.credentials) {
+      try { await ctx.credentials.set(pool.env, key) } catch (e) {}
+    }
     return config
   })
 
