@@ -79,9 +79,10 @@ window.__ModuleLoader__.load({
     // The takeover is for text-only models: the (vision bridge) variants
     // convert pastes at request time with the thumbnail preserved, and real
     // vision models read images natively — both keep the original paste UX.
-    // Keep explicit vision aliases here as a fast path while the host capability
-    // lookup is still in flight (for example DSV4FV vs DSV4F).
+    // Keep explicit aliases as a fast path while the host capability lookup
+    // is still in flight. Boundaries are important: DSV4F must not match DSV4FV.
     var VISION_HINT = /\(vision bridge\)|dsv4fv\b|deepseek-v4-flash-vision(?:-exp)?\b|deepseek-(vl|ocr)|janus|glm-[\d.]*v\b|agnes-|sensenova/i
+    var TEXT_HINT = /\bdsv4f\b|deepseek-v4-flash(?![-\s]?vision)/i
 
     function currentModelLabel() {
       var buttons = document.querySelectorAll('button[aria-label]')
@@ -129,6 +130,7 @@ window.__ModuleLoader__.load({
     // pending = capability lookup has not completed; fail open to native handling
     function imageDecision(label) {
       if (VISION_HINT.test(label)) return 'native'
+      if (TEXT_HINT.test(label)) return 'bridge'
       var cap = capabilityCache[normalizeLabel(label)]
       if (!cap || !cap.known) return 'pending'
       return cap.multimodal ? 'native' : 'bridge'
@@ -162,20 +164,77 @@ window.__ModuleLoader__.load({
     }
 
 
-    // Do not register a drop listener here. The separate file-drop plugin and
-    // DSH's native image intake both own the global drop lifecycle. Capturing
-    // and stopping a drop here can strand their overlay in the "drop" state.
-    // Vision Bridge's text-model path remains available through paste and the
-    // host-side autoRead/read_image flow.
+    function filesOfDataTransfer(dt) {
+      var files = []
+      if (dt && dt.items) {
+        for (var i = 0; i < dt.items.length; i++) {
+          var item = dt.items[i]
+          if (item.kind !== 'file') continue
+          var file = item.getAsFile && item.getAsFile()
+          if (file && /^image\//.test(file.type)) files.push(file)
+        }
+      }
+      if (files.length === 0 && dt && dt.files) {
+        for (var j = 0; j < dt.files.length; j++) {
+          var dataFile = dt.files[j]
+          if (/^image\//.test(dataFile.type)) files.push(dataFile)
+        }
+      }
+      return files
+    }
+
+    // Let the file-drop plugin synchronously clear its overlay/depth state,
+    // but give it an empty payload so it does not insert the same image path.
+    // The marker prevents this synthetic event from re-entering onDrop.
+    function resetFileDropOverlay() {
+      try {
+        var reset = new Event('drop', { bubbles: true, cancelable: true })
+        Object.defineProperty(reset, 'dataTransfer', {
+          configurable: true,
+          value: { types: ['Files'], items: [], files: [], getData: function () { return '' } },
+        })
+        Object.defineProperty(reset, '__dshVisionBridgeReset', { value: true })
+        document.dispatchEvent(reset)
+      } catch (error) {
+        console.warn('[dsh-vision-bridge] drop overlay reset failed: ' + (error && error.message ? error.message : error))
+      }
+    }
+
+    function onDrop(event) {
+      if (event.__dshVisionBridgeReset) return
+      var files = filesOfDataTransfer(event.dataTransfer)
+      if (files.length === 0) return
+      var label = currentModelLabel()
+      var decision = imageDecision(label)
+      if (decision !== 'bridge') {
+        if (decision === 'pending') fetchCapabilities(label)
+        return
+      }
+      resetFileDropOverlay()
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      var target = event.target
+      Promise.all(files.map(uploadOne))
+        .then(function (results) {
+          var text = results.map(function (r) { return r.path }).filter(Boolean).join(' ')
+          if (text) insertText(target, text + ' ')
+        })
+        .catch(function (error) {
+          console.error('[dsh-vision-bridge] drop-to-path failed: ' + (error && error.message ? error.message : error))
+        })
+    }
+
     function apply(ctx) {
       document.addEventListener('paste', onPaste, true)
+      document.addEventListener('drop', onDrop, true)
       pollModel() // 立即拉取一次，缩短首次粘贴前的空窗
       var pollTimer = setInterval(pollModel, 1000)
       if (typeof ctx.effect === 'function') {
         ctx.effect(() => () => {
           document.removeEventListener('paste', onPaste, true)
+          document.removeEventListener('drop', onDrop, true)
           clearInterval(pollTimer)
-        }, 'dsh-vision-bridge: paste listener')
+        }, 'dsh-vision-bridge: paste/drop listener')
       }
     }
 
