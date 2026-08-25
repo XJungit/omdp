@@ -44,6 +44,31 @@ Install into a profile via a **local `link:` dependency** (see its README for th
 "@omdp/dsh-connector": "link:D:/WorkSpace/omdp/dsh-connector"
 ```
 
+### `dsh-key-fallback` → npm name `@omdp/dsh-key-fallback`
+
+Minimal API key fallback: on a retryable request error (`AUTH / 401 / key / rate / timeout` → `agent/request-error`), silently marks the current key cooling and **retries the same request with the next pooled key in one step**. Ships an always-visible settings section (`settings.section → API Key 回退`) that shows `分nek` key count / cursor / cooling / healthy (visibility-gated polling, no busy-loop).
+
+Configure in `~/.dsh/settings.yaml`:
+
+```yaml
+keyFallback:
+  providers:
+    ninerouter:   # provider id (e.g. ninerouter / openrouter / a6api)
+      env: NINEROUTER_API_KEY
+      keys:
+        - sk-xxx   # pooled keys
+        - sk-yyy
+      cooldownMs: 30000
+```
+
+**How it works:** `llm-pi-ai` providers (e.g. `ninerouter`) authenticate via the credentials domain — the host writes `ctx.credentials.set(env, key)` **and** `process.env[env]` so the retry actually reaches the model call **and** the UI `settings.section` + `settings.plugin.item` card show `分nek` cooling/healthy. The rotation is per-turn bounded (`turn:step` → ≤ `keys.length` retries) and backed by a 30s-per-failure cooldown (up to 5×). See `dsh-key-fallback/README.md` for the full reference and `dsh-vision-bridge`’s `index.js` for the ESM bundle pattern.
+
+Install into a profile via a **local `link:` dependency** or from **npm**:
+
+```json
+"@omdp/dsh-key-fallback": "^1.0.7"
+```
+
 ### `dsh-vision-bridge` → npm name `@omdp/dsh-vision-bridge`
 
 A zero-dependency plugin that gives **text-only models** vision: it auto-detects whether the
@@ -106,17 +131,19 @@ The same monorepo layout is used by other DSH plugin collections, e.g.
 
 ## Installing from npm (recommended)
 
-Both plugins are published to **npm** (`@omdp/dsh-connector`, `@omdp/dsh-vision-bridge`),
+All three plugins are published to **npm** (`@omdp/dsh-connector`, `@omdp/dsh-vision-bridge`,
+ `@omdp/dsh-key-fallback`),
 automatically by GitHub Actions on every `v*` tag. This is the **preferred** install
 path — it avoids the git-`#path:` normalization, cross-resolution, and
 `allowBuilds` friction that GitHub installs cause (see the history in
 `docs/npm-publish.md`).
 
 ```jsonc
-// ~/.dsh/profiles/<name>/package.json
+// ~/.dsh/profiles/<name>/package.json — you can use three or mix-and-match
 "dependencies": {
-  "@omdp/dsh-connector": "^0.1.0",
-  "@omdp/dsh-vision-bridge": "^0.1.0"
+  "@omdp/dsh-connector": "^0.2.5",
+  "@omdp/dsh-vision-bridge": "^0.1.6",
+  "@omdp/dsh-key-fallback": "^1.0.7"
 }
 ```
 
@@ -129,7 +156,7 @@ Updating is a standard `pnpm update`:
 
 ```sh
 cd ~/.dsh/profiles/<name>
-pnpm update @omdp/dsh-connector @omdp/dsh-vision-bridge
+pnpm update @omdp/dsh-connector @omdp/dsh-vision-bridge @omdp/dsh-key-fallback
 ```
 
 No `#path:` spec, no `allowBuilds` gate, no one-shot repair script, no duplicate
@@ -137,14 +164,16 @@ loader-id pitfalls — npm packages install as clean bundles.
 
 ## Releasing a new version (GitHub Actions)
 
-1. Bump `version` in `dsh-connector/package.json` and `dsh-vision-bridge/package.json`.
+1. Bump `version` in `dsh-connector/package.json`, `dsh-vision-bridge/package.json`,
+ and `dsh-key-fallback/package.json` (or only the one(s) you touched).
 2. Commit, then tag and push:
    ```sh
-   git tag v0.1.1
-   git push origin master && git push origin v0.1.1
+   git tag v1.0.7
+   git push origin master && git push origin v1.0.7
    ```
-3. `.github/workflows/publish.yml` publishes both packages to npm with provenance.
-4. Update your profile: `pnpm update @omdp/dsh-connector @omdp/dsh-vision-bridge`.
+3. `.github/workflows/publish.yml` publishes the three packages to npm with provenance
+ (re-publishing an already-published version is a no-op — skip message is printed).
+4. Update your profile: `pnpm update @omdp/dsh-connector @omdp/dsh-vision-bridge @omdp/dsh-key-fallback`.
 
 See [`docs/npm-publish.md`](docs/npm-publish.md) for the full setup (npm token,
 GitHub Secret, troubleshooting).
