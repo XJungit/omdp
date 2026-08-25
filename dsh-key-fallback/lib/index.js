@@ -41,13 +41,6 @@ function readConfig() {
 }
 
 function apply(ctx) {
-  // 占位命名空间：让只读状态卡出现在 Settings → 插件（keyed slot 要求 key ∈ served）
-  ctx.inject(['settings'], (sctx) => {
-    try {
-      if (typeof zs !== 'undefined') sctx.settings.register('key-fallback', zs.object({}), { base: {} })
-    } catch (e) { /* 命名空间注册失败不影响核心轮换逻辑 */ }
-  })
-
   const pools = new Map()
   const attempts = new Map() // `${turn}:${step}` -> 已尝试次数（防止死循环）
   const lifetime = new AbortController()
