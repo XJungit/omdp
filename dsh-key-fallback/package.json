@@ -1,7 +1,7 @@
 {
   "name": "@omdp/dsh-key-fallback",
   "description": "Minimal API key fallback for DeepSeek Harness: on a retryable request error, silently retry the same call with the next key in the pool.",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "type": "commonjs",
   "main": "lib/index.js",
   "exports": {

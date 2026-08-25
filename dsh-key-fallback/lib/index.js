@@ -8,8 +8,12 @@ const { load: loadYaml } = (() => {
   try { return require('js-yaml') }
   catch { return { load: (s) => { try { return JSON.parse(s) } catch { return {} } } } }
 })()
-// schemastery 用于注册 settings 命名空间占位（served 集合来源）。
-// bundle 环境解析失败时降级为 null，此时仅卡片显示受影响、轮换逻辑照常。
+// dsh-settings 官方助手：installSettingsSection 挂在 scoped fiber 上，注册命名空间
+// 后 client 的 settings.plugin.item 键槽才能把它 serve 并渲染状态卡。
+// 参考 dshmarket（同款姿势，实证可显示）。schemastery 用于构造命名空间 schema。
+const dshSettings = (() => {
+  try { return require('@deepseek-ai/dsh-settings') } catch { return null }
+})()
 const zs = (() => {
   try { return require('@deepseek-ai/schemastery') } catch { return null }
 })()
@@ -18,6 +22,8 @@ const name = 'key-fallback'
 const inject = ['llm', 'settings', 'webServer']
 const API_BASE = '/dsh-key-fallback'
 const SETTINGS_FILE = join(homedir(), '.dsh', 'settings.yaml')
+// 与客户端 slots.register key 保持一致的命名空间名。
+const SETTINGS_NS = 'key-fallback'
 
 function mask(key) {
   if (!key) return ''
@@ -46,21 +52,22 @@ function readConfig() {
 }
 
 function apply(ctx) {
-  // 注册 settings 命名空间（含真实字段 schema）：让客户端 Settings → 插件
-  // 的 keyed slot（settings.plugin.item, key='key-fallback'）被 serve 并渲染状态卡。
-  // 状态卡只读；轮换逻辑仍直接读 settings.yaml（v1.0.0 原设计）。
-  // 注意：1.0.0 版写的是 `if (typeof zs !== 'undefined')` 死代码（zs 从未导入），
-  // 注册实际从未发生；这里用真实 require 修复。
-  if (zs) {
+  // 注册 settings 命名空间（官方助手 installSettingsSection，与 dshmarket 同款）：
+  // 让客户端 Settings → 插件的 keyed slot（settings.plugin.item, key='key-fallback'）
+  // 被 serve 并渲染状态卡。状态卡只读；轮换逻辑仍直接读 settings.yaml（原设计）。
+  if (dshSettings && zs) {
     try {
-      ctx.inject(['settings'], (sctx) => {
-        sctx.settings.register('key-fallback', zs.object({
-          providers: zs.dict(zs.object({
-            env: zs.string(),
-            keys: zs.array(zs.string()),
-            cooldownMs: zs.natural(),
-          })),
-        }), { base: {} })
+      const ns = dshSettings.settingsNamespace(SETTINGS_NS)
+      const schema = zs.object({
+        providers: zs.dict(zs.object({
+          env: zs.string(),
+          keys: zs.array(zs.string()),
+          cooldownMs: zs.natural(),
+        })),
+      })
+      dshSettings.installSettingsSection(ctx, ns, schema, {}, {
+        setSource: () => {},
+        onChange: () => {},
       })
     } catch (e) {
       // 命名空间注册失败不影响核心轮换逻辑

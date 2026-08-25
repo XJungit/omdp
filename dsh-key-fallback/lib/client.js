@@ -122,15 +122,24 @@ window.__ModuleLoader__.load({
     }
 
     function apply(ctx) {
-      var slots = ctx.get('slots')
-      if (slots === undefined) return
       // settings.plugin.item 是 root-scope 的 keyed slot，按 settings 命名空间
-      // 分发：host 端 settings.register('key-fallback', …) 让该 key 进入
-      // served 集合后，本卡片才会被渲染（参考 auto-continue 的注册姿势）。
-      slots.inject('settings.plugin.item', () => slots.register({
-        name: 'settings.plugin.item',
-        key: 'key-fallback',
-      }, KeyFallbackCard))
+      // 分发：host 端 installSettingsSection 注册 key-fallback 命名空间，使它
+      // 进入 served 集合后，本卡片才会被 ConfigurablePluginsTab 渲染。
+      // 参考 dshmarket：注册通过嵌套 settingsScope inject（保持模块级无
+      // settingsScope 硬依赖——旧宿主没有该服务时不至于拖垮整个插件）。
+      var scopedInject = ctx.inject
+      if (typeof scopedInject === 'function') {
+        scopedInject(['settingsScope'], function (scoped) {
+          var scopedSlots = scoped.slots
+          if (!scopedSlots) return
+          scopedSlots.inject('settings.plugin.item', function () {
+            return scopedSlots.register({
+              name: 'settings.plugin.item',
+              key: 'key-fallback',
+            }, KeyFallbackCard)
+          })
+        })
+      }
     }
 
     exports.apply = apply
