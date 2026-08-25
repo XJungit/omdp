@@ -1,5 +1,7 @@
 # @omdp/dsh-gitbash-win
 
+> **Archived:** This plugin is retained for historical reference and is no longer maintained or published from this repository. Existing npm releases remain available, but new development should use an active plugin instead.
+
 ## Overview
 
 DSH (DeepSeek Harness) 全局 Git Bash 工具插件（Windows）。

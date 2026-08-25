@@ -34,12 +34,6 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Publish @omdp/dsh-gitbash-win
-        working-directory: dsh-gitbash-win
-        run: 'npm publish --provenance --access public || echo "skip: version already published"'
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
       - name: Publish @omdp/dsh-key-fallback
         working-directory: dsh-key-fallback
         run: 'npm publish --provenance --access public || echo "skip: version already published"'

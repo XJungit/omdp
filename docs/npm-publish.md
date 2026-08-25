@@ -1,7 +1,8 @@
 # 发布到 npm（GitHub Actions 自动发包）
 
-本仓库的三个插件（`@omdp/dsh-connector`、`@omdp/dsh-vision-bridge`、
-`@omdp/dsh-gitbash-win`）通过 **GitHub Actions 在 push tag 时自动发布到 npm**。
+本仓库的活动插件（`@omdp/dsh-connector`、`@omdp/dsh-vision-bridge`、
+`@omdp/dsh-key-fallback`）通过 **GitHub Actions 在 push tag 时自动发布到 npm**。
+`@omdp/dsh-gitbash-win` 与 `@omdp/dsh-resume-stream` 已归档，不再由本仓库维护或发布。
 本机不需要 npm 登录。
 
 ---
@@ -41,7 +42,8 @@ git push origin v0.1.0
 GitHub Actions 自动执行 `publish.yml`：
 - `dsh-connector/` → `npm publish` → `@omdp/dsh-connector@0.1.0`
 - `dsh-vision-bridge/` → `npm publish` → `@omdp/dsh-vision-bridge@0.1.0`
-- `dsh-gitbash-win/` → `npm publish` → `@omdp/dsh-gitbash-win@0.1.0`
+
+> `dsh-gitbash-win/` 与 `dsh-resume-stream/` 的发布步骤已随归档移除，不再由本仓库发布。
 
 到 https://github.com/XJungit/omdp/actions 看运行结果，绿色 = 发布成功。
 
@@ -56,7 +58,7 @@ GitHub Actions 自动执行 `publish.yml`：
 # 必须用 #path: 指定子目录（因为 3 个包在同一个仓库）
 dsh plugin --profile web add github:XJungit/omdp#path:dsh-connector
 dsh plugin --profile web add github:XJungit/omdp#path:dsh-vision-bridge
-dsh plugin --profile web add github:XJungit/omdp#path:dsh-gitbash-win
+# （dsh-gitbash-win 已归档，不再提供远程安装命令）
 ```
 
 **这不是简单的"命令长一点"——它埋着三个致命坑：**
@@ -118,8 +120,7 @@ dsh plugin add github:XJungit/dsh-connector      # 单独仓库，无 #path:
 // ~/.dsh/profiles/web/package.json
 "dependencies": {
   "@omdp/dsh-connector": "^0.1.0",
-  "@omdp/dsh-vision-bridge": "^0.1.0",
-  "@omdp/dsh-gitbash-win": "^0.1.0"
+  "@omdp/dsh-vision-bridge": "^0.1.0"
 }
 ```
 
@@ -151,7 +152,7 @@ pnpm install
 4. 本机更新：
    ```sh
    cd ~/.dsh/profiles/web
-   pnpm update @omdp/dsh-connector @omdp/dsh-vision-bridge @omdp/dsh-gitbash-win
+   pnpm update @omdp/dsh-connector @omdp/dsh-vision-bridge
    ```
 
 ---

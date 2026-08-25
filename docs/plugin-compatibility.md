@@ -1,14 +1,19 @@
 # OMDP 插件兼容性评估
 
-> 评估 `@omdp/*` 三个插件对 DSH（DeepSeek Harness）更新的抗崩溃能力。
+> ⚠️ **本文档为历史记录**：`@omdp/dsh-gitbash-win` 与 `@omdp/dsh-resume-stream`
+> 已于 2026-08-25 归档（源码移至 `archive/`，不再维护或发布）。下方对 gitbash
+> 的评估保留作为历史架构参考；当前活跃插件为 `@omdp/dsh-connector`、
+> `@omdp/dsh-vision-bridge`、`@omdp/dsh-key-fallback`。
+>
+> 评估内容：各插件对 DSH（DeepSeek Harness）更新的抗崩溃能力。
 > 核心问题：DSH 更新后，插件会不会导致 DSH 崩溃？
 
-**结论先行**：三个插件都采用**抗崩溃架构**——DSH 更新时**不会因插件而崩溃**（硬保证），
-最坏情况只是单个插件功能需要适配更新。三者互不影响。
+**结论先行**：活跃插件都采用**抗崩溃架构**——DSH 更新时**不会因插件而崩溃**（硬保证），
+最坏情况只是单个插件功能需要适配更新。插件之间互不影响。
 
 ---
 
-## 1. @omdp/dsh-gitbash-win（v0.1.6）
+## 1. @omdp/dsh-gitbash-win（v0.1.6）【已归档，仅作历史参考】
 
 ### 架构
 
@@ -48,7 +53,7 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 
 ---
 
-## 2. @omdp/dsh-connector（v0.1.2）
+## 2. @omdp/dsh-connector（v0.2.5）【活跃插件】
 
 ### 架构
 
@@ -81,7 +86,7 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 
 ---
 
-## 3. @omdp/dsh-vision-bridge（v0.1.2）
+## 3. @omdp/dsh-vision-bridge（v0.1.6）【活跃插件】
 
 ### 架构
 
@@ -115,18 +120,18 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 
 ---
 
-## 汇总对比
+## 汇总对比【gitbash 已归档】
 
 | 插件 | 版本 | 第三方依赖 | DSH 硬依赖 | 抗崩溃设计 | 最大风险点 |
 |---|---|---|---|---|---|
-| dsh-gitbash-win | 0.1.3 | 无（动态加载 5 个 @deepseek-ai/*） | `tools`/`subprocess`/`systemPrompt`/`shellEnv` | 顶层零依赖 + 动态加载 + 失败隔离 | `dsh-sandbox`（Windows ACL 上游 bug） |
-| dsh-connector | 0.1.1 | `yaml` | `webServer` | 纯静态 + 零 @deepseek-ai + try/catch | `ctx.webServer` API 变化 |
-| dsh-vision-bridge | 0.1.1 | 无 | `tools`/`attachments`/`llm`/`credentials` | 纯静态 + 零 @deepseek-ai + 防御性编码 | `ctx.llm` API 变化 |
+| dsh-gitbash-win（归档） | 0.1.6 | 无（动态加载 5 个 @deepseek-ai/*） | `tools`/`subprocess`/`systemPrompt`/`shellEnv` | 顶层零依赖 + 动态加载 + 失败隔离 | `dsh-sandbox`（Windows ACL 上游 bug） |
+| dsh-connector | 0.2.5 | `yaml` | `webServer` | 纯静态 + 零 @deepseek-ai + try/catch | `ctx.webServer` API 变化 |
+| dsh-vision-bridge | 0.1.6 | 无 | `tools`/`attachments`/`llm`/`credentials` | 纯静态 + 零 @deepseek-ai + 防御性编码 | `ctx.llm` API 变化 |
 
 ## 总体结论
 
-1. **三个插件都不会导致 DSH 崩溃**——这是共同的硬保证（架构设计使然）。
+1. **活跃插件都不会导致 DSH 崩溃**——这是共同的硬保证（架构设计使然）。
 2. **最坏情况**：DSH 大版本更新后，某个插件功能不可用/降级，需适配更新插件版本（不是 DSH 的问题）。
 3. **相互隔离**：任一插件失效，不影响其他插件和 DSH 本体。
-4. **建议**：DSH 大版本升级后，逐个验证三个插件（gitbash 工具、connector API、vision-bridge 识图），
+4. **建议**：DSH 大版本升级后，逐个验证活跃插件（connector API、vision-bridge 识图、key-fallback），
    有问题就更新对应插件版本。

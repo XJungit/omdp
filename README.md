@@ -20,13 +20,9 @@ omdp/
 │   ├── cordis.patch.yml # bundle activation row
 │   ├── package.json
 │   └── README.md
-├── dsh-gitbash-win/     # global Git Bash tool for Windows (POSIX shell for the model)
-│   ├── lib/
-│   │   ├── index.js     # host half (dynamically loads @deepseek-ai/* at apply time)
-│   │   └── client.js    # client half (toolview terminal card)
-│   ├── cordis.patch.yml # bundle activation row
-│   ├── package.json
-│   └── README.md
+├── archive/             # archived plugins retained for historical reference
+│   ├── dsh-gitbash-win/
+│   └── resume-stream/
 ├── _skeleton-client/    # copy-paste template: client + host bundle (Web UI plugin)
 ├── _skeleton-host/      # copy-paste template: host-only bundle
 ├── docs/                # research notes, e.g. AI-DSH-plugin-quality.md (community findings)
@@ -64,40 +60,26 @@ Install into a profile via a **local `link:` dependency**:
 
 See its own `README.md` for the full config reference.
 
-### `dsh-gitbash-win` → npm name `@omdp/dsh-gitbash-win`
+## Archived plugins
 
-A lightweight **global Git Bash tool** for Windows. Registers a `gitbash` model
-tool that runs every command via Git for Windows `bash.exe` (`bash -c`), giving
-the model a real POSIX shell (grep/sed/awk/pipes/globs) without WSL and without
-node-pty. Sandbox-aware, with timeout / background jobs / output-spill / a
-toolview terminal card. On Windows, Git Bash is the recommended shell for the
-model: POSIX semantics transfer well to Linux and macOS.
+The following plugins are retained under [`archive/`](archive/) for historical reference and are no longer maintained or published by this repository:
 
-Install into a profile from npm:
+- `@omdp/dsh-gitbash-win` → [`archive/dsh-gitbash-win/`](archive/dsh-gitbash-win/)
+- `@omdp/dsh-resume-stream` → [`archive/resume-stream/`](archive/resume-stream/)
 
-```sh
-dsh plugin --profile web add @omdp/dsh-gitbash-win
-```
-
-> **安装命令前提**：上面的 `dsh plugin add` 需要 `dsh` 已在 PATH。若你是按官方文档用 `npx` 运行 dsh（没有全局 `dsh` 命令），上面这行会报 `command not found: dsh` —— 改用等价命令：
-> `npx @deepseek-ai/dsh plugin --profile web add @omdp/dsh-gitbash-win`（不要求 `dsh` 在 PATH）。
-
-Requires Git for Windows installed (`C:\Program Files\Git\bin\bash.exe`).
-See its own `README.md` for config, sandbox notes, and troubleshooting.
+Existing npm versions remain available from npm. Archiving the source does not automatically uninstall an already-installed package from any DSH profile.
 
 ## Remote installs from GitHub (alternative)
 
-Each plugin is a standalone npm package in its own subdirectory, so it can also
+Each active plugin is a standalone npm package in its own subdirectory, so it can also
 be installed straight from GitHub without a local checkout:
 
 ```sh
 dsh plugin --profile web add github:XJungit/omdp#path:dsh-connector
 dsh plugin --profile web add github:XJungit/omdp#path:dsh-vision-bridge
-dsh plugin --profile web add github:XJungit/omdp#path:dsh-gitbash-win
 ```
 
-> **安装命令前提**：上面的 `dsh plugin add` 需要 `dsh` 已在 PATH。若你是按官方文档用 `npx` 运行 dsh（没有全局 `dsh` 命令），上面这几行会报 `command not found: dsh` —— 每行前面加 `npx @deepseek-ai/dsh` 即可（不要求 `dsh` 在 PATH），例如：
-> `npx @deepseek-ai/dsh plugin --profile web add github:XJungit/omdp#path:dsh-gitbash-win`。
+> **安装命令前提**：上面的 `dsh plugin add` 需要 `dsh` 已在 PATH。若你是按官方文档用 `npx` 运行 dsh（没有全局 `dsh` 命令），上面这几行会报 `command not found: dsh` —— 每行前面加 `npx @deepseek-ai/dsh` 即可（不要求 `dsh` 在 PATH）。
 
 The `#path:<subdir>` selector tells pnpm which workspace subdirectory to install
 (it resolves to that subpackage's `package.json`, not the repo root).
