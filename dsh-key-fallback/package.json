@@ -17,7 +17,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/XJungit/dsh-key-fallback.git"
+    "url": "git+https://github.com/XJungit/omdp.git"
   },
   "publishConfig": {
     "access": "public"
