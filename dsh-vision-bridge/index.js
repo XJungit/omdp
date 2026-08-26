@@ -665,7 +665,10 @@ function registerAutoRead(ctx, appConfig) {
     // 检测当前路由模型是否支持图片输入。
     // rc.7+ 的 pre-step 载荷带 `agent`（rc.8 文档化签名），这是拿到当前路由
     // provider/model 的正确途径；decision.session 从来不存在，保留为兜底。
-    const sessionCfg = payload.agent?.session?.requestHeader?.()?.config ?? decision.session?.requestHeader?.()?.config
+    const sessionCfg =
+      payload.agent?.requestHeader?.()?.config ??
+      payload.agent?.session?.requestHeader?.()?.config ??
+      decision.session?.requestHeader?.()?.config
     const provider = sessionCfg?.provider
     const model = sessionCfg?.model
     let capable = false
@@ -673,6 +676,14 @@ function registerAutoRead(ctx, appConfig) {
       try {
         const info = await ctx.get('llm').resolveModelInfo(provider, model, payload.signal)
         capable = Array.isArray(info?.inputModalities) && info.inputModalities.includes('image')
+      } catch {}
+    }
+    // 兜底：会话配置取不到 provider/model，或 resolveModelInfo 未暴露 image 模态时，
+    // 用插件自身的标签匹配（与 /capabilities 同款逻辑）判定，避免多模态模型被误判成纯文本去走 Agnes。
+    if (!capable && model && typeof resolveMultimodalByLabel === 'function') {
+      try {
+        const r = await resolveMultimodalByLabel(ctx, model)
+        capable = !!r?.multimodal
       } catch {}
     }
     // 未显式配置时：多模态跳过转换，纯文本自动转换
