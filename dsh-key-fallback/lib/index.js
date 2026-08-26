@@ -275,7 +275,7 @@ export function apply(ctx) {
         pool.currentRef = key.ref
         diag('agent/request', 'PICK ' + key.ref + ' env=' + pool.cfg.env)
         try { process.env[pool.cfg.env] = key.value } catch (e) {}
-        try { backupFile(CRED_FILE, 'credentials'); ctx.credentials.set(credentialRef(pool.cfg.env), key.value).catch(() => {}) } catch (e) {}
+        try { backupFile(CRED_FILE, 'credentials') } catch (e) {}
       } catch (e) {}
       return config
     }).catch((e) => {})
@@ -302,7 +302,7 @@ export function apply(ctx) {
     // 失败后优先按 nextRef 轮换（用户配置的顺序）；useKeyRef 只决定初始选择
     const nextKey = nextKeyFor(pool, curRef)
     if (nextKey) {
-      try { await backupFile(CRED_FILE, 'credentials'); ctx.credentials.set(credentialRef(pool.cfg.env), nextKey.value); process.env[pool.cfg.env] = nextKey.value } catch (e) {}
+      try { await backupFile(CRED_FILE, 'credentials'); process.env[pool.cfg.env] = nextKey.value } catch (e) {}
       pool.currentRef = nextKey.ref
     } else {
       // 无 nextRef 可选时：若 useKeyRef 锁定 key 仍 live 则退回它，否则放弃

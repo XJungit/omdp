@@ -1,7 +1,7 @@
 {
   "name": "@omdp/dsh-key-fallback",
   "description": "Elliptic key pool with automatic rotation for DeepSeek Harness LLM providers. Settings → API Key 回退 UI: pick provider, add multiple keys (write-only). v3.",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
