@@ -13,9 +13,10 @@ Current version is **v6** (`3.1.0`).
 
 - **Pool cards** with status dots, badges, enable switch, per-pool cooldown display and a "重置冷却" reset button.
 - **轮转触发码 (rotation triggers) are now configurable and actually enforced**: click chips to select which error codes
-  cause rotation (`QUOTA` / `AUTH` / `RATE_LIMIT` / `TIMEOUT` / `TRANSPORT` / `SERVER`), or add a custom code. The default set is a
-  superset of the old hard-coded behavior, so existing pools behave identically unless you change it.
-- **真正当前使用的 key 显示**: the page shows which key is actually being used right now (derived from the last value written to the
+  cause rotation — the preset chips cover the full DSH `LlmError` standard code set (`QUOTA` / `AUTH` / `RATE_LIMIT` / `TIMEOUT` /
+  `TRANSPORT` / `SERVER` / `EMPTY_RESPONSE` / `INVALID_CREDENTIAL`), or add a non-standard/custom code (matched exactly against the
+  provider's `failure.code`). The default set is the full standard set.
+- **真实当前使用 key 显示**: the page shows which key is actually being used right now (derived from the last value written to the
   provider's env), instead of a truncated hash.
 - **短 ref 命名**: new keys are named `key_fallback_<provider>_key1`, `key_fallback_<provider>_key2`, … so the UI shows clean short
   names (`key1`, `key2`…) instead of long ref strings. Existing long refs are migrated once, automatically and idempotently.

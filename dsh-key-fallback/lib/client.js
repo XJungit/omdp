@@ -34,9 +34,11 @@ window.__ModuleLoader__.load({
     var ce = React.createElement
 
     // ── 常用代码 / 名称 ──
-    var ROTATE_CODES = ['QUOTA', 'AUTH', 'RATE_LIMIT', 'TIMEOUT', 'TRANSPORT', 'SERVER']
+    // 预设 chips = DSH LlmError 标准码（换 key 有意义的全集）。这些码决定「失败后是否换 key」，
+    // 与 DSH 的重试机制（provider 的 retryPolicy.retryableCodes，决定同一把 key 是否重发）独立互补。
+    var ROTATE_CODES = ['QUOTA', 'AUTH', 'RATE_LIMIT', 'TIMEOUT', 'TRANSPORT', 'SERVER', 'EMPTY_RESPONSE', 'INVALID_CREDENTIAL']
     function codeLabel(c) {
-      return { QUOTA: '配额用尽', AUTH: '认证失败', RATE_LIMIT: '限流', TIMEOUT: '超时', TRANSPORT: '传输错误', SERVER: '服务端' }[c] || c
+      return { QUOTA: '配额用尽', AUTH: '认证失败', RATE_LIMIT: '限流', TIMEOUT: '超时', TRANSPORT: '传输错误', SERVER: '服务端', EMPTY_RESPONSE: '空响应', INVALID_CREDENTIAL: '凭据无效' }[c] || c
     }
 
     // ── CSS（一次注入）──
@@ -94,7 +96,7 @@ window.__ModuleLoader__.load({
       '.kf_statusDot.recovered{background:#38bdf8}',
       '.kf_keyName{font-weight:600;font-size:12.5px;color:var(--dsw-alias-label-primary,#e8e8e8);min-width:56px;display:flex;align-items:center;gap:6px}',
       '.kf_keyRef{font-size:10.5px;color:var(--dsw-alias-label-secondary,#9aa);font-family:ui-monospace,Menlo,Consolas,monospace;opacity:.75;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
-      '.kf_keyVal{flex:1;min-width:170px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;padding:6px 10px;border-radius:8px;border:1px dashed var(--dsw-alias-border-l2,rgba(128,128,128,.3));background:var(--dsw-alias-bg-base,rgba(0,0,0,.22));color:inherit}',
+      '.kf_keyVal{flex:1;min-width:170px;max-width:100%;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;padding:6px 10px;border-radius:8px;border:1px dashed var(--dsw-alias-border-l2,rgba(128,128,128,.3));background:var(--dsw-alias-bg-base,rgba(0,0,0,.22));color:inherit;overflow-wrap:anywhere;word-break:break-all;line-height:1.5}',
       '.kf_keyActions{display:flex;gap:6px;align-items:center;flex-wrap:wrap}',
       '.kf_err{color:var(--dsw-alias-state-error-primary,#f87171);font-size:12px;line-height:1.5}',
       '.kf_ok{color:var(--dsw-alias-state-success-primary,#4ade80);font-size:12px;line-height:1.5}',
@@ -106,7 +108,7 @@ window.__ModuleLoader__.load({
       '.kf_iconBtn{cursor:pointer;font:inherit;font-size:12px;width:28px;height:28px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.3));background:transparent;color:var(--dsw-alias-label-secondary,#9aa);display:inline-flex;align-items:center;justify-content:center;transition:all .12s;flex:none;line-height:1}',
       '.kf_iconBtn:hover:not(:disabled){color:var(--dsw-alias-label-primary,#eee);border-color:var(--dsw-alias-brand-primary,#5b8cff);background:var(--dsw-alias-bg-layer-2,rgba(128,128,128,.12))}',
       '.kf_iconBtn:disabled{opacity:.4;cursor:default}',
-      '.kf_envNote{font-size:11.5px;color:var(--dsw-alias-label-secondary,#9aa);border:1px dashed var(--dsw-alias-border-l2,rgba(128,128,128,.28));border-radius:8px;padding:6px 10px;flex:1;min-width:150px}',
+      '.kf_envNote{font-size:11.5px;color:var(--dsw-alias-label-secondary,#9aa);border:1px dashed var(--dsw-alias-border-l2,rgba(128,128,128,.28));border-radius:8px;padding:6px 10px;flex:1;min-width:150px;overflow-wrap:anywhere}',
     ].join('')
     if (typeof document !== 'undefined' && !document.querySelector('style[data-plugin-css="@omdp/dsh-key-fallback"]')) {
       var tag = document.createElement('style')
@@ -201,7 +203,7 @@ window.__ModuleLoader__.load({
           k.active ? ce('span', { className: 'kf_badge ok', style: { padding: '1px 7px', fontSize: 10.5 } }, '当前') : null,
         ),
         ce('span', { className: 'kf_keyRef', title: k.ref }, k.ref),
-        isEnv
+        isEnv && !isRevealed
           ? ce('span', { className: 'kf_envNote' },
               props.pool.envSource === 'env' && props.pool.envWritable === false
                 ? '由启动环境提供（只读）'
@@ -389,7 +391,12 @@ window.__ModuleLoader__.load({
           (pool.rotateOn || []).filter(function (c) { return ROTATE_CODES.indexOf(c) < 0 }).map(function (c) {
             return ce('span', { key: c, className: 'kf_chip on' }, c)
           }),
-          ce('span', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary,#9aa)' } }, '勾选=失败后轮换；取消=不轮换'),
+          ce('span', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary,#9aa)' } }, '勾选=该错误发生后换下一把 key；换 key 与 DSH 的重试再发相互独立'),
+        ),
+        ce('div', { className: 'kf_customRow', style: { fontSize: 11, color: 'var(--dsw-alias-label-tertiary,#778)', lineHeight: 1.6 } },
+          '补充：DSH 的重试插件负责「同一把 key 重发几次」，由各模型 provider 的 retryPolicy 决定；',
+          ce('br'),
+          '这里只决定「失败后是否切换到下一把 key」。预设 chips 已含 LlmError 标准码，下方输入框用于添加非标准/自定义错误码（与 provider 返回的 failure.code 精确匹配）。',
         ),
         ce('div', { className: 'kf_section' }, '密钥链'),
         keys.length === 0

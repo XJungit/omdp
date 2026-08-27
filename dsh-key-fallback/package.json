@@ -1,7 +1,7 @@
 {
   "name": "@omdp/dsh-key-fallback",
-  "description": "API Key 回退轮换插件：多 key 池 + 自动轮换（触发码可配置）+ 环境密钥编辑 + 明文揭示 + 短 ref 迁移。Settings → API Key 回退 UI. v6.",
-  "version": "3.1.0",
+  "description": "API Key 回退轮换插件：多 key 池 + 自动轮换（触发码可配置，含 LlmError 标准码全集）+ 环境密钥编辑 + 明文揭示 + 短 ref 迁移。Settings → API Key 回退 UI. v6.1.",
+  "version": "3.1.1",
   "type": "module",
   "main": "lib/index.js",
   "exports": {

@@ -95,10 +95,12 @@ function sendJson(res, code, data) {
 }
 
 // ── 轮转触发语义（v6：rotateOn 真正生效）──
-// 默认集 = 旧 RETRYABLE_CODES 行为超集（QUOTA_EXCEEDED 规范化成规范码 QUOTA）；
-// 用户保存什么就严格按什么判断——不做「等于旧三元组就提升成超集」的魔法，
-// 否则用户精确配置的三个码保存后刷新会变回六个，配置不生效。
-const DEFAULT_ROTATE_ON = ['QUOTA', 'AUTH', 'RATE_LIMIT', 'TIMEOUT', 'TRANSPORT', 'SERVER']
+// 注意：rotateOn 决定「失败后是否换下一把 key」，与 DSH 的重试机制（dsh-llm-retry 按
+// provider 的 retryPolicy.retryableCodes 决定是否用同一把 key 重发、重试几次）相互独立、互补：
+// 同一 failure.code，重试插件决定重发，本插件决定换 key。所以这是两套开关，不存在谁覆盖谁。
+// 预设 = LlmError 标准码（换 key 有意义的全集）：QUOTA/AUTH/RATE_LIMIT/TIMEOUT/TRANSPORT/SERVER
+// + EMPTY_RESPONSE/INVALID_CREDENTIAL。ABORTED（用户取消）永远不轮换。
+const DEFAULT_ROTATE_ON = ['QUOTA', 'AUTH', 'RATE_LIMIT', 'TIMEOUT', 'TRANSPORT', 'SERVER', 'EMPTY_RESPONSE', 'INVALID_CREDENTIAL']
 function canonicalCode(c) {
   const s = String(c || '').toUpperCase()
   if (s === 'QUOTA_EXCEEDED' || s === 'QUOTA') return 'QUOTA'
@@ -118,6 +120,7 @@ const CODE_KEYWORDS = {
   TRANSPORT: /transport|network|econn|socket|eai|dns|fetch failed|connection|closed|reset|unreachable/i,
   SERVER: /5\d\d|server error|internal|unavailable|502|503|504|bad gateway|overload/i,
   EMPTY_RESPONSE: /empty response|no content|empty reply/i,
+  INVALID_CREDENTIAL: /invalid credential|malformed|bad credential|invalid api key/i,
 }
 function shouldRotate(pool, code, rawMsg, status) {
   const triggers = effectiveRotateOn(pool.cfg.rotateOn)
