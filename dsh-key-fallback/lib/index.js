@@ -1,12 +1,18 @@
-// @omdp/dsh-key-fallback — Host half (ESM, v5)
+// @omdp/dsh-key-fallback — Host half (ESM, v6)
 //
-// v5 = v1 核心功能全量恢复（预写 + 失败标记 + 顺序配置）+ v4 的 CRUD 与极简配置：
-//   - 配置来源 = ~/.dsh/settings.yaml 的 key-fallback.providers[*]
-//   - agent/request 预写：每次请求把池当前 key 写入 env + credentials（v1 行为）
-//   - agent/request-error：标记失败的 key（failCount/cooldown/status/lastError）并按 nextRef 顺序切下一个
-//   - 每个 key 可配置 nextRef（失败后跳转到指定 key），UI 可直接配置轮换顺序
-//   - GET /pools 返回每个 key 的实时状态（status/failCount/cooldownRemaining/lastError），UI 展示
-import { readFileSync, writeFileSync, existsSync } from 'node:fs'
+// v6 = v5 全量功能 + 用户要求的修复与增强：
+//   - 轮转触发码真正生效：agent/request-error 按池的 rotateOn 判断（可配置、chips 可点选），
+//     数字 status 与消息关键字按所选触发码映射；默认集=旧行为超集（无回归）。
+//   - 「当前使用」显示修复：GET /pools 返回 activeRef（= 最近一次预写进 process.env 的 key），
+//     POST/PATCH 改 useKeyRef 后同步刷新内存池 + env，UI 立刻显示真正在用的 key。
+//   - key 短命名：新增 key 自动命名为 key_fallback_<provider>_key<N>；
+//     旧的长 ref 在首次加载时一次性迁移（refsCompacted 标记，幂等，先 set 新 ref 再 unset 旧 ref）。
+//   - 明文揭示：GET /keys/plain?provider=&ref= 返回真实值（走 rawResolve，绕过池 wrap）。
+//   - 环境密钥可编辑：PATCH /keys 的 ref 等于池 env 时改写 .credentials.yaml（describe 可写才允许）。
+//   - 隐藏 bug 修复：PATCH /keys 解构 useKeyRef（此前「设为当前」静默失效）；
+//     warmPools 不再二次调用 pickKey；GET /pools 返回真实 label；POST /diag 接受；
+//     resolve wrap 尊重 pool.enabled。
+import { readFileSync, writeFileSync, existsSync, copyFileSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { load as loadYaml, dump as dumpYaml } from 'js-yaml'
@@ -43,7 +49,7 @@ const profileSchema = z.object({
   env: z.string().pattern(/^[A-Za-z_][A-Za-z0-9_]*$/).default('NINEROUTER_API_KEY'),
   cooldownMs: z.number().min(0).default(30000),
   enabled: z.boolean().default(true),
-  rotateOn: z.array(z.string()).default(['QUOTA_EXCEEDED', 'AUTH', 'RATE_LIMIT']),
+  rotateOn: z.array(z.string()).default(['QUOTA', 'AUTH', 'RATE_LIMIT', 'TIMEOUT', 'TRANSPORT', 'SERVER']),
   keyRefs: z.array(z.object({
     ref: z.string().pattern(/^[A-Za-z_][A-Za-z0-9_]*$/),
     label: z.string().default(''),
@@ -52,6 +58,7 @@ const profileSchema = z.object({
   })).default([]),
   displayName: z.string().default(''),
   useKeyRef: z.string().default(''),
+  refsCompacted: z.boolean().default(false),
 })
 
 function readSettings() {
@@ -87,10 +94,74 @@ function sendJson(res, code, data) {
   } catch (e) { try { res.end() } catch {} }
 }
 
-const RETRYABLE_CODES = ['RATE_LIMIT', 'AUTH', 'QUOTA_EXCEEDED', 'TIMEOUT', 'TRANSPORT']
+// ── 轮转触发语义（v6：rotateOn 真正生效）──
+// 默认集 = 旧 RETRYABLE_CODES 行为超集（QUOTA_EXCEEDED 规范化成规范码 QUOTA）；
+// 用户保存什么就严格按什么判断——不做「等于旧三元组就提升成超集」的魔法，
+// 否则用户精确配置的三个码保存后刷新会变回六个，配置不生效。
+const DEFAULT_ROTATE_ON = ['QUOTA', 'AUTH', 'RATE_LIMIT', 'TIMEOUT', 'TRANSPORT', 'SERVER']
+function canonicalCode(c) {
+  const s = String(c || '').toUpperCase()
+  if (s === 'QUOTA_EXCEEDED' || s === 'QUOTA') return 'QUOTA'
+  return s
+}
+// 读取池配置时规范化 rotateOn；空数组/未配置 → 返回默认超集。
+function effectiveRotateOn(stored) {
+  const norm = (Array.isArray(stored) ? stored : []).map(canonicalCode).filter(Boolean)
+  if (norm.length === 0) return [...DEFAULT_ROTATE_ON]
+  return norm
+}
+const CODE_KEYWORDS = {
+  QUOTA: /quota|insufficient|balance|credit|budget|exhaust|billing|limit exceeded/i,
+  AUTH: /401|403|auth|credential|denied|forbidden|invalid key|api key|unauthor|token/i,
+  RATE_LIMIT: /429|rate|limit|throttl|too many|try again later|concurr|busy/i,
+  TIMEOUT: /timeout|timed ?out|deadline|gateway timeout/i,
+  TRANSPORT: /transport|network|econn|socket|eai|dns|fetch failed|connection|closed|reset|unreachable/i,
+  SERVER: /5\d\d|server error|internal|unavailable|502|503|504|bad gateway|overload/i,
+  EMPTY_RESPONSE: /empty response|no content|empty reply/i,
+}
+function shouldRotate(pool, code, rawMsg, status) {
+  const triggers = effectiveRotateOn(pool.cfg.rotateOn)
+  if (triggers.includes(code)) return true
+  const s = Number(status)
+  if (Number.isFinite(s) && s >= 400 && s <= 599) {
+    const mapped = s === 429 ? 'RATE_LIMIT' : (s === 401 || s === 403 ? 'AUTH' : (s === 402 ? 'QUOTA' : (s >= 500 ? 'SERVER' : 'AUTH')))
+    if (triggers.includes(mapped)) return true
+  }
+  for (const t of triggers) {
+    const rx = CODE_KEYWORDS[t]
+    if (rx && rx.test(rawMsg)) return true
+  }
+  return false
+}
+
+// ── key 短命名 ──
+function safeProvider(provider) {
+  return String(provider || '').replace(/[^A-Za-z0-9_]/g, '_')
+}
+function isShortRef(ref) {
+  return /^key_fallback_[A-Za-z0-9_]+_key\d+$/.test(ref)
+}
+function shortRefOf(provider, n) {
+  return 'key_fallback_' + safeProvider(provider) + '_key' + n
+}
+// 为新增 key 分配下一个空闲短 ref（key1、key2…）
+function nextKeyRef(provider, keyRefs) {
+  const used = new Set((Array.isArray(keyRefs) ? keyRefs : []).map((e) => e && e.ref).filter(Boolean))
+  let n = 1
+  while (used.has(shortRefOf(provider, n))) n++
+  return shortRefOf(provider, n)
+}
+// 从 ref 派生显示名（label 优先，否则 key_fallback_x_keyN → keyN）
+function displayNameOf(entry) {
+  if (entry && entry.label) return entry.label
+  const ref = (entry && entry.ref) || ''
+  const m = /_key(\d+)$/.exec(ref)
+  if (m) return 'key' + m[1]
+  return ref
+}
 
 export function apply(ctx) {
-  try { ctx.logger.info('key-fallback: v5 host apply() starting (config = settings.yaml)') } catch (e) {}
+  try { ctx.logger.info('key-fallback: v6 host apply() starting (config = settings.yaml)') } catch (e) {}
   const diagLog = []
   const diag = (kind, msg) => { try { diagLog.push({ kind, msg: String(msg).slice(0, 300), at: Date.now() }); if (diagLog.length > 200) diagLog.splice(0, diagLog.length - 200) } catch (e) {} }
   diag('apply', 'host loaded')
@@ -105,9 +176,9 @@ export function apply(ctx) {
       try { result = await rawResolve(ref) } catch (e) { result = undefined }
       const refName = String(ref || '')
       const pool = poolsByEnv.get(refName)
-      if (pool && pool.currentRef) {
+      if (pool && pool.cfg && pool.cfg.enabled !== false && pool.currentRef) {
         const cur = pool.keyValues.find((k) => k.ref === pool.currentRef)
-        if (cur) { diag('resolve', 'pool-hit ' + refName + ' -> ' + cur.ref.slice(-12)); return { value: cur.value, source: 'pool' } }
+        if (cur) { diag('resolve', 'pool-hit ' + refName + ' -> ' + cur.ref); return { value: cur.value, source: 'pool' } }
       }
       return result
     }
@@ -120,6 +191,8 @@ export function apply(ctx) {
   function readPools() {
     const cfg = readSettings()
     const providers = (cfg && cfg.providers) || {}
+    // 每次全量重建 env 索引：删除池/改 env 后不得残留旧映射（否则 wrap 会命中已删池）
+    poolsByEnv.clear()
     for (const name in providers) {
       if (!pools.has(name)) pools.set(name, { cfg: providers[name], keyValues: [], cursor: 0, currentRef: '' })
       else pools.get(name).cfg = providers[name]
@@ -129,11 +202,59 @@ export function apply(ctx) {
     for (const name of [...pools.keys()]) if (!providers[name]) pools.delete(name)
   }
 
-  async function resolvePoolKeys(pool) {
+  // 一次性迁移旧长 ref → 短 ref（key_fallback_x_keyN）。幂等：迁移后长 ref 不存在即自然短路。
+  // 顺序：先 set 新 ref（从旧 ref 读值）→ 改 settings → 再 unset 旧 ref；任一步失败即中止，保留旧状态可重试。
+  // 注意：不依赖 refsCompacted 短路——空池创建会先置标记，若之后外部导入旧格式长 ref 仍必须迁移。
+  async function compactRefs(provider, prof) {
+    const entries = (prof.keyRefs || []).map((e) => {
+      if (typeof e === 'string') return { ref: e, label: '', createdAt: 0, nextRef: '' }
+      return { ref: e.ref || '', label: e.label || '', createdAt: e.createdAt || 0, nextRef: e.nextRef || '' }
+    })
+    const longOnes = entries.filter((e) => e.ref && e.ref.startsWith('key_fallback_') && !isShortRef(e.ref))
+    if (longOnes.length === 0) return false
+    const oldToNew = new Map()
+    const used = new Set(entries.map((e) => e.ref).filter(isShortRef))
+    let n = 1
+    for (const e of longOnes) {
+      while (used.has(shortRefOf(provider, n))) n++
+      oldToNew.set(e.ref, shortRefOf(provider, n))
+      used.add(shortRefOf(provider, n))
+      n++
+    }
+    // 1) 写新 ref（读旧值）
+    for (const [oldRef, newRef] of oldToNew) {
+      let hit
+      try { hit = rawResolve ? await rawResolve(credentialRef(oldRef)) : await ctx.credentials.resolve(credentialRef(oldRef)) } catch (e) { hit = undefined }
+      if (!hit || !hit.value) return false
+      try { backupFile(CRED_FILE, 'credentials'); await ctx.credentials.set(credentialRef(newRef), hit.value) } catch (e) { return false }
+    }
+    // 2) 更新 settings 引用
+    for (const e of entries) {
+      if (e.ref && oldToNew.has(e.ref)) e.ref = oldToNew.get(e.ref)
+      if (e.nextRef && oldToNew.has(e.nextRef)) e.nextRef = oldToNew.get(e.nextRef)
+    }
+    if (prof.useKeyRef && oldToNew.has(prof.useKeyRef)) prof.useKeyRef = oldToNew.get(prof.useKeyRef)
+    prof.keyRefs = entries
+    prof.refsCompacted = true
+    // 3) unset 旧 ref（best-effort）
+    for (const oldRef of oldToNew.keys()) { try { await ctx.credentials.unset(credentialRef(oldRef)) } catch (e) {} }
+    return true
+  }
+
+  async function resolvePoolKeys(pool, providerName) {
+    // 迁移旧 ref（一次），成功后持久化 settings —— 用与 pool.cfg 同一对象的 settings 块
+    const cfg = readSettings()
+    const providers = cfg.providers || {}
+    // 让 pool.cfg 指向本次解析的树（之前 readPools 解析的是旧树，改它无法写回）
+    if (providers[providerName]) pool.cfg = providers[providerName]
+    let compacted = false
+    if (pool.cfg) { try { compacted = await compactRefs(providerName, pool.cfg) } catch (e) { compacted = false } }
+    if (compacted) writeSettings(cfg)
     // 保留已有状态（failCount/cooldown/lastError），避免重建时丢状态
     const prev = new Map(pool.keyValues.map((k) => [k.ref, k]))
     pool.keyValues = []
-    for (const entry of (pool.cfg.keyRefs || [])) {
+    const entries = (pool.cfg.keyRefs || []).map((e) => typeof e === 'string' ? { ref: e, label: '', createdAt: 0, nextRef: '' } : e)
+    for (const entry of entries) {
       const ref = (entry && typeof entry === 'object') ? entry.ref : entry
       const nextRef = (entry && typeof entry === 'object' && entry.nextRef) ? entry.nextRef : ''
       if (!ref) continue
@@ -142,7 +263,7 @@ export function apply(ctx) {
         if (hit && hit.value) {
           const old = prev.get(ref) || {}
           pool.keyValues.push({
-            ref, value: hit.value, source: 'user',
+            ref, value: hit.value, source: 'user', label: (entry && entry.label) || '',
             nextRef,
             failCount: old.failCount || 0,
             cooldownUntil: old.cooldownUntil || 0,
@@ -164,7 +285,7 @@ export function apply(ctx) {
           const found = pool.keyValues.find((k) => k.ref === envRef)
           if (!found) {
             pool.keyValues.push({
-              ref: envRef, value: hit.value, source: 'env',
+              ref: envRef, value: hit.value, source: 'env', label: '',
               nextRef: '',
               failCount: old.failCount || 0,
               cooldownUntil: old.cooldownUntil || 0,
@@ -182,7 +303,7 @@ export function apply(ctx) {
     readPools()
     const pool = pools.get(provider)
     if (!pool) return undefined
-    await resolvePoolKeys(pool)
+    await resolvePoolKeys(pool, provider)
     return pool
   }
 
@@ -235,6 +356,15 @@ export function apply(ctx) {
     return undefined
   }
 
+  // 把 useKeyRef 选择立即落到内存池 + process.env，让「当前使用」立刻真实
+  function applySelection(pool, ref) {
+    if (!pool || !ref) return
+    const kv = pool.keyValues.find((k) => k.ref === ref)
+    if (!kv) return
+    pool.currentRef = ref
+    try { process.env[pool.cfg.env] = kv.value } catch (e) {}
+  }
+
   // ── 预写：v1 同款 —— 全局 agent/request（DSH 全局收得到这个 waterfall），
   //    每次请求同步 buildPools() 重读 settings，选 key，同步写 process.env，
   //    credentials.set fire-and-forget（不 await 阻塞 waterfall）。
@@ -243,11 +373,13 @@ export function apply(ctx) {
     for (const name of pools.keys()) {
       const pool = pools.get(name)
       if (pool) {
-        try { await resolvePoolKeys(pool) } catch (e) {}
-        // 预热时确定初始 currentRef：useKeyRef 锁定优先，否则 pickKey
+        try { await resolvePoolKeys(pool, name) } catch (e) {}
+        // 预热时确定初始 currentRef：useKeyRef 锁定优先，否则 pickKey（只调一次）
         if (pool.keyValues.length > 0 && !pool.currentRef) {
           const locked = pool.cfg.useKeyRef && pool.keyValues.find((k) => k.ref === pool.cfg.useKeyRef)
-          pool.currentRef = (locked && locked.ref) || (pickKey(pool) && pickKey(pool).ref) || pool.keyValues[0].ref
+          let picked = null
+          if (!(locked && locked.ref)) picked = pickKey(pool)
+          pool.currentRef = (locked && locked.ref) || (picked && picked.ref) || pool.keyValues[0].ref
         }
       }
     }
@@ -255,7 +387,6 @@ export function apply(ctx) {
 
   // 启动时预热 pools（resolve keyValues，供同步预写 pickKey 用）
   try { warmPools().catch(() => {}) } catch (e) {}
-  // 每次 settings 变化也刷新 —— webServer 路由里已有调用，这里兜底周期不设
 
   ctx.on('agent/request', (payload, next) => {
     // next() 是 async，但我们要同步写 env —— 用 then 链，立即返回 p 不阻塞 waterfall
@@ -286,12 +417,13 @@ export function apply(ctx) {
   ctx.on('agent/request-error', async (payload, next) => {
     const code = String((payload && payload.failure && payload.failure.code) || (payload && payload.code) || '')
     const rawMsg = String((payload && payload.failure && payload.failure.message) || (payload && payload.message) || '')
+    const status = (payload && payload.failure && payload.failure.status) || (payload && payload.status)
     const provider = (payload && payload.provider) || ''
-    const isRetryable = RETRYABLE_CODES.includes(code) || /^[45]\d\d$/.test(code) || /rate|limit|quota|exhaust|throttl|429|timeout|timed?out|auth|credential|denied|forbidden|unavailable|busy|key/i.test(rawMsg)
-    if (!provider || !isRetryable) return next()
-    diag('request-error', 'provider=' + provider + ' code=' + code)
+    if (!provider) return next()
+    diag('request-error', 'provider=' + provider + ' code=' + code + ' status=' + status)
     const pool = await getPool(provider)
-    if (!pool || pool.keyValues.length === 0) return next()
+    if (!pool || pool.keyValues.length === 0 || pool.cfg.enabled === false) return next()
+    if (!shouldRotate(pool, canonicalCode(code), rawMsg, status)) return next()
     let curRef = pool.currentRef
     if (!curRef) {
       const envCur = process.env[pool.cfg.env]
@@ -329,7 +461,11 @@ export function apply(ctx) {
           req.on('error', reject)
         })
 
-        if (path === 'diag' && req.method === 'GET') {
+        if (path === 'diag' && (req.method === 'GET' || req.method === 'POST')) {
+          if (req.method === 'POST') {
+            try { const b = await readBody(); diag(b.kind || 'client', b.message || b.msg || '') } catch (e) {}
+            return sendJson(res, 200, { ok: true })
+          }
           return sendJson(res, 200, { diag: diagLog })
         }
 
@@ -355,13 +491,32 @@ export function apply(ctx) {
             const out = []
             readPools()
             for (const [name, pool] of pools) {
-              await resolvePoolKeys(pool)
+              await resolvePoolKeys(pool, name)
               const now = Date.now()
+              // 真正当前使用的 key：最近一次预写进 process.env 的值
+              let activeRef = ''
+              if (pool.cfg.enabled !== false) {
+                const envCur = process.env[pool.cfg.env]
+                if (envCur) { const m = pool.keyValues.find((k) => k.value === envCur); if (m) activeRef = m.ref }
+                if (!activeRef && pool.currentRef) activeRef = pool.currentRef
+              }
+              // 环境密钥可写性（描述：文件=可写，启动环境=只读）
+              let envWritable = null
+              let envSource = ''
+              try {
+                if (ctx.credentials.describe) {
+                  const d = await ctx.credentials.describe(credentialRef(pool.cfg.env))
+                  envWritable = d ? d.writable !== false : null
+                  envSource = d ? (d.source || '') : ''
+                }
+              } catch (e) {}
               const keys = pool.keyValues.map((k) => {
                 const cooling = (k.cooldownUntil || 0) > now
+                const entry = (pool.cfg.keyRefs || []).find((x) => (x && x.ref) === k.ref) || {}
                 return {
                   ref: k.ref,
-                  label: '',
+                  name: displayNameOf({ label: k.label || entry.label, ref: k.ref }),
+                  label: k.label || entry.label || '',
                   source: k.source,
                   nextRef: k.nextRef || '',
                   status: cooling ? 'cooling' : (k.failCount ? 'recovered' : 'live'),
@@ -370,6 +525,7 @@ export function apply(ctx) {
                   cooldownRemainingMs: cooling ? (k.cooldownUntil - now) : 0,
                   lastErrorAt: k.lastErrorAt || 0,
                   lastErrorMsg: k.lastErrorMsg || '',
+                  active: k.ref === activeRef,
                 }
               })
               out.push({
@@ -378,10 +534,14 @@ export function apply(ctx) {
                 env: pool.cfg.env,
                 cooldownMs: pool.cfg.cooldownMs,
                 enabled: pool.cfg.enabled,
-                rotateOn: pool.cfg.rotateOn || [],
+                rotateOn: effectiveRotateOn(pool.cfg.rotateOn),
                 useKeyRef: pool.cfg.useKeyRef || '',
                 currentRef: pool.currentRef || '',
+                activeRef: activeRef,
+                activeName: activeRef ? (keys.find((k) => k.ref === activeRef) || {}).name || activeRef : '',
                 envKeyValue: pool.envKeyValue ? mask(pool.envKeyValue) : '',
+                envWritable: envWritable,
+                envSource: envSource,
                 keys: keys,
               })
             }
@@ -400,18 +560,29 @@ export function apply(ctx) {
               env: envName,
               enabled: enabled !== false,
               cooldownMs: Number.isFinite(cooldownMs) && cooldownMs >= 0 ? cooldownMs : (cur.cooldownMs ?? 30000),
-              rotateOn: Array.isArray(rotateOn) && rotateOn.length > 0 ? rotateOn : (cur.rotateOn || ['QUOTA_EXCEEDED', 'AUTH', 'RATE_LIMIT']),
+              rotateOn: Array.isArray(rotateOn) && rotateOn.length > 0 ? rotateOn.map(canonicalCode).filter(Boolean) : effectiveRotateOn(cur.rotateOn),
               keyRefs: (cur.keyRefs || []).map((x) => {
                 if (typeof x === 'string') return { ref: x, label: '', createdAt: 0, nextRef: '' }
                 return { ref: x.ref, label: x.label || '', createdAt: x.createdAt || 0, nextRef: x.nextRef || '' }
               }),
               displayName: (typeof displayName === 'string' && displayName) ? displayName : (cur.displayName || provider),
               useKeyRef: (typeof useKeyRef === 'string') ? useKeyRef : (cur.useKeyRef || ''),
+              refsCompacted: cur.refsCompacted === true,
             }
             let validated
             try { validated = profileSchema(upd) } catch (e) { return sendJson(res, 400, { error: 'invalid profile: ' + (e && e.message || e) }) }
             cfg.providers[provider] = validated
             writeSettings(cfg)
+            // 同步内存池 + env，让「当前使用」立刻真实
+            try {
+              const pool = await getPool(provider)
+              if (pool) {
+                if (validated.useKeyRef) applySelection(pool, validated.useKeyRef)
+                else if (pool.currentRef && !pool.keyValues.find((k) => k.ref === pool.currentRef && isLive(k))) {
+                  const pk = pickKey(pool); if (pk) { pool.currentRef = pk.ref; try { process.env[pool.cfg.env] = pk.value } catch (e) {} }
+                }
+              }
+            } catch (e) {}
             return sendJson(res, 200, { ok: true, pool: validated })
           }
           if (req.method === 'DELETE') {
@@ -423,6 +594,7 @@ export function apply(ctx) {
             for (const k of (prof.keyRefs || [])) { try { backupFile(CRED_FILE, 'credentials'); await ctx.credentials.unset(credentialRef(k.ref || k)) } catch (e) {} }
             delete cfg.providers[provider]
             writeSettings(cfg)
+            pools.delete(provider)
             return sendJson(res, 200, { ok: true })
           }
           return sendJson(res, 405, { error: 'method not allowed' })
@@ -437,28 +609,49 @@ export function apply(ctx) {
             const cfg = readSettings()
             if (!cfg.providers || !cfg.providers[provider]) return sendJson(res, 404, { error: 'pool not found' })
             const prof = cfg.providers[provider]
-            const newRef = 'key_fallback_' + provider + '_' + Date.now().toString(36) + '_' + Math.floor(Math.random() * 0xffffffff).toString(36)
+            const newRef = nextKeyRef(provider, prof.keyRefs || [])
             try { backupFile(CRED_FILE, 'credentials'); await ctx.credentials.set(credentialRef(newRef), value) } catch (e) { return sendJson(res, 500, { error: 'credentials write failed' }) }
             const newEntry = { ref: newRef, label: (typeof label === 'string' && label) ? label : '', createdAt: Date.now(), nextRef: '' }
             prof.keyRefs = [...(prof.keyRefs || []), newEntry]
             writeSettings(cfg)
+            // 刷新内存池，让新 key 立即可参与轮换（幂等；已 compacted 则快速返回）
+            try { await getPool(provider) } catch (e) {}
             return sendJson(res, 200, { ok: true, key: newEntry, valueMask: mask(value) })
           }
           if (req.method === 'PATCH') {
             const body = await readBody()
-            const { provider, ref, value, label, nextRef } = body || {}
+            const { provider, ref, value, label, nextRef, useKeyRef } = body || {}
             if (typeof provider !== 'string' || !provider || typeof ref !== 'string' || !ref) return sendJson(res, 400, { error: 'provider & ref required' })
             const cfg = readSettings()
             const prof = cfg.providers && cfg.providers[provider]
             if (!prof) return sendJson(res, 404, { error: 'pool not found' })
             const entry = (prof.keyRefs || []).find((k) => k.ref === ref)
-            if (!entry) return sendJson(res, 404, { error: 'key not found' })
+            const isEnvKey = ref === prof.env
+            if (!entry && !isEnvKey) return sendJson(res, 404, { error: 'key not found' })
             if (typeof value === 'string' && value) {
-              try { backupFile(CRED_FILE, 'credentials'); await ctx.credentials.set(credentialRef(ref), value) } catch (e) { return sendJson(res, 500, { error: 'credentials write failed' }) }
+              // 环境密钥：允许改写 .credentials.yaml（describe 可写才允许；启动环境提供=只读）
+              if (isEnvKey) {
+                let writable = null
+                try { if (ctx.credentials.describe) { const d = await ctx.credentials.describe(credentialRef(ref)); writable = d ? d.writable !== false : null } } catch (e) {}
+                if (writable === false) return sendJson(res, 400, { error: '该环境密钥由启动环境提供（只读）；请改启动 DSH 的终端环境变量' })
+              }
+              try { backupFile(CRED_FILE, 'credentials'); await ctx.credentials.set(credentialRef(ref), value) } catch (e) { return sendJson(res, 500, { error: 'credentials write failed: ' + ((e && e.message) || e) }) }
+              // 同步内存池 + env
+              try {
+                const pool = pools.get(provider)
+                if (pool) {
+                  const kv = pool.keyValues.find((k) => k.ref === ref)
+                  if (kv) kv.value = value
+                  if (isEnvKey) pool.envKeyValue = value
+                }
+              } catch (e) {}
             }
-            if (typeof label === 'string') entry.label = label
-            if (typeof nextRef === 'string') entry.nextRef = nextRef
-            if (typeof useKeyRef === 'string') prof.useKeyRef = useKeyRef
+            if (typeof label === 'string') { if (entry) entry.label = label }
+            if (typeof nextRef === 'string') { if (entry) entry.nextRef = nextRef }
+            if (typeof useKeyRef === 'string') {
+              prof.useKeyRef = useKeyRef
+              try { const pool = await getPool(provider); if (pool) applySelection(pool, useKeyRef) } catch (e) {}
+            }
             writeSettings(cfg)
             return sendJson(res, 200, { ok: true })
           }
@@ -469,6 +662,7 @@ export function apply(ctx) {
             const cfg = readSettings()
             const prof = cfg.providers && cfg.providers[provider]
             if (!prof) return sendJson(res, 404, { error: 'pool not found' })
+            if (ref === prof.env) return sendJson(res, 400, { error: '环境密钥不可删除' })
             const idx = (prof.keyRefs || []).findIndex((k) => k.ref === ref)
             if (idx < 0) return sendJson(res, 404, { error: 'key not found' })
             try { backupFile(CRED_FILE, 'credentials'); await ctx.credentials.unset(credentialRef(ref)) } catch (e) {}
@@ -477,9 +671,33 @@ export function apply(ctx) {
             // 清理指向已删 key 的 nextRef
             for (const k of (prof.keyRefs || [])) if (k.nextRef === ref) k.nextRef = ''
             writeSettings(cfg)
+            // 同步内存池
+            try {
+              const pool = pools.get(provider)
+              if (pool) {
+                pool.keyValues = pool.keyValues.filter((k) => k.ref !== ref)
+                if (pool.currentRef === ref) { pool.currentRef = ''; try { const pk = pickKey(pool); if (pk) { pool.currentRef = pk.ref; try { process.env[pool.cfg.env] = pk.value } catch (e) {} } } catch (e) {} }
+              }
+            } catch (e) {}
             return sendJson(res, 200, { ok: true })
           }
           return sendJson(res, 405, { error: 'method not allowed' })
+        }
+
+        // 明文揭示：仅限本池拥有的 user key 或环境密钥
+        if (path === 'keys/plain' && req.method === 'GET') {
+          const provider = url.searchParams.get('provider')
+          const ref = url.searchParams.get('ref')
+          if (!provider || !ref) return sendJson(res, 400, { error: 'provider & ref required' })
+          const pool = await getPool(provider)
+          if (!pool) return sendJson(res, 404, { error: 'pool not found' })
+          const isUserKey = (pool.cfg.keyRefs || []).some((k) => k.ref === ref)
+          const isEnvKey = ref === pool.cfg.env
+          if (!isUserKey && !isEnvKey) return sendJson(res, 404, { error: 'key not found' })
+          let hit
+          try { hit = rawResolve ? await rawResolve(credentialRef(ref)) : await ctx.credentials.resolve(credentialRef(ref)) } catch (e) { hit = undefined }
+          if (!hit || !hit.value) return sendJson(res, 404, { error: 'no value' })
+          return sendJson(res, 200, { ok: true, ref: ref, value: hit.value })
         }
 
         if (path === 'reset') {

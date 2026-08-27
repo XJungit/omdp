@@ -1,48 +1,75 @@
 # @omdp/dsh-key-fallback
 
 Multi-key API key pool with automatic rotation for DeepSeek Harness. Sits between the LLM adapter and the credential store:
-the plugin picks a key from the per-provider pool and writes it into the provider's credential reference before each request;
-on a retryable error (`AUTH` / `QUOTA_EXCEEDED` / `RATE_LIMIT` by default), it advances to the next key in the chain and returns `{ kind: 'retry' }` so the agent loop retries with the rotated key.
+the plugin picks a key from the per-provider pool and pre-writes it into the provider's credential reference before each request;
+on a configured trigger error it marks the failed key (cooldown) and advances to the next key in the chain, then lets DSH's own
+`dsh-llm-retry` decide whether/when to retry (the plugin never re-sends on its own).
 
-This is **v3** (work in progress; not yet feature-frozen). v3 supersedes v1 (which stored keys in plaintext under `~/.dsh/settings.yaml#keyFallback.providers`);
-v1 still ships in this profile (it registers the `key-fallback` settings namespace), so v3 deliberately uses a different namespace (`key-fallback-pools`) to avoid the registration conflict.
+Current version is **v6** (`3.1.0`).
 
-## What's in v3
+## What v6 offers
 
-- **Independent settings page**: **Settings → API Key 回退** — a top-level section, not a card under plugin config.
-- **Provider dropdown** (the chooser merges `ctx.llm.listProviders()` and `ctx.llm.listConfigurableProviders()`).
-- **Add / remove keys via the UI** (write-only; the value is never read back into the page).
-- **Per-provider enabled switch** (disable = the pool is bypassed entirely).
-- **Environment key in the pool**: the runtime composes `effectiveKeys = [envKey, ...userKeys]`. The env key is the first entry, marked `[环境来源]` in the UI, and cannot be edited or deleted; the environment remains the source of truth for it.
-- **Manual key selector** (pool-level dropdown "当前使用") — pick any key (including the env one) to lock the pool to that key. Failures do **not** auto-rotate while a key is locked; select "自动轮换" to return to cursor-based rotation.
-- **Rotation on retryable errors** (`agent/request-error` waterfall) with cooldown tracking per key.
-- **Pre-write on every request** (`agent/request` waterfall) so the LLM adapter always reads the pool key, not the original env value.
-- **v1 → v3 one-shot migration** on first launch: reads `~/.dsh/settings.yaml#keyFallback.providers`, writes the plaintext keys into the credential store, copies the pool metadata into the new namespace, and marks `keyFallbackMigratedToV3: true` to prevent re-running. The v1 plaintext block is **left in place** (deleting it would touch a file DSH is actively using; verify the v3 UI looks right, then delete manually).
+**Settings → API Key 回退** — a top-level settings page with a redesigned UI:
 
-## What's still in flight / not done
+- **Pool cards** with status dots, badges, enable switch, per-pool cooldown display and a "重置冷却" reset button.
+- **轮转触发码 (rotation triggers) are now configurable and actually enforced**: click chips to select which error codes
+  cause rotation (`QUOTA` / `AUTH` / `RATE_LIMIT` / `TIMEOUT` / `TRANSPORT` / `SERVER`), or add a custom code. The default set is a
+  superset of the old hard-coded behavior, so existing pools behave identically unless you change it.
+- **真正当前使用的 key 显示**: the page shows which key is actually being used right now (derived from the last value written to the
+  provider's env), instead of a truncated hash.
+- **短 ref 命名**: new keys are named `key_fallback_<provider>_key1`, `key_fallback_<provider>_key2`, … so the UI shows clean short
+  names (`key1`, `key2`…) instead of long ref strings. Existing long refs are migrated once, automatically and idempotently.
+- **明文揭示**: every key row has an eye toggle (`👁` / `🙈`) that fetches and shows the real value via `GET /keys/plain` (only for
+  keys owned by that pool, or the pool's env key).
+- **环境密钥可编辑**: the pool's env key (`AGNES_API_KEY` etc.) can be updated right in the page when it's backed by the writable
+  credential file. If it is supplied by the launching environment (read-only), the UI says so and refuses to edit.
+- **Per-key controls**: rename/update value, set the "失败后→" next key (nextRef), lock the pool to a specific key ("设为当前"),
+  delete a key (the env key is not deletable).
+- **Pool-level "锁定"**: lock the pool to a specific key or return to 自动轮换 (cursor-based).
 
-- **Cooldown / failure status rendering in the UI**: host returns `failCount / cooldownUntil / cooldownRemainingMs / lastErrorAt / lastErrorMsg / status: 'cooling' | 'healthy'` per key and a pool-level `cursor`; the client currently shows the basic list and the env-key badge but does not yet render the cooldown progress bars. Pending — I stopped here for a stable checkpoint after you said "收尾" (wrap up).
-- **v1 and v3 running side by side**: v1's host still loads alongside v3 and both touch the same `~/.dsh/.credentials.yaml`. This is the root cause of the credential-file lock contention you hit while editing model config. To eliminate it: uninstall v1 (remove the dep from `~/.dsh/profiles/web/package.json` and delete `node_modules/@omdp/dsh-key-fallback` so only v3 remains). **Until you do, behavior is undefined under concurrent writes.**
-- **DSH-side bundle caching**: the browser keeps old client bundles by `rev=` hash. The settings-page fix you saw (label-as-function contract) only lands after a DSH restart that re-hashes the plugin. Use Ctrl+Shift+R if a page shows stale UI.
+## Rotation semantics
+
+- **pick**: respects `useKeyRef` lock first (but a cooling locked key is skipped so the pool never deadlocks on a bad key), otherwise
+  cursor round-robin over live keys.
+- **fail** (`agent/request-error`, registered `prepend` so it runs before `dsh-llm-retry`): only when the error matches the pool's
+  `rotateOn` (code / status mapping / message keyword). Marks the failed key with a fixed `cooldownMs` (no exponential backoff), then
+  switches to `nextRef` if configured, else the next live key.
+- **re-send** is left entirely to DSH's `dsh-llm-retry` with the user's own retry policy; this plugin only switches the key and writes
+  config/env. `ABORTED` (user cancel) never triggers rotation.
+
+## Diagnostics
+
+- The client POSTs runtime exceptions to `POST /dsh-key-fallback/diag`.
+- `GET /dsh-key-fallback/diag` returns the in-memory buffer (last 200 entries) as JSON.
 
 ## Install
 
 ```sh
-# 1) from a local checkout (no publish required)
+# from a local checkout (no publish required)
 dsh plugin --profile web add link:D:/WorkSpace/omdp/dsh-key-fallback
 # or from npm
 dsh plugin --profile web add @omdp/dsh-key-fallback
 
-# 2) restart DSH
-
-# 3) open Settings → API Key 回退
+# restart DSH, then open Settings → API Key 回退
 ```
 
-## Diagnostics (built in for v3, not for v1)
+> Note: this profile currently installs the package from npm (`^3.x`) into
+> `~/.dsh/profiles/web/node_modules/@omdp/dsh-key-fallback`; copying updated `lib/index.js` + `lib/client.js` there and restarting DSH
+> picks up v6.
 
-- The client wires `window.addEventListener('error' / 'unhandledrejection')` to POST every runtime exception to `POST /dsh-key-fallback/diag`.
-- The host keeps the last 50 reports in memory.
-- `GET /dsh-key-fallback/diag` returns the buffer as JSON. Use this to see what's actually breaking in the browser (instead of reading minified DSH bundles).
+## HTTP API (host)
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/dsh-key-fallback/pools` | list pools with live status, activeRef, env writability, per-key status |
+| POST | `/dsh-key-fallback/pools` | create/update pool (enabled, cooldownMs, rotateOn, useKeyRef, …) |
+| DELETE | `/dsh-key-fallback/pools?provider=` | delete pool + all its keys |
+| POST | `/dsh-key-fallback/keys` | add key (auto short ref `key_fallback_<p>_keyN`) |
+| PATCH | `/dsh-key-fallback/keys` | update value / label / nextRef / useKeyRef (env key value = edit env) |
+| DELETE | `/dsh-key-fallback/keys?provider=&ref=` | delete key (env key refused) |
+| GET | `/dsh-key-fallback/keys/plain?provider=&ref=` | reveal real value (pool-owned keys / env key only) |
+| POST | `/dsh-key-fallback/reset` | reset cooldown state for a pool |
+| GET/POST | `/dsh-key-fallback/diag` | diagnostics buffer |
 
 ## License
 
