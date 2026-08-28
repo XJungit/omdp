@@ -29,8 +29,7 @@ omdp/
 ├── archive/             # archived plugins retained for historical reference
 │   ├── dsh-gitbash-win/
 │   └── resume-stream/
-├── _skeleton-client/    # copy-paste template: client + host bundle (Web UI plugin)
-├── _skeleton-host/      # copy-paste template: host-only bundle
+├── notes/               # development lessons & notes (三层：notes/<date>/<category>/)
 ├── docs/                # research notes, compatibility matrix, publish guide
 └── <future plugins>/    # each its own subdirectory + package.json
 ```
@@ -148,7 +147,8 @@ Local `link:` installs (`"@omdp/<plugin>": "link:<abs-path>/omdp/<plugin>"`) sti
 - Package names are scoped under `@omdp/` to avoid colliding with upstream `dsh-*` packages on npm.
 - Plugins in this repo are plain JavaScript (no build step), so both local-link and GitHub installs work without a compile stage.
 - **Installing locally is preferred** during development: add `"@omdp/<plugin>": "link:<abs-path>/omdp/<plugin>"` to the profile's `dependencies` and run `pnpm install` — the plugin loads straight from the repo and updates with a restart.
-- `_skeleton-client/` and `_skeleton-host/` are copy-paste templates for new plugins; they are not installable bundles themselves.
+- New plugins should be modelled on the existing three (connector / vision-bridge / key-fallback) rather than on a skeleton — the real plugins are the living templates.
+- **文档纪律**：插件有任何更新（源码/配置/版本）时，必须同步更新根 README、对应插件 README、docs/ 相关文档；开发中产生的教训/经验主动写入 `notes/<date>/<category>/`（详见 [AGENTS.md](AGENTS.md)）。
 
 ## Docs index
 
@@ -159,3 +159,4 @@ Local `link:` installs (`"@omdp/<plugin>": "link:<abs-path>/omdp/<plugin>"`) sti
 | [`docs/AI-DSH-plugin-quality.md`](docs/AI-DSH-plugin-quality.md) | community research: why AI-written DSH plugins break, and defensive practices |
 | [`docs/DSH-plugin-quality-zh-discussion.md`](docs/DSH-plugin-quality-zh-discussion.md) | Chinese write-up of the same research + omdp practice |
 | [`docs/dsh-drag-and-drop-troubleshooting.md`](docs/dsh-drag-and-drop-troubleshooting.md) | troubleshooting record for the `dsh-drag-and-drop` plugin (Windows/Chinese) |
+| [`notes/README.md`](notes/README.md) | development lessons & notes index (`notes/<date>/<category>/`) — see [AGENTS.md](AGENTS.md) 规范 2 |

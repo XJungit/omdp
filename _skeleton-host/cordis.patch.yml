@@ -1,6 +1,0 @@
-# Bundle patch for the SKELETON host plugin.
-# After copying: replace `REPLACE-ME` in the id and name below with your plugin id/name.
-# The profile's own cordis.patch.yml may still override or disable this row by id.
-- insert:
-    - id: REPLACE-ME
-      name: omdp-REPLACE-ME
