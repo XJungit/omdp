@@ -1,15 +1,26 @@
 # OMDP 插件兼容性评估
 
-> ⚠️ **本文档为历史记录**：`@omdp/dsh-gitbash-win` 与 `@omdp/dsh-resume-stream`
+> ⚠️ **本文档为演进记录**：`@omdp/dsh-gitbash-win` 与 `@omdp/dsh-resume-stream`
 > 已于 2026-08-25 归档（源码移至 `archive/`，不再维护或发布）。下方对 gitbash
-> 的评估保留作为历史架构参考；当前活跃插件为 `@omdp/dsh-connector`、
-> `@omdp/dsh-vision-bridge`、`@omdp/dsh-key-fallback`。
+> 的评估保留作为历史架构参考；当前活跃插件为 `@omdp/dsh-connector`（`0.2.5`）、
+> `@omdp/dsh-vision-bridge`（`0.1.7`）、`@omdp/dsh-key-fallback`（`3.1.1`）。
 >
 > 评估内容：各插件对 DSH（DeepSeek Harness）更新的抗崩溃能力。
 > 核心问题：DSH 更新后，插件会不会导致 DSH 崩溃？
 
 **结论先行**：活跃插件都采用**抗崩溃架构**——DSH 更新时**不会因插件而崩溃**（硬保证），
 最坏情况只是单个插件功能需要适配更新。插件之间互不影响。
+
+**DSH `v0.1.2-alpha.1` 适配结论（2026-08-28）**：三个插件**源码零改动即同时兼容**
+当前版本 `0.1.1-rc.2` 与新版 `v0.1.2-alpha.1`。逐项核查过的 API 面（两版本源码逐字对比）：
+`ctx.webServer.register({kind:'prefix'})`（新增 gzip 压缩中间件，向后兼容）、
+`agent/request(-error)` 载荷、`credentials` reference 半边（`resolve`/`describe`/`set`/`unset`/`credentialRef`）、
+`settings.yaml` 文件、client `slots.inject('settings.section')`+`register`、`attachments.readImage`、
+`tools.register`、`llm.resolveModelInfo`、`/plugins/<id>/client.js` 加载、`__ModuleLoader__`——全部一致。
+Node 要求两版本相同（`^22.19.0 || >=24.0.0`）。唯一改动：`@omdp/dsh-key-fallback` 的
+`peerDependencies` 放宽为显式枚举 `0.1.0-rc.6` / `0.1.1-rc.2` / `0.1.2-alpha.1` 三个系列
+（npm semver 只匹配同 `[major,minor,patch]` 三元组内的预发布，故须显式列出，`^0.1.0-rc.6` 类写法
+对 `0.1.1`/`0.1.2` 系列均判 false）。回归测试通过（smoke 33/33、集成 49/49）。
 
 ---
 
@@ -121,37 +132,40 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 
 ---
 
-## 4. @omdp/dsh-key-fallback（v1.0.7）【活跃插件】
+## 4. @omdp/dsh-key-fallback（v3.1.1）【活跃插件】
 
 ### 架构
 
-- **ESM bundle**：`lib/index.js` 为 `type: module`，静态 import `@deepseek-ai/dsh-settings` + `@deepseek-ai/schemastery`（与 `dsh-market`/`dsh-vision-bridge` 同构；DSH 只经 ESM import 图解析 DSH 内部包，CommonJS `require()` 无法到达它们——根因见下）
-- **Host**: `inject: ['llm','settings','webServer','credentials']`（`credentials.set` 供 `llm-pi-ai` 的 `apiKeyEnv` 路径使用）
-- **Client**: `dsh.client` 声明 + lazy-CJS `__ModuleLoader__` bundle；`key-fallback` 命名空间走 `installSettingsSection`，UI 通过 `settings.section`（`API Key 回退`，永远可见）与 `settings.plugin.item`（插件配置标签下）双路渲染
-- **能力**：`keyFallback.providers.*` 池按 `turn:step` 有界重试（≤ `keys.length`）+ 30s 递增冷却（`cooldownUntil = now + cooldown*min(failCount,5)`）
+- **ESM bundle**：`lib/index.js` 为 `type: module`（`main`/`exports` → `./lib/index.js`），静态 import `@deepseek-ai/dsh-credentials`（只用 reference 半边 `credentialRef`/`resolve`/`describe`/`set`/`unset`；`isCredentialRefName` 本地实现兜底）与 `node:*` 内置。
+- **Host**: `inject: ['llm','settings','webServer','credentials']`。`agent/request` 预写 key（`credentials.set` **和** `process.env` 双写）；`agent/request-error` 注册 `prepend: true` 先于 `dsh-llm-retry` 看到错误，按池 `rotateOn` 判定后切 key，**重发交还 llm-retry**。`webServer` 用 `ctx.get('webServer')` 可选获取（不硬 inject 缺失不崩）。
+- **Client**: 独立设置页 `Settings → API Key 回退`，经 `slots.inject('settings.section')` + `slots.register` 注册（`id: 'key-fallback'`, `order: 62`），不再依赖 `installSettingsSection`/`settings.plugin.item` 双路渲染。
+- **能力**：多 key 池按 `rotateOn`（失败码/状态/关键字）判定轮换；固定 `cooldownMs` 冷却；`useKeyRef` 锁定/`nextRef` 链；短 ref 自动命名 + 旧长 ref 一次性幂等迁移；`GET /keys/plain` 明文揭示（仅池内 key/env）；env key 可编辑（describe 只读拒绝）。
 
 ### 依赖的 DSH 接口
 
 | 接口 | 说明 | 变更风险 |
 |---|---|---|
-| `ctx.settings`（通过 `installSettingsSection` 注册命名空间 `key-fallback`） | 让 `settings.plugin.item` 的 served 集合包含本插件（`schemastery` schema 的 `settingsNamespace` + `installSettingsSection`） | 中 |
-| `ctx.credentials`（`credentials.set(pool.env, key)`） | `llm-pi-ai` 的 `apiKeyEnv` 经过 credentials 域（`@deepseek-ai/dsh-settings`）而非环境变量，`process.env` 单独写对 `ninerouter` 无效 | 中 |
-| `ctx.llm`（`llm/stream` 侧的 `agent/request` + `agent/request-error` 换 key 链） | 在同一步内返回 `kind:'retry'` 后由框架重入下一次 `agent/request`，`pickKey` 选下一把；client 通过 `settings.plugin.item` 的 occupant 分发的 `key` 进入渲染 | 低 |
-| `ctx.webServer`（`GET /dsh-key-fallback/pools` 的 `register`） | 仅用于 `settings.section` 卡片的可见时轮询，健康/冷却状态由 host 端 `pools` 计算 | 中 |
+| `ctx.credentials`（`inject` 硬依赖） | `set`/`unset`/`describe`/`resolve` + `credentialRef`（reference 半边，rc.6 起稳定） | 低–中（record 半边 rc.8 新增，插件未用） |
+| `ctx.llm`（`inject` 硬依赖） | `agent/request` + `agent/request-error` waterfall 换 key 链 | 中（事件名/载荷若变需适配） |
+| `ctx.settings`（`inject` 硬依赖） | 池配置持久化到 `settings.yaml` 的 `keyFallback.providers` | 低 |
+| `ctx.webServer`（`ctx.get` 可选） | `GET/POST /dsh-key-fallback/*` HTTP API（客户端设置页 fetch 用） | 中（缺失时设置页不可用，插件本体仍工作） |
+| client `slots`（`ctx.get` 可选） | `settings.section` 槽位注册设置页 | 低（缺失则 UI 不显示，聊天轮换不受影响） |
 
 ### 风险点
 
-- **`require` 隔离**：早期 host 为 `type: commonjs`，`require('@deepseek-ai/dsh-settings')` 在 DSH 的 bundle 图中解析为 `false`（诊断见 `apply CALLED. dshSettings=false zs=false`），`settings.register` 从未执行 → 卡片占位已注册（`occupants: key-fallback, active`）但 `served` 无它，永远不显示。ESM 静态 import 方可。
-- **`process.env` vs `credentials`**：`ninerouter` 经 `llm-pi-ai` 凭据走 `ctx.credentials.resolve(apiKeyEnv)` 优先于环境变量，只写 `process.env[NINEROUTER_API_KEY]` 无效；401 仍报 `API key is invalid / AUTH` → `agent/request-error` 的 `RATE_LIMIT/AUTH/4xx + auth/key` 正则无法切下一把。
-- **监听链上**：`keyFallback` 读 `settings.yaml` 的 `keyFallback.providers`（文件轮询与 `agent/request` 重建池），与 `installSettingsSection` 的命名空间 base `{}` 是两条道（为 served 写的拉链，非落盘），与 `dsh-market` 同姿势。
+- **peer 声明已对齐**：`@deepseek-ai/dsh-credentials` 下界从 `rc.8` 修正为 `>=0.1.0-rc.6 <0.2.0`（reference 半边 rc.6 起即稳定；profile 实际锁 `0.1.0-rc.6`，不再有 unmet-peer 警告）。
+- **`ctx.llm` 事件**是主要变数：`agent/request`/`agent/request-error` 的载荷结构若在 DSH 大版本调整，轮换判定需适配；但所有 handler 都走 `next()` 链，异常不会让 DSH 崩溃。
+- **`webServer` 可选**：用 `ctx.get('webServer')` 而非硬 inject，缺失时插件其余功能（轮换）照常。
+- **防御性编码**：凭证读写、`describe`、状态计算均有 try/catch；`ctx.credentials.describe` 存在性检查。
 
 ### 结论
 
 | 场景 | 崩溃？ |
 |---|---|
 | DSH 小更新/补丁 | ✅ 不会崩 |
-| DSH 大版本 | ✅ DSH 不崩；`dsh-settings` 的 `installSettingsSection` 签名若变，需适配 |
-| API 缺失 | ✅ 优雅降级（`process.env` 回退） |
+| DSH 大版本 | ✅ DSH 不崩；`agent/*` 事件载荷或 `webServer` 若变，轮换/设置页需适配 |
+| `dsh-credentials` 版本漂移 | ✅ reference 半边自 rc.6 稳定，低风险 |
+| 服务缺失 | ✅ 设置页不显示/轮换降级，不崩溃 |
 
 ---
 
@@ -161,8 +175,8 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 |---|---|---|---|---|---|
 | dsh-gitbash-win（归档） | 0.1.6 | 无（动态加载 5 个 @deepseek-ai/*） | `tools`/`subprocess`/`systemPrompt`/`shellEnv` | 顶层零依赖 + 动态加载 + 失败隔离 | `dsh-sandbox`（Windows ACL 上游 bug） |
 | dsh-connector | 0.2.5 | `yaml` | `webServer` | 纯静态 + 零 @deepseek-ai + try/catch | `ctx.webServer` API 变化 |
-| dsh-vision-bridge | 0.1.6 | 无 | `tools`/`attachments`/`llm`/`credentials` | 纯静态 + 零 @deepseek-ai + 防御性编码 | `ctx.llm` API 变化 |
-| dsh-key-fallback | 1.0.7 | 无（静态 ESM import，同 dsh-market） | `settings`/`credentials`/`webServer` | ESM import + `installSettingsSection` + `process.env + credentials.set` 双写 | `dsh-settings` 的 `installSettingsSection` / `credentials.set` |
+| dsh-vision-bridge | 0.1.7 | 无 | `tools`/`attachments`/`llm`/`credentials` | 纯静态 + 零 @deepseek-ai + 防御性编码 | `ctx.llm` API 变化 |
+| dsh-key-fallback | 3.1.1 | 无（reference 半边 dsh-credentials） | `credentials`/`llm`/`settings`（`webServer`/`slots` 可选） | ESM import + `agent/*` 事件 + `process.env + credentials.set` 双写 + 防御性编码 | `agent/request-error` 载荷 / `webServer` API 变化 |
 
 ## 总体结论
 
