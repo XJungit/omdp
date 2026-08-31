@@ -1,6 +1,6 @@
 # @omdp/dsh-connector
 
-**MCP 服务器 + 用户 Skills + 魔搭市场浏览三合一设置页**（`v0.2.5`）。适合需要在 DSH 里频繁增删改 MCP server / skills、又不想手改 `cordis.patch.yml` 的用户。
+**MCP 服务器 + 用户 Skills + 魔搭市场浏览三合一设置页**（`v0.2.6`）。适合需要在 DSH 里频繁增删改 MCP server / skills、又不想手改 `cordis.patch.yml` 的用户。
 
 ## Requirements
 
@@ -80,7 +80,7 @@ pnpm install --lockfile-only --offline   # 按 link 依赖重写 lockfile
 
 ```jsonc
 "dependencies": {
-  "@omdp/dsh-connector": "^0.2.5"
+  "@omdp/dsh-connector": "^0.2.6"
 }
 ```
 
@@ -250,4 +250,4 @@ MIT License。安全问题请通过 GitHub Issues 私密报告（https://github.
 
 **最后验证**：DSH `0.1.0-rc.8`（2026-08-20）；0.2.0 市场功能以 `node --check` +
 真实 HTTP 集成测试通过（11 项：skills/mcp 列表与详情、证书/Hosted 标识、安装命令、
-记录来源回写、更新判定），未改动 DSH 实例。当前 npm 版本 `0.2.5`。
+记录来源回写、更新判定），未改动 DSH 实例。当前 npm 版本 `0.2.6`。

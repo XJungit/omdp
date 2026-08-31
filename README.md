@@ -44,7 +44,7 @@ omdp/
 
 ### Plugins
 
-#### `@omdp/dsh-connector` — MCP + Skills manager (`v0.2.5`)
+#### `@omdp/dsh-connector` — MCP + Skills manager (`v0.2.6`)
 
 One settings tab (**Connector**) that manages three things from the DSH Web UI:
 
@@ -53,10 +53,10 @@ One settings tab (**Connector**) that manages three things from the DSH Web UI:
 - **Market explorer (v0.2.0+)** — read-only browsing of ModelScope [Skills hub](https://modelscope.cn/skills) and [MCP plaza](https://modelscope.cn/mcp) via anonymous OpenAPI; one-click copy of install commands / `mcpServers` config snippets, skill "check update" via `source`/`sourceUpdated` frontmatter. Market data lives only in process memory (30-min TTL), never on disk.
 
 ```jsonc
-"dependencies": { "@omdp/dsh-connector": "^0.2.5" }
+"dependencies": { "@omdp/dsh-connector": "^0.2.6" }
 ```
 
-#### `@omdp/dsh-key-fallback` — multi-key API key pool with rotation (`v3.1.1`)
+#### `@omdp/dsh-key-fallback` — multi-key API key pool with rotation (`v3.1.2`)
 
 Sits between the LLM adapter and the credential store. Before each request the plugin picks a key from the per-provider pool and pre-writes it into the provider's credential reference; on a configured trigger error it marks the failed key cooling and advances to the next key — **re-sending is left entirely to DSH's own `dsh-llm-retry`**. Ships an always-visible settings page (**Settings → API Key 回退**) with a redesigned UI:
 
@@ -67,15 +67,15 @@ Sits between the LLM adapter and the credential store. Before each request the p
 - Per-key `nextRef`, pool lock ("设为当前"), cooldown reset, and delete.
 
 ```jsonc
-"dependencies": { "@omdp/dsh-key-fallback": "^3.1.1" }
+"dependencies": { "@omdp/dsh-key-fallback": "^3.1.2" }
 ```
 
-#### `@omdp/dsh-vision-bridge` — vision for text-only models (`v0.1.7`)
+#### `@omdp/dsh-vision-bridge` — vision for text-only models (`v0.1.8`)
 
 A zero-dependency plugin that gives **text-only models** vision: it auto-detects whether the routed model supports images (`llm.resolveModelInfo().inputModalities`), and for text-only models forwards pasted / attached images to a configurable OpenAI-compatible multimodal endpoint (default Agnes `agnes-2.5-flash`) and feeds the returned text back as evidence. Ships a `vision_bridge_read_image` tool, a paste/drop → temp-path browser handler, a wrapped `(vision bridge)` provider entry, and an `agent/pre-step` auto-read hook.
 
 ```jsonc
-"dependencies": { "@omdp/dsh-vision-bridge": "^0.1.7" }
+"dependencies": { "@omdp/dsh-vision-bridge": "^0.1.8" }
 ```
 
 ### Installing from npm (recommended)
@@ -85,9 +85,9 @@ All three plugins are published to **npm** automatically by GitHub Actions on ev
 ```jsonc
 // ~/.dsh/profiles/<name>/package.json — you can use one or mix-and-match
 "dependencies": {
-  "@omdp/dsh-connector": "^0.2.5",
-  "@omdp/dsh-vision-bridge": "^0.1.7",
-  "@omdp/dsh-key-fallback": "^3.1.1"
+  "@omdp/dsh-connector": "^0.2.6",
+  "@omdp/dsh-vision-bridge": "^0.1.8",
+  "@omdp/dsh-key-fallback": "^3.1.2"
 }
 ```
 
@@ -135,8 +135,8 @@ The same monorepo layout is used by other DSH plugin collections, e.g. [zhu10900
 1. Bump `version` in the subdirectory's `package.json` (only the one(s) you touched).
 2. Commit, then tag and push:
    ```sh
-   git tag v3.1.1
-   git push origin master && git push origin v3.1.1
+   git tag v3.1.2
+   git push origin master && git push origin v3.1.2
    ```
 3. `.github/workflows/publish.yml` publishes the touched packages to npm with provenance (re-publishing an already-published version is a no-op — skip message is printed).
 4. Update your profile: `pnpm update @omdp/<plugin>`.
@@ -211,7 +211,7 @@ omdp/
 
 ### 插件
 
-#### `@omdp/dsh-connector` — MCP + Skills 管理器（`v0.2.5`）
+#### `@omdp/dsh-connector` — MCP + Skills 管理器（`v0.2.6`）
 
 一个设置页（**Connector**），从 DSH Web UI 管理三件事：
 
@@ -220,10 +220,10 @@ omdp/
 - **市场浏览器（v0.2.0+）** —— 匿名 OpenAPI 只读浏览 ModelScope [Skills 集市](https://modelscope.cn/skills) 与 [MCP 广场](https://modelscope.cn/mcp)；一键复制安装命令 / `mcpServers` 配置片段；通过 `source`/`sourceUpdated` frontmatter 检查技能更新。市场数据只存进程内存（30 分钟 TTL），绝不落盘。
 
 ```jsonc
-"dependencies": { "@omdp/dsh-connector": "^0.2.5" }
+"dependencies": { "@omdp/dsh-connector": "^0.2.6" }
 ```
 
-#### `@omdp/dsh-key-fallback` — 多 key API 池 + 轮换（`v3.1.1`）
+#### `@omdp/dsh-key-fallback` — 多 key API 池 + 轮换（`v3.1.2`）
 
 位于 LLM 适配器与凭据存储之间。每次请求前，插件从对应 provider 的 key 池里选一把，预写入 provider 的凭据引用；遇配置的触发错误时，把失败 key 标记为冷却并切到下一把——**重发完全交给 DSH 自带的 `dsh-llm-retry`**。带一个常驻可见的设置页（**设置 → API Key 回退**）与全新 UI：
 
@@ -234,15 +234,15 @@ omdp/
 - 每把 key 的 `nextRef`、池锁定（"设为当前"）、冷却重置与删除。
 
 ```jsonc
-"dependencies": { "@omdp/dsh-key-fallback": "^3.1.1" }
+"dependencies": { "@omdp/dsh-key-fallback": "^3.1.2" }
 ```
 
-#### `@omdp/dsh-vision-bridge` — 给纯文本模型的视觉（`v0.1.7`）
+#### `@omdp/dsh-vision-bridge` — 给纯文本模型的视觉（`v0.1.8`）
 
 零依赖插件，给**纯文本模型**装上视觉：自动探测被路由模型是否支持图片（`llm.resolveModelInfo().inputModalities`）；对纯文本模型，把粘贴/附加的图片转发到可配置的 OpenAI 兼容多模态端点（默认 Agnes `agnes-2.5-flash`），并把返回文本喂回作为证据。附带 `vision_bridge_read_image` 工具、粘贴/拖拽 → 临时路径的浏览器处理器、一个包装后的 `(vision bridge)` provider 条目，以及 `agent/pre-step` 自动读取钩子。
 
 ```jsonc
-"dependencies": { "@omdp/dsh-vision-bridge": "^0.1.7" }
+"dependencies": { "@omdp/dsh-vision-bridge": "^0.1.8" }
 ```
 
 ### 从 npm 安装（推荐）
@@ -252,9 +252,9 @@ omdp/
 ```jsonc
 // ~/.dsh/profiles/<name>/package.json —— 可用其一或自由组合
 "dependencies": {
-  "@omdp/dsh-connector": "^0.2.5",
-  "@omdp/dsh-vision-bridge": "^0.1.7",
-  "@omdp/dsh-key-fallback": "^3.1.1"
+  "@omdp/dsh-connector": "^0.2.6",
+  "@omdp/dsh-vision-bridge": "^0.1.8",
+  "@omdp/dsh-key-fallback": "^3.1.2"
 }
 ```
 
@@ -302,8 +302,8 @@ allowBuilds:
 1. 在子目录的 `package.json` 里 bump `version`（只 bump 你动过的）。
 2. 提交，然后打 tag 并推送：
    ```sh
-   git tag v3.1.1
-   git push origin master && git push origin v3.1.1
+   git tag v3.1.2
+   git push origin master && git push origin v3.1.2
    ```
 3. `.github/workflows/publish.yml` 把动过的包发布到 npm（带 provenance；已发布的版本重复发布是 no-op，会打印 skip 信息）。
 4. 更新你的 profile：`pnpm update @omdp/<plugin>`。

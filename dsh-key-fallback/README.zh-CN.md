@@ -4,7 +4,7 @@ English | [简体中文](README.md)
 
 **为 [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) 提供多 key 池 + 自动轮换**——插件位于 LLM 适配器与凭证存储之间：每次请求前从按 provider 分组的 key 池里选一把，预写入该 provider 的凭证引用；遇到配置的触发错误时，把失败 key 标记为冷却（固定 `cooldownMs`，无指数退避）并前进到下一把。**重发完全交给 DSH 自带的 `dsh-llm-retry`**——本插件从不自行重发，只负责换 key，重试策略由 retry policy 决定。
 
-当前版本：**v3.1.1**（v6 UI 代）。
+当前版本：**v3.1.2**（v6 UI 代）。
 
 ## 环境要求
 
@@ -12,7 +12,7 @@ English | [简体中文](README.md)
 - Node.js `^22.19` 或 `>=24`
 - `@deepseek-ai/dsh-credentials` / `dsh-llm` / `dsh-settings` 的 peer 范围覆盖完整 `0.1.x` 预发布线——**`0.1.0-rc.6`、`0.1.1-rc.2`、`0.1.2-alpha.1` 均满足**。插件只使用 credential-reference 半边（`resolve`/`describe`/`set`/`unset`/`credentialRef`，自 `0.1.0-rc.6` 起稳定）与 `agent/request` + `agent/request-error` waterfall（载荷跨这些版本未变）；`isCredentialRefName`（rc.8 新增）本地实现兜底。peer 范围故意逐个枚举 `0.1.x` 系列，因为 npm semver 只匹配同 `[major,minor,patch]` 三元组内的预发布。
 
-## v3.1.1 提供什么
+## v3.1.2 提供什么
 
 **设置 → API Key 回退** —— 顶层设置页，全新 UI（状态点、徽章、渐变池卡片、逐 key 行）：
 

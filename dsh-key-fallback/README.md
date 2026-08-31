@@ -4,7 +4,7 @@
 
 **Multi-key API key pool with automatic rotation for [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness)** — sits between the LLM adapter and the credential store. Before each request the plugin picks a key from the per-provider pool and pre-writes it into the provider's credential reference; when a configured trigger error occurs it marks the failed key cooling (fixed `cooldownMs`, no exponential backoff) and advances to the next key. **Re-sending is left entirely to DSH's own `dsh-llm-retry`** — this plugin never re-sends on its own; it only switches the key and lets the retry policy decide.
 
-Current version: **v3.1.1** (`v6` UI generation).
+Current version: **v3.1.2** (`v6` UI generation).
 
 ## Requirements
 
@@ -12,7 +12,7 @@ Current version: **v3.1.1** (`v6` UI generation).
 - Node.js `^22.19` or `>=24`
 - Peer ranges for `@deepseek-ai/dsh-credentials` / `dsh-llm` / `dsh-settings` cover the full `0.1.x` pre-release line — **`0.1.0-rc.6`, `0.1.1-rc.2`, and `0.1.2-alpha.1` all satisfy them**. The plugin only uses the credential-reference half (`resolve`/`describe`/`set`/`unset`/`credentialRef` — stable since `0.1.0-rc.6`) and the `agent/request` + `agent/request-error` waterfall (payload unchanged across these versions); `isCredentialRefName` (added `rc.8`) is implemented locally for compatibility. The peer range deliberately enumerates each `0.1.x` series because npm semver only matches pre-releases within the same `[major,minor,patch]` triple.
 
-## What v3.1.1 offers
+## What v3.1.2 offers
 
 **Settings → API Key 回退** — a top-level settings page with a redesigned UI (status dots, badges, gradient pool cards, per-key rows):
 

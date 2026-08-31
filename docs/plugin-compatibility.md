@@ -2,8 +2,8 @@
 
 > ⚠️ **本文档为演进记录**：`@omdp/dsh-gitbash-win` 与 `@omdp/dsh-resume-stream`
 > 已于 2026-08-25 归档（源码移至 `archive/`，不再维护或发布）。下方对 gitbash
-> 的评估保留作为历史架构参考；当前活跃插件为 `@omdp/dsh-connector`（`0.2.5`）、
-> `@omdp/dsh-vision-bridge`（`0.1.7`）、`@omdp/dsh-key-fallback`（`3.1.1`）。
+> 的评估保留作为历史架构参考；当前活跃插件为 `@omdp/dsh-connector`（`0.2.6`）、
+> `@omdp/dsh-vision-bridge`（`0.1.8`）、`@omdp/dsh-key-fallback`（`3.1.2`）。
 >
 > 评估内容：各插件对 DSH（DeepSeek Harness）更新的抗崩溃能力。
 > 核心问题：DSH 更新后，插件会不会导致 DSH 崩溃？
@@ -64,7 +64,7 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 
 ---
 
-## 2. @omdp/dsh-connector（v0.2.5）【活跃插件】
+## 2. @omdp/dsh-connector（v0.2.6）【活跃插件】
 
 ### 架构
 
@@ -132,7 +132,7 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 
 ---
 
-## 4. @omdp/dsh-key-fallback（v3.1.1）【活跃插件】
+## 4. @omdp/dsh-key-fallback（v3.1.2）【活跃插件】
 
 ### 架构
 
@@ -174,9 +174,9 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 | 插件 | 版本 | 第三方依赖 | DSH 硬依赖 | 抗崩溃设计 | 最大风险点 |
 |---|---|---|---|---|---|
 | dsh-gitbash-win（归档） | 0.1.6 | 无（动态加载 5 个 @deepseek-ai/*） | `tools`/`subprocess`/`systemPrompt`/`shellEnv` | 顶层零依赖 + 动态加载 + 失败隔离 | `dsh-sandbox`（Windows ACL 上游 bug） |
-| dsh-connector | 0.2.5 | `yaml` | `webServer` | 纯静态 + 零 @deepseek-ai + try/catch | `ctx.webServer` API 变化 |
-| dsh-vision-bridge | 0.1.7 | 无 | `tools`/`attachments`/`llm`/`credentials` | 纯静态 + 零 @deepseek-ai + 防御性编码 | `ctx.llm` API 变化 |
-| dsh-key-fallback | 3.1.1 | 无（reference 半边 dsh-credentials） | `credentials`/`llm`/`settings`（`webServer`/`slots` 可选） | ESM import + `agent/*` 事件 + `process.env + credentials.set` 双写 + 防御性编码 | `agent/request-error` 载荷 / `webServer` API 变化 |
+| dsh-connector | 0.2.6 | `yaml` | `webServer` | 纯静态 + 零 @deepseek-ai + try/catch | `ctx.webServer` API 变化 |
+| dsh-vision-bridge | 0.1.8 | 无 | `tools`/`attachments`/`llm`/`credentials` | 纯静态 + 零 @deepseek-ai + 防御性编码 | `ctx.llm` API 变化 |
+| dsh-key-fallback | 3.1.2 | 无（reference 半边 dsh-credentials） | `credentials`/`llm`/`settings`（`webServer`/`slots` 可选） | ESM import + `agent/*` 事件 + `process.env + credentials.set` 双写 + 防御性编码 | `agent/request-error` 载荷 / `webServer` API 变化 |
 
 ## 总体结论
 
