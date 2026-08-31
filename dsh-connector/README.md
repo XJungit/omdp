@@ -6,7 +6,7 @@
 
 - DeepSeek Harness 带 `web` profile GUI（`npx @deepseek-ai/dsh web`）
 - Node.js `^22.19` 或 `>=24`
-- `@deepseek-ai/cordis` `^4.0.1`（peer；唯一 DSH 硬依赖是 `ctx.webServer`）
+- `@deepseek-ai/cordis` `4.0.1` / `4.0.2`（已实测版本；插件无 peer 声明，唯一 DSH 硬依赖是 `ctx.webServer`）
 
 ## Overview
 

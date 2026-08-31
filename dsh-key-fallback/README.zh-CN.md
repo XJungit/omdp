@@ -10,7 +10,7 @@ English | [简体中文](README.md)
 
 - DeepSeek Harness 带 `web` profile GUI（`npx @deepseek-ai/dsh web`）
 - Node.js `^22.19` 或 `>=24`
-- `@deepseek-ai/dsh-credentials` / `dsh-llm` / `dsh-settings` 的 peer 范围覆盖完整 `0.1.x` 预发布线——**`0.1.0-rc.6`、`0.1.1-rc.2`、`0.1.2-alpha.1` 均满足**。插件只使用 credential-reference 半边（`resolve`/`describe`/`set`/`unset`/`credentialRef`，自 `0.1.0-rc.6` 起稳定）与 `agent/request` + `agent/request-error` waterfall（载荷跨这些版本未变）；`isCredentialRefName`（rc.8 新增）本地实现兜底。peer 范围故意逐个枚举 `0.1.x` 系列，因为 npm semver 只匹配同 `[major,minor,patch]` 三元组内的预发布。
+- peer 范围**只枚举已实际进行过兼容测试的版本**——`@deepseek-ai/dsh-credentials` `0.1.0-rc.6 || 0.1.1-rc.2 || 0.1.2-alpha.1 || 0.1.2-alpha.2`、`@deepseek-ai/dsh-llm` / `@deepseek-ai/dsh-settings` `0.1.1-rc.2 || 0.1.2-alpha.1 || 0.1.2-alpha.2`、`@deepseek-ai/cordis` `4.0.1 || 4.0.2`、`@deepseek-ai/schemastery` `3.18.1 || 3.18.2`。不使用 `<0.2.0`、caret 之类的开放范围：未测试版本在核查通过前刻意排除。插件只使用 credential-reference 半边（`resolve`/`describe`/`set`/`unset`/`credentialRef`，自 `0.1.0-rc.6` 起稳定）与 `agent/request` + `agent/request-error` waterfall（载荷跨上述枚举版本未变）；`isCredentialRefName`（rc.8 新增）本地实现兜底。
 
 ## v3.1.2 提供什么
 

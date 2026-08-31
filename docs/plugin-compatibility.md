@@ -11,16 +11,19 @@
 **结论先行**：活跃插件都采用**抗崩溃架构**——DSH 更新时**不会因插件而崩溃**（硬保证），
 最坏情况只是单个插件功能需要适配更新。插件之间互不影响。
 
-**DSH `v0.1.2-alpha.1` 适配结论（2026-08-28）**：三个插件**源码零改动即同时兼容**
-当前版本 `0.1.1-rc.2` 与新版 `v0.1.2-alpha.1`。逐项核查过的 API 面（两版本源码逐字对比）：
+**DSH `v0.1.2-alpha.1` / `v0.1.2-alpha.2` 适配结论（2026-08-28 / 2026-08-31）**：三个插件**源码零改动即同时兼容**
+当前版本 `0.1.1-rc.2` 与新版 `v0.1.2-alpha.1`、`v0.1.2-alpha.2`。逐项核查过的 API 面（版本间源码逐字对比）：
 `ctx.webServer.register({kind:'prefix'})`（新增 gzip 压缩中间件，向后兼容）、
 `agent/request(-error)` 载荷、`credentials` reference 半边（`resolve`/`describe`/`set`/`unset`/`credentialRef`）、
 `settings.yaml` 文件、client `slots.inject('settings.section')`+`register`、`attachments.readImage`、
 `tools.register`、`llm.resolveModelInfo`、`/plugins/<id>/client.js` 加载、`__ModuleLoader__`——全部一致。
-Node 要求两版本相同（`^22.19.0 || >=24.0.0`）。唯一改动：`@omdp/dsh-key-fallback` 的
-`peerDependencies` 放宽为显式枚举 `0.1.0-rc.6` / `0.1.1-rc.2` / `0.1.2-alpha.1` 三个系列
-（npm semver 只匹配同 `[major,minor,patch]` 三元组内的预发布，故须显式列出，`^0.1.0-rc.6` 类写法
-对 `0.1.1`/`0.1.2` 系列均判 false）。回归测试通过（smoke 33/33、集成 49/49）。
+alpha.1 → alpha.2 增量核查：webServer/attachments/client-modules src 零变化，agent `runtime-types.ts` 零变化，
+credentials/llm/settings/tools 签名与服务面不变（内部重构），`settings.section` slot 契约零变化。
+Node 要求三版本相同（`^22.19.0 || >=24.0.0`）。唯一改动：`@omdp/dsh-key-fallback` 的
+`peerDependencies` **只精确枚举已实测兼容的版本**（2026-08-31 起，不用 `<0.2.0` 类开放范围）：
+credentials `0.1.0-rc.6 || 0.1.1-rc.2 || 0.1.2-alpha.1 || 0.1.2-alpha.2`、llm/settings
+`0.1.1-rc.2 || 0.1.2-alpha.1 || 0.1.2-alpha.2`、cordis `4.0.1 || 4.0.2`、schemastery `3.18.1 || 3.18.2`
+（npm semver 只匹配同 `[major,minor,patch]` 三元组内的预发布，故须逐版本显式列出）。回归测试通过（smoke 33/33、集成 49/49）。
 
 ---
 
@@ -153,7 +156,7 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 
 ### 风险点
 
-- **peer 声明已对齐**：`@deepseek-ai/dsh-credentials` 下界从 `rc.8` 修正为 `>=0.1.0-rc.6 <0.2.0`（reference 半边 rc.6 起即稳定；profile 实际锁 `0.1.0-rc.6`，不再有 unmet-peer 警告）。
+- **peer 声明严格枚举实测版本**（2026-08-31 起）：credentials `0.1.0-rc.6 || 0.1.1-rc.2 || 0.1.2-alpha.1 || 0.1.2-alpha.2`、llm/settings `0.1.1-rc.2 || 0.1.2-alpha.1 || 0.1.2-alpha.2`、cordis `4.0.1 || 4.0.2`、schemastery `3.18.1 || 3.18.2`——只声明已实际兼容测试过的版本，不用开放范围；profile 实际锁 `0.1.0-rc.6`（credentials）在枚举内，无 unmet-peer 警告。
 - **`ctx.llm` 事件**是主要变数：`agent/request`/`agent/request-error` 的载荷结构若在 DSH 大版本调整，轮换判定需适配；但所有 handler 都走 `next()` 链，异常不会让 DSH 崩溃。
 - **`webServer` 可选**：用 `ctx.get('webServer')` 而非硬 inject，缺失时插件其余功能（轮换）照常。
 - **防御性编码**：凭证读写、`describe`、状态计算均有 try/catch；`ctx.credentials.describe` 存在性检查。

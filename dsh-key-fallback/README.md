@@ -10,7 +10,7 @@ Current version: **v3.1.2** (`v6` UI generation).
 
 - DeepSeek Harness with a `web`-profile GUI (`npx @deepseek-ai/dsh web`)
 - Node.js `^22.19` or `>=24`
-- Peer ranges for `@deepseek-ai/dsh-credentials` / `dsh-llm` / `dsh-settings` cover the full `0.1.x` pre-release line — **`0.1.0-rc.6`, `0.1.1-rc.2`, and `0.1.2-alpha.1` all satisfy them**. The plugin only uses the credential-reference half (`resolve`/`describe`/`set`/`unset`/`credentialRef` — stable since `0.1.0-rc.6`) and the `agent/request` + `agent/request-error` waterfall (payload unchanged across these versions); `isCredentialRefName` (added `rc.8`) is implemented locally for compatibility. The peer range deliberately enumerates each `0.1.x` series because npm semver only matches pre-releases within the same `[major,minor,patch]` triple.
+- Peer ranges strictly enumerate **only compatibility-tested versions** — `@deepseek-ai/dsh-credentials` `0.1.0-rc.6 || 0.1.1-rc.2 || 0.1.2-alpha.1 || 0.1.2-alpha.2`, `@deepseek-ai/dsh-llm` / `@deepseek-ai/dsh-settings` `0.1.1-rc.2 || 0.1.2-alpha.1 || 0.1.2-alpha.2`, `@deepseek-ai/cordis` `4.0.1 || 4.0.2`, `@deepseek-ai/schemastery` `3.18.1 || 3.18.2`. No open-ended ranges (`<0.2.0`, caret): untested versions are deliberately excluded until verified. The plugin only uses the credential-reference half (`resolve`/`describe`/`set`/`unset`/`credentialRef` — stable since `0.1.0-rc.6`) and the `agent/request` + `agent/request-error` waterfall (payload unchanged across the enumerated versions); `isCredentialRefName` (added `rc.8`) is implemented locally for compatibility.
 
 ## What v3.1.2 offers
 
