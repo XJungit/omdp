@@ -7,6 +7,9 @@ node_modules/
 **/lib/
 *.tsbuildinfo
 
+# archived plugin snapshots: their bundled lib/ is historical source, keep it
+!archive/**/lib/
+
 # lockfiles (profile-managed, not part of the plugin source)
 **/pnpm-lock.yaml
 package-lock.json

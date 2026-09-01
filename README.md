@@ -36,7 +36,9 @@ omdp/
 │   └── README.md
 ├── archive/             # archived plugins retained for historical reference
 │   ├── dsh-gitbash-win/
-│   └── resume-stream/
+│   ├── resume-stream/
+│   ├── key-fallback-*/                  # dsh-key-fallback version snapshots & design drafts
+│   └── README.md
 ├── notes/               # development lessons & notes (三层：notes/<date>/<category>/)
 ├── docs/                # research notes, compatibility matrix, publish guide
 └── <future plugins>/    # each its own subdirectory + package.json
@@ -203,7 +205,9 @@ omdp/
 │   └── README.md
 ├── archive/             # 已归档插件，留作历史参考
 │   ├── dsh-gitbash-win/
-│   └── resume-stream/
+│   ├── resume-stream/
+│   ├── key-fallback-*/                  # dsh-key-fallback 各版本快照与设计草案
+│   └── README.md
 ├── notes/               # 开发教训与笔记（三层：notes/<date>/<category>/）
 ├── docs/                # 研究笔记、兼容性矩阵、发布指南
 └── <未来插件>/          # 每个插件一个子目录 + package.json
