@@ -14,3 +14,13 @@ package-lock.json
 # os / editor
 .DS_Store
 *.log
+
+# dsh runtime data / regenerable caches / session artifacts (not source)
+.dsh-meow/
+.npm-cache/
+.npm-cache-redirect/
+.run-*.log.zip
+.dshkf-*
+
+# external reference clone (deepseek harness docs), not part of this repo
+deepseek-harness-docs/
