@@ -58,7 +58,7 @@ One settings tab (**Connector**) that manages three things from the DSH Web UI:
 "dependencies": { "@omdp/dsh-connector": "^0.2.6" }
 ```
 
-#### `@omdp/dsh-key-fallback` — multi-key API key pool with rotation (`v3.1.3`)
+#### `@omdp/dsh-key-fallback` — multi-key API key pool with rotation (`v3.1.4`)
 
 Sits between the LLM adapter and the credential store. Before each request the plugin picks a key from the per-provider pool and pre-writes it into the provider's credential reference; on a configured trigger error it marks the failed key cooling and advances to the next key — **re-sending is left entirely to DSH's own `dsh-llm-retry`**. Ships an always-visible settings page (**Settings → API Key 回退**) with a redesigned UI:
 
@@ -69,7 +69,7 @@ Sits between the LLM adapter and the credential store. Before each request the p
 - Per-key `nextRef`, pool lock ("设为当前"), cooldown reset, and delete.
 
 ```jsonc
-"dependencies": { "@omdp/dsh-key-fallback": "^3.1.3" }
+"dependencies": { "@omdp/dsh-key-fallback": "^3.1.4" }
 ```
 
 #### `@omdp/dsh-vision-bridge` — vision for text-only models (`v0.1.8`)
@@ -89,7 +89,7 @@ All three plugins are published to **npm** automatically by GitHub Actions on ev
 "dependencies": {
   "@omdp/dsh-connector": "^0.2.6",
   "@omdp/dsh-vision-bridge": "^0.1.8",
-  "@omdp/dsh-key-fallback": "^3.1.3"
+  "@omdp/dsh-key-fallback": "^3.1.4"
 }
 ```
 
@@ -137,8 +137,8 @@ The same monorepo layout is used by other DSH plugin collections, e.g. [zhu10900
 1. Bump `version` in the subdirectory's `package.json` (only the one(s) you touched).
 2. Commit, then tag and push:
    ```sh
-   git tag v3.1.3
-   git push origin master && git push origin v3.1.3
+   git tag v3.1.4
+   git push origin master && git push origin v3.1.4
    ```
 3. `.github/workflows/publish.yml` publishes the touched packages to npm with provenance (re-publishing an already-published version is a no-op — skip message is printed).
 4. Update your profile: `pnpm update @omdp/<plugin>`.
@@ -227,7 +227,7 @@ omdp/
 "dependencies": { "@omdp/dsh-connector": "^0.2.6" }
 ```
 
-#### `@omdp/dsh-key-fallback` — 多 key API 池 + 轮换（`v3.1.3`）
+#### `@omdp/dsh-key-fallback` — 多 key API 池 + 轮换（`v3.1.4`）
 
 位于 LLM 适配器与凭据存储之间。每次请求前，插件从对应 provider 的 key 池里选一把，预写入 provider 的凭据引用；遇配置的触发错误时，把失败 key 标记为冷却并切到下一把——**重发完全交给 DSH 自带的 `dsh-llm-retry`**。带一个常驻可见的设置页（**设置 → API Key 回退**）与全新 UI：
 
@@ -238,7 +238,7 @@ omdp/
 - 每把 key 的 `nextRef`、池锁定（"设为当前"）、冷却重置与删除。
 
 ```jsonc
-"dependencies": { "@omdp/dsh-key-fallback": "^3.1.3" }
+"dependencies": { "@omdp/dsh-key-fallback": "^3.1.4" }
 ```
 
 #### `@omdp/dsh-vision-bridge` — 给纯文本模型的视觉（`v0.1.8`）
@@ -258,7 +258,7 @@ omdp/
 "dependencies": {
   "@omdp/dsh-connector": "^0.2.6",
   "@omdp/dsh-vision-bridge": "^0.1.8",
-  "@omdp/dsh-key-fallback": "^3.1.3"
+  "@omdp/dsh-key-fallback": "^3.1.4"
 }
 ```
 
@@ -306,8 +306,8 @@ allowBuilds:
 1. 在子目录的 `package.json` 里 bump `version`（只 bump 你动过的）。
 2. 提交，然后打 tag 并推送：
    ```sh
-   git tag v3.1.3
-   git push origin master && git push origin v3.1.3
+   git tag v3.1.4
+   git push origin master && git push origin v3.1.4
    ```
 3. `.github/workflows/publish.yml` 把动过的包发布到 npm（带 provenance；已发布的版本重复发布是 no-op，会打印 skip 信息）。
 4. 更新你的 profile：`pnpm update @omdp/<plugin>`。

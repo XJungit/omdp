@@ -23,6 +23,11 @@ import z from '@deepseek-ai/schemastery'
 function isCredentialRefName(value) {
   return typeof value === 'string' && /^[A-Za-z_][A-Za-z0-9_]*$/.test(value)
 }
+// provider id 可能是 b-ai / B.AI 这类含非法字符的名字，自动派生 env 时消毒
+// （- . 等 → _），保证派生名始终是合法 POSIX 标识符。
+function deriveEnvName(name) {
+  return String(name).toUpperCase().replace(/[^A-Z0-9]/g, '_') + '_API_KEY'
+}
 
 export const name = 'key-fallback'
 export const inject = ['llm', 'settings', 'webServer', 'credentials']
@@ -199,7 +204,7 @@ export function apply(ctx) {
     for (const name in providers) {
       if (!pools.has(name)) pools.set(name, { cfg: providers[name], keyValues: [], cursor: 0, currentRef: '' })
       else pools.get(name).cfg = providers[name]
-      const envName = (providers[name] && providers[name].env) || (name.toUpperCase() + '_API_KEY')
+      const envName = (providers[name] && providers[name].env) || deriveEnvName(name)
       poolsByEnv.set(envName, pools.get(name))
     }
     for (const name of [...pools.keys()]) if (!providers[name]) pools.delete(name)
@@ -554,7 +559,7 @@ export function apply(ctx) {
             const body = await readBody()
             const { provider, enabled, env, cooldownMs, rotateOn, displayName, useKeyRef } = body || {}
             if (typeof provider !== 'string' || !provider) return sendJson(res, 400, { error: 'provider required' })
-            const envName = (typeof env === 'string' && env) ? env : (provider.toUpperCase() + '_API_KEY')
+            const envName = (typeof env === 'string' && env) ? env : deriveEnvName(provider)
             if (!isCredentialRefName(envName)) return sendJson(res, 400, { error: 'env must be POSIX identifier' })
             const cfg = readSettings()
             cfg.providers = cfg.providers || {}
