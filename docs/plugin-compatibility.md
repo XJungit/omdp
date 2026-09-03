@@ -3,13 +3,15 @@
 > ⚠️ **本文档为演进记录**：`@omdp/dsh-gitbash-win` 与 `@omdp/dsh-resume-stream`
 > 已于 2026-08-25 归档（源码移至 `archive/`，不再维护或发布）。下方对 gitbash
 > 的评估保留作为历史架构参考；当前活跃插件为 `@omdp/dsh-connector`（`0.2.6`）、
-> `@omdp/dsh-vision-bridge`（`0.1.9`）、`@omdp/dsh-key-fallback`（`3.1.4`）。
+> `@omdp/dsh-vision-bridge`（`0.1.9`）、`@omdp/dsh-key-fallback`（`3.1.5`）。
 >
 > 评估内容：各插件对 DSH（DeepSeek Harness）更新的抗崩溃能力。
 > 核心问题：DSH 更新后，插件会不会导致 DSH 崩溃？
 
 **结论先行**：活跃插件都采用**抗崩溃架构**——DSH 更新时**不会因插件而崩溃**（硬保证），
 最坏情况只是单个插件功能需要适配更新。插件之间互不影响。
+
+**DSH `v0.1.2-rc.1`（`next` dist-tag）适配结论（2026-09-03）**：三个插件**源码零改动即兼容** DSH next。逐项核查（npm `dist-tags`：`latest=0.1.1-rc.2`、`next=0.1.2-rc.1`、`alpha=0.1.2-alpha.5`）：`@deepseek-ai/dsh-credentials`/`@deepseek-ai/dsh-llm`/`@deepseek-ai/dsh-settings` 从 `0.1.2-alpha.2`→`alpha.3`→`alpha.4`→`alpha.5`→`0.1.2-rc.1` **逐字节一致（`Compare-Object` NO DIFF）**；`ctx.credentials`（`resolve`/`set`/`unset`/`describe`→`{configured,source,writable}`）、`ctx.llm`（`registerAdapter`/`stream`/`listProviders`/`listConfigurableProviders`/`resolveModelInfo`/`inputModalities`）、`ctx.webServer`（`register({kind:'prefix'|'exact'})`、`ctx.get('webServer')?.port`）、`agent/request(-error)`、`tools.register`、`attachments.readImage`、`window.__ModuleLoader__.load` client 挂载——全部保留。node engines `^22.19.0 || >=24.0.0` 不变（DSH 主包依赖 `cordis^4.0.2`、`schemastery^3.18.2` 仍在枚举内）。**结论：三插件源码零改动兼容 next；唯一动作是把 next 系列版本追加进 `@omdp/dsh-key-fallback` 的 peer 枚举（已实测一致才放行）**。
 
 **DSH `v0.1.2-alpha.1` / `v0.1.2-alpha.2` 适配结论（2026-08-28 / 2026-08-31）**：三个插件**源码零改动即同时兼容**
 当前版本 `0.1.1-rc.2` 与新版 `v0.1.2-alpha.1`、`v0.1.2-alpha.2`。逐项核查过的 API 面（版本间源码逐字对比）：
@@ -135,7 +137,7 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 
 ---
 
-## 4. @omdp/dsh-key-fallback（v3.1.4）【活跃插件】
+## 4. @omdp/dsh-key-fallback（v3.1.5）【活跃插件】
 
 ### 架构
 
@@ -156,7 +158,7 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 
 ### 风险点
 
-- **peer 声明严格枚举实测版本**（2026-08-31 起）：credentials `0.1.0-rc.6 || 0.1.1-rc.2 || 0.1.2-alpha.1 || 0.1.2-alpha.2`、llm/settings `0.1.1-rc.2 || 0.1.2-alpha.1 || 0.1.2-alpha.2`、cordis `4.0.1 || 4.0.2`、schemastery `3.18.1 || 3.18.2`——只声明已实际兼容测试过的版本，不用开放范围；profile 实际锁 `0.1.0-rc.6`（credentials）在枚举内，无 unmet-peer 警告。
+- **peer 声明严格枚举实测版本**（2026-08-31 起）：credentials `0.1.0-rc.6 || 0.1.1-rc.2 || 0.1.2-alpha.1 || 0.1.2-alpha.2 || 0.1.2-alpha.3 || 0.1.2-alpha.4 || 0.1.2-alpha.5 || 0.1.2-rc.1`、llm/settings `0.1.1-rc.2 || 0.1.2-alpha.1 || 0.1.2-alpha.2 || 0.1.2-alpha.3 || 0.1.2-alpha.4 || 0.1.2-alpha.5 || 0.1.2-rc.1`、cordis `4.0.1 || 4.0.2`、schemastery `3.18.1 || 3.18.2`——只声明已实际兼容测试过的版本，不用开放范围；`0.1.2-alpha.2`→`alpha.5`→`0.1.2-rc.1` 配套包逐字节一致（2026-09-03 复核），profile 实际锁 `0.1.0-rc.6`（credentials）在枚举内，无 unmet-peer 警告。
 - **`ctx.llm` 事件**是主要变数：`agent/request`/`agent/request-error` 的载荷结构若在 DSH 大版本调整，轮换判定需适配；但所有 handler 都走 `next()` 链，异常不会让 DSH 崩溃。
 - **`webServer` 可选**：用 `ctx.get('webServer')` 而非硬 inject，缺失时插件其余功能（轮换）照常。
 - **防御性编码**：凭证读写、`describe`、状态计算均有 try/catch；`ctx.credentials.describe` 存在性检查。
@@ -179,7 +181,7 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 | dsh-gitbash-win（归档） | 0.1.6 | 无（动态加载 5 个 @deepseek-ai/*） | `tools`/`subprocess`/`systemPrompt`/`shellEnv` | 顶层零依赖 + 动态加载 + 失败隔离 | `dsh-sandbox`（Windows ACL 上游 bug） |
 | dsh-connector | 0.2.6 | `yaml` | `webServer` | 纯静态 + 零 @deepseek-ai + try/catch | `ctx.webServer` API 变化 |
 | dsh-vision-bridge | 0.1.9 | 无 | `tools`/`attachments`/`llm`/`credentials` | 纯静态 + 零 @deepseek-ai + 防御性编码 | `ctx.llm` API 变化 |
-| dsh-key-fallback | 3.1.4 | 无（reference 半边 dsh-credentials） | `credentials`/`llm`/`settings`（`webServer`/`slots` 可选） | ESM import + `agent/*` 事件 + `process.env + credentials.set` 双写 + 防御性编码 | `agent/request-error` 载荷 / `webServer` API 变化 |
+| dsh-key-fallback | 3.1.5 | 无（reference 半边 dsh-credentials） | `credentials`/`llm`/`settings`（`webServer`/`slots` 可选） | ESM import + `agent/*` 事件 + `process.env + credentials.set` 双写 + 防御性编码 | `agent/request-error` 载荷 / `webServer` API 变化 |
 
 ## 总体结论
 
