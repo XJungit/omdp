@@ -1,6 +1,6 @@
 # dsh-vision-bridge
 
-**让纯文本模型也能"看图"的视觉桥插件**（`v0.1.8`）：自动区分多模态 / 文本模型。零第三方依赖。
+**让纯文本模型也能"看图"的视觉桥插件**（`v0.1.9`）：自动区分多模态 / 文本模型。零第三方依赖。
 
 ## Requirements
 
@@ -125,7 +125,7 @@ pnpm install --lockfile-only --offline
 
 ```jsonc
 "dependencies": {
-  "@omdp/dsh-vision-bridge": "^0.1.8"
+  "@omdp/dsh-vision-bridge": "^0.1.9"
 }
 ```
 
@@ -268,4 +268,4 @@ MIT License。安全问题请通过 GitHub Issues 私密报告（https://github.
 | DSH 大版本（`ctx.llm` API 变化） | ✅ DSH 不崩；LLM 相关功能可能降级（适配器/流式），需适配 |
 | DSH 服务缺失 | ✅ 优雅降级（防御性编码） |
 
-**最后验证**：DSH `0.1.0-rc.8`（2026-08-20，已在本机运行实例活体验证 paste 路由；autoRead 改用 rc.8 pre-step 载荷的 `payload.agent` 获取当前路由模型）。rc.8 起 DeepSeek 适配器支持原生图片请求，多模态模型场景下 autoRead 会自动放行不再代看。当前 npm 版本 `0.1.8`（2026-08-28 发布）。
+**最后验证**：DSH `0.1.0-rc.8`（2026-08-20，已在本机运行实例活体验证 paste 路由；autoRead 改用 rc.8 pre-step 载荷的 `payload.agent` 获取当前路由模型）。rc.8 起 DeepSeek 适配器支持原生图片请求，多模态模型场景下 autoRead 会自动放行不再代看。当前 npm 版本 `0.1.9`（2026-09-03 发布）。多模态误判修复：`agent/pre-step` 改用 `agent.options` / `agent.session.requestHeader()` / `agent.session.requestContext()` 三级回退，避免声明 `image` 的模型被当纯文本走 Agnes 代看。

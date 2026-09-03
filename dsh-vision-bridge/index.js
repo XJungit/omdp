@@ -332,13 +332,21 @@ function registerReadImageTool(ctx, config) {
       const images = args?.path ? [args.path] : (Array.isArray(args?.paths) ? args.paths : [])
       if (images.length === 0) throw new Error(toolName + ' 需要 path 或 paths')
       // 1) 判断当前路由模型是否支持图片输入
-      const routed = exec.agent?.session?.requestHeader?.()?.config
+      const opt2 = exec.agent?.options
+      const headerCfg2 = exec.agent?.session?.requestHeader?.()?.config
+      const ctxCfg2 = exec.agent?.session?.requestContext?.()
+      const routed = (opt2?.provider && opt2?.model ? opt2 : null)
+        ?? (headerCfg2?.provider && headerCfg2?.model ? headerCfg2 : null)
+        ?? (ctxCfg2?.provider && ctxCfg2?.model ? { provider: ctxCfg2.provider, model: ctxCfg2.model } : null)
+        ?? exec.agent?.session?.requestHeader?.()?.config
+        ?? exec.agent?.options
       const provider = routed?.provider ?? exec.agent?.options?.provider
       const model = routed?.model ?? exec.agent?.options?.model
       let capable = false
-      if (provider && model && ctx.get('llm')?.resolveModelInfo) {
+      if (provider && model && (ctx.get('llm') ?? ctx.llm)?.resolveModelInfo) {
         try {
-          const info = await ctx.get('llm').resolveModelInfo(provider, model, exec.signal)
+          const svc = ctx.get('llm') ?? ctx.llm
+          const info = await svc.resolveModelInfo(provider, model, exec.signal)
           capable = Array.isArray(info?.inputModalities) && info.inputModalities.includes('image')
         } catch (error) {
           console.error('[dsh-vision-bridge] resolveModelInfo failed:', error && error.message)
@@ -663,23 +671,28 @@ function registerAutoRead(ctx, appConfig) {
     if (decision.kind !== 'enter') return decision
     if (!decision.messages.some((message) => contentHasImage(message.content))) return decision
     // 检测当前路由模型是否支持图片输入。
-    // rc.7+ 的 pre-step 载荷带 `agent`（rc.8 文档化签名），这是拿到当前路由
-    // provider/model 的正确途径；decision.session 从来不存在，保留为兜底。
-    const sessionCfg =
-      payload.agent?.requestHeader?.()?.config ??
-      payload.agent?.session?.requestHeader?.()?.config ??
-      decision.session?.requestHeader?.()?.config
+    // pre-step 载荷: { agent, messages, turn, step, signal } — provider/model
+    // 在 agent.options + session 折叠头里。agent 本身没有 requestHeader，
+    // 旧代码 payload.agent?.requestHeader / decision.session 都是错路径，
+    // 导致 oc/muse-spark 这类声明了 image 的多模态模型被误判为纯文本。
+    const opt = payload.agent?.options
+    const headerCfg = payload.agent?.session?.requestHeader?.()?.config
+    const ctxCfg = payload.agent?.session?.requestContext?.()
+    const sessionCfg = (opt?.provider && opt?.model ? opt : null)
+      ?? (headerCfg?.provider && headerCfg?.model ? headerCfg : null)
+      ?? (ctxCfg?.provider && ctxCfg?.model ? { provider: ctxCfg.provider, model: ctxCfg.model } : null)
     const provider = sessionCfg?.provider
     const model = sessionCfg?.model
     let capable = false
-    if (provider && model && ctx.get('llm')?.resolveModelInfo) {
+    const llmSvc = ctx.get('llm') ?? ctx.llm
+    if (provider && model && llmSvc?.resolveModelInfo) {
       try {
-        const info = await ctx.get('llm').resolveModelInfo(provider, model, payload.signal)
+        const info = await llmSvc.resolveModelInfo(provider, model, payload.signal)
         capable = Array.isArray(info?.inputModalities) && info.inputModalities.includes('image')
       } catch {}
     }
-    // 兜底：会话配置取不到 provider/model，或 resolveModelInfo 未暴露 image 模态时，
-    // 用插件自身的标签匹配（与 /capabilities 同款逻辑）判定，避免多模态模型被误判成纯文本去走 Agnes。
+    // 兜底：provider/model 仍取不到或 resolveModelInfo 未暴露 image 模态时，
+    // 用标签匹配（与 /capabilities 同款）判定，避免多模态被误判成纯文本去走 Agnes。
     if (!capable && model && typeof resolveMultimodalByLabel === 'function') {
       try {
         const r = await resolveMultimodalByLabel(ctx, model)

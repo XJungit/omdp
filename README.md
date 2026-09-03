@@ -72,12 +72,12 @@ Sits between the LLM adapter and the credential store. Before each request the p
 "dependencies": { "@omdp/dsh-key-fallback": "^3.1.4" }
 ```
 
-#### `@omdp/dsh-vision-bridge` — vision for text-only models (`v0.1.8`)
+#### `@omdp/dsh-vision-bridge` — vision for text-only models (`v0.1.9`)
 
 A zero-dependency plugin that gives **text-only models** vision: it auto-detects whether the routed model supports images (`llm.resolveModelInfo().inputModalities`), and for text-only models forwards pasted / attached images to a configurable OpenAI-compatible multimodal endpoint (default Agnes `agnes-2.5-flash`) and feeds the returned text back as evidence. Ships a `vision_bridge_read_image` tool, a paste/drop → temp-path browser handler, a wrapped `(vision bridge)` provider entry, and an `agent/pre-step` auto-read hook.
 
 ```jsonc
-"dependencies": { "@omdp/dsh-vision-bridge": "^0.1.8" }
+"dependencies": { "@omdp/dsh-vision-bridge": "^0.1.9" }
 ```
 
 ### Installing from npm (recommended)
@@ -88,7 +88,7 @@ All three plugins are published to **npm** automatically by GitHub Actions on ev
 // ~/.dsh/profiles/<name>/package.json — you can use one or mix-and-match
 "dependencies": {
   "@omdp/dsh-connector": "^0.2.6",
-  "@omdp/dsh-vision-bridge": "^0.1.8",
+  "@omdp/dsh-vision-bridge": "^0.1.9",
   "@omdp/dsh-key-fallback": "^3.1.4"
 }
 ```
@@ -241,12 +241,12 @@ omdp/
 "dependencies": { "@omdp/dsh-key-fallback": "^3.1.4" }
 ```
 
-#### `@omdp/dsh-vision-bridge` — 给纯文本模型的视觉（`v0.1.8`）
+#### `@omdp/dsh-vision-bridge` — 给纯文本模型的视觉（`v0.1.9`）
 
 零依赖插件，给**纯文本模型**装上视觉：自动探测被路由模型是否支持图片（`llm.resolveModelInfo().inputModalities`）；对纯文本模型，把粘贴/附加的图片转发到可配置的 OpenAI 兼容多模态端点（默认 Agnes `agnes-2.5-flash`），并把返回文本喂回作为证据。附带 `vision_bridge_read_image` 工具、粘贴/拖拽 → 临时路径的浏览器处理器、一个包装后的 `(vision bridge)` provider 条目，以及 `agent/pre-step` 自动读取钩子。
 
 ```jsonc
-"dependencies": { "@omdp/dsh-vision-bridge": "^0.1.8" }
+"dependencies": { "@omdp/dsh-vision-bridge": "^0.1.9" }
 ```
 
 ### 从 npm 安装（推荐）
@@ -257,7 +257,7 @@ omdp/
 // ~/.dsh/profiles/<name>/package.json —— 可用其一或自由组合
 "dependencies": {
   "@omdp/dsh-connector": "^0.2.6",
-  "@omdp/dsh-vision-bridge": "^0.1.8",
+  "@omdp/dsh-vision-bridge": "^0.1.9",
   "@omdp/dsh-key-fallback": "^3.1.4"
 }
 ```
