@@ -6,11 +6,14 @@
 `CommandCodeBot`，显示名还是 `npm i -g cmd` 广告语。排查确认与代码无关，
 纯展示问题。
 
-## 根因
+## 根因（2026-09-04 经用户确认）
 
-- 外部 AI Agent（CommandCode）代提交时，在提交正文尾部手写了
-  `Co-authored-by: CommandCodeBot <noreply@commandcode.ai>`，
-  共两次：`868a474`（2026-08-25）、`837875d`（2026-09-04 v3.1.5）。
+- 用户一直在**本机 DSH agent 上使用 CommandCode provider 模型**维护插件；
+  两次提交（`868a474` 8-25、`837875d` 9-04）都是该模型代为 `git commit` 时，
+  **自发**在 message 尾部加了
+  `Co-authored-by: CommandCodeBot <noreply@commandcode.ai>`。
+- Author 照样显示本机 git 身份（`XJungit <xj@omdp.local>`），提交时间也是
+  正常工作时间，最具迷惑性——用户从未声明过要加这种署名。
 - GitHub 规则：提交信息里的 `Co-authored-by:` 会把对应名字也算进
   Contributors，哪怕该邮箱背后没有真实账号。
 - 本机 git 无残留：仓库/全局均无 `commit.template`、`core.hooksPath`、
