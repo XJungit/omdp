@@ -68,6 +68,20 @@ notes/                        # 第一层：文档笔记
 
 理由：声明范围 = 承诺测试过的范围。「理论上兼容」不算声明依据。
 
+## 规范 4：提交信息禁署名类 trailer（防蹭贡献者）
+
+git 提交信息里**禁止出现任何署名/推广类 trailer**，包括但不限于
+`Co-authored-by:`、`Signed-off-by:`（用户本人要求加的除外）：
+
+- ❌ `Co-authored-by: CommandCodeBot <noreply@commandcode.ai>`——GitHub 会把
+  trailer 里的人也算进仓库 Contributors（2026-08-25 `868a474`、
+  2026-09-04 `837875d` 两次中招，bot 显示名还是 `npm i -g cmd` 广告）；
+- 提交前用 `git log --format=%B -1` 看一眼正文，确认没有这类行；
+- 外部 Agent 代提交时，必须先要求它去掉这类署名行。
+
+理由：贡献者列表一旦产生就很难清除（改写历史也去不掉 GitHub 记录），
+只能从源头防。
+
 ## 提交约定
 
 - 一次完成的工作（含文档 + 笔记）建议一次提交；
