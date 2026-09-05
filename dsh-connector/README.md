@@ -1,6 +1,6 @@
 # @omdp/dsh-connector
 
-**MCP 服务器 + 用户 Skills + 魔搭市场浏览三合一设置页**（`v0.2.6`）。适合需要在 DSH 里频繁增删改 MCP server / skills、又不想手改 `cordis.patch.yml` 的用户。
+**MCP 服务器 + 用户 Skills + 魔搭市场浏览三合一设置页**（`v0.3.0`）。适合需要在 DSH 里频繁增删改 MCP server / skills、又不想手改 `cordis.patch.yml` 的用户。
 
 ## Requirements
 
@@ -14,6 +14,7 @@
 合并到 DSH Web UI 的同一个设置页（设置页标签：**Connector**）。
 
 - **MCP**：读取/编辑 `profiles/web/cordis.patch.yml` 中的 `mcp-*` 块（结构化表单）。保存后**重启 `dsh` 生效**。
+- **工具过滤（0.3.0 新增）**：每台 MCP server 卡片下可勾选放行的工具（`mcp__<server>__<raw>` 公开名按 `__` 切分回 raw 名）。规则存 `settings.yaml` 的 `connector.toolFilters`（`{<serverName>: {allow: [...]}}`），**无配置 = 全量放行**；保存后新会话即生效、无需重启。生效三件套：`systemPrompt.tools(provider)` 隐藏 schema + `ctx.tools.guard` 执行期硬拦截（做法参照 `hyqhyq3/dsh-mcp-manager`）。典型场景：tinyfish 这类 15 个工具只留 `search`/`fetch_content` 两个免费工具。
 - **Skills**：列出/查看/编辑/删除 `~/.dsh/skills` 下的 `SKILL.md`。保存**即时生效**（filesystem provider 自动重新发现）。
 - **市场探索（0.2.0 新增）**：只读浏览魔搭社区 [Skills 中心](https://modelscope.cn/skills) 与 [MCP 广场](https://modelscope.cn/mcp)（匿名 OpenAPI，无需密钥）。
   - 列表/详情：名称、作者、分类、下载/浏览数、认证标识（Hosted 官方托管 / 已认证）
@@ -80,7 +81,7 @@ pnpm install --lockfile-only --offline   # 按 link 依赖重写 lockfile
 
 ```jsonc
 "dependencies": {
-  "@omdp/dsh-connector": "^0.2.6"
+  "@omdp/dsh-connector": "^0.3.0"
 }
 ```
 
@@ -142,7 +143,8 @@ pnpm remove @omdp/dsh-connector
 1. **MCP 服务器** 区：
    - 列出当前 `cordis.patch.yml` 里的 `mcp-*` 服务器
    - 「编辑」改名称/传输/URL/命令/参数/Header；「删除」移除；「＋ 添加」新建
-   - 保存后提示**重启 dsh** 才会真正加载新的 MCP server
+   - 每台 server 卡片下有**工具过滤**多选（chips）：勾选即放行，未勾选的工具模型不可见、调用被拒；「清除」回到全量放行
+   - 保存后提示**重启 dsh** 才会真正加载新的 MCP server（工具过滤规则除外：存 settings，**新会话即生效**）
 2. **Skills** 区：
    - 列出 `~/.dsh/skills` 下的用户技能
    - 「编辑」改 frontmatter 与正文；「删除」移除目录；「＋ 新建」创建
@@ -158,9 +160,10 @@ pnpm remove @omdp/dsh-connector
 
 | 组成 | 机制 |
 |---|---|
-| 设置页 | client half 注册 `settings.section` 槽位（"Connector" 页签） |
+| 设置页 | client half 注册 `settings.section` 槽位（"Connector" 页签；client factory 须 `exports.inject = ['slots']`，否则 fiber 在 slots 就绪前跑 apply 会静默丢注册） |
 | 跨边界调用 | client 用 `fetch('/connector/api/...')`，host 用 `ctx.webServer.register` 接收（安装包走 HTTP） |
 | MCP 持久化 | 文本块级提取并替换 `cordis.patch.yml` 中含 `mcp-` 的 insert 块，**保留 `!!js` 表达式与 env 块原样**（preserve 桶） |
+| 工具过滤 | 规则存 settings `connector` 命名空间（`toolFilters`）；`systemPrompt.tools(provider)` 滤 schema + `tools.guard` 硬拦截；`dsh-mcp-client` Config 封闭，规则**不能**写进 mcp 行 config |
 | Skill 持久化 | 直接读写 `~/.dsh/skills/<name>/SKILL.md` |
 
 ## 已知限制
@@ -177,7 +180,8 @@ pnpm remove @omdp/dsh-connector
 
 | 问题 | 原因 / 解决 |
 |---|---|
-| 设置页看不到 Connector 标签 | bundle 未挂载：确认 `dsh.profile.bundles` 含 `@omdp/dsh-connector`，重启 dsh |
+| 设置页看不到 Connector 标签 | bundle 未挂载：确认 `dsh.profile.bundles` 含 `@omdp/dsh-connector`，重启 dsh；仍无则检查 client.js 尾部 `exports.inject = ['slots']` 是否在（缺了会静默丢注册） |
+| 工具过滤不生效（模型仍能看到/调用） | 过滤规则只对**新会话**生效（当前会话的 schema 已下发）；确认 settings.yaml 有 `connector.toolFilters` 且 serverName 拼写与 patch 一致 |
 | 保存 MCP 被拒（HTTP 400） | 配置不合法（transport/serverName/command/url 校验失败），按提示修正——插件不会写入坏配置 |
 | MCP server 保存后不生效 | 需**重启 dsh**（`dsh-mcp-client` 静态加载） |
 | `/connector/api/*` 404 | client/host 边界异常：确认插件 host 半边已加载（重启），浏览器强刷缓存 |
@@ -237,7 +241,7 @@ MIT License。安全问题请通过 GitHub Issues 私密报告（https://github.
 
 本插件采用**抗崩溃架构**，DSH 更新时不会导致 DSH 崩溃（硬保证）。
 
-- **纯静态依赖**：只 `import node:*` + `yaml`（唯一第三方依赖，版本 `^2.9.0`），**零 `@deepseek-ai/*` 依赖**。
+- **纯静态依赖**：只 `import node:*` + `yaml`（唯一第三方依赖，版本 `^2.9.0`），**零 `@deepseek-ai/*` 依赖**（`@deepseek-ai/schemastery` 仅 peer 声明，供工具过滤的 settings schema 用，无则过滤静默全放行）。
 - **唯一的 DSH 硬依赖**：`ctx.webServer`（`inject: ['webServer']`），用于注册 `/connector/api/*` HTTP 路由。
 - **失败隔离**：webServer 不可用/变化时插件**干净失败不加载**，DSH 照常运行；内部多处 try/catch 防御。
 
@@ -250,4 +254,4 @@ MIT License。安全问题请通过 GitHub Issues 私密报告（https://github.
 
 **最后验证**：DSH `0.1.0-rc.8`（2026-08-20）；0.2.0 市场功能以 `node --check` +
 真实 HTTP 集成测试通过（11 项：skills/mcp 列表与详情、证书/Hosted 标识、安装命令、
-记录来源回写、更新判定），未改动 DSH 实例。当前 npm 版本 `0.2.6`。
+记录来源回写、更新判定），未改动 DSH 实例。当前 npm 版本 `0.3.0`。

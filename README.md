@@ -46,16 +46,17 @@ omdp/
 
 ### Plugins
 
-#### `@omdp/dsh-connector` — MCP + Skills manager (`v0.2.6`)
+#### `@omdp/dsh-connector` — MCP + Skills manager (`v0.3.0`)
 
 One settings tab (**Connector**) that manages three things from the DSH Web UI:
 
 - **MCP servers** — edits the MCP block in `cordis.patch.yml` (stdio / streamable-http), with full validation so bad config never reaches the next boot. Legacy SSE servers (e.g. Zhihu) are kept as `mcp-remote --transport sse-only` stdio bridges; the plugin only manages that config text.
 - **User skills** — read / write / delete skills under `~/.dsh/skills/<name>/SKILL.md` (frontmatter preserved).
 - **Market explorer (v0.2.0+)** — read-only browsing of ModelScope [Skills hub](https://modelscope.cn/skills) and [MCP plaza](https://modelscope.cn/mcp) via anonymous OpenAPI; one-click copy of install commands / `mcpServers` config snippets, skill "check update" via `source`/`sourceUpdated` frontmatter. Market data lives only in process memory (30-min TTL), never on disk.
+- **Tool filter (v0.3.0+)** — per-server allow-list for MCP tools (`settings.yaml` `connector.toolFilters`), prompt hiding + execution guard; unset = allow all.
 
 ```jsonc
-"dependencies": { "@omdp/dsh-connector": "^0.2.6" }
+"dependencies": { "@omdp/dsh-connector": "^0.3.0" }
 ```
 
 #### `@omdp/dsh-key-fallback` — multi-key API key pool with rotation (`v3.1.5`)
@@ -87,7 +88,7 @@ All three plugins are published to **npm** automatically by GitHub Actions on ev
 ```jsonc
 // ~/.dsh/profiles/<name>/package.json — you can use one or mix-and-match
 "dependencies": {
-  "@omdp/dsh-connector": "^0.2.6",
+  "@omdp/dsh-connector": "^0.3.0",
   "@omdp/dsh-vision-bridge": "^0.1.9",
   "@omdp/dsh-key-fallback": "^3.1.4"
 }
@@ -215,16 +216,17 @@ omdp/
 
 ### 插件
 
-#### `@omdp/dsh-connector` — MCP + Skills 管理器（`v0.2.6`）
+#### `@omdp/dsh-connector` — MCP + Skills 管理器（`v0.3.0`）
 
 一个设置页（**Connector**），从 DSH Web UI 管理三件事：
 
 - **MCP 服务器** —— 编辑 `cordis.patch.yml` 中的 MCP 块（stdio / streamable-http），带完整校验，坏配置绝不可能带到下次启动。旧版 SSE 服务器（如知乎）保留为 `mcp-remote --transport sse-only` 的 stdio 桥；插件只管这段配置文本。
 - **用户 Skills** —— 读写/删除 `~/.dsh/skills/<name>/SKILL.md` 下的技能（保留 frontmatter）。
 - **市场浏览器（v0.2.0+）** —— 匿名 OpenAPI 只读浏览 ModelScope [Skills 集市](https://modelscope.cn/skills) 与 [MCP 广场](https://modelscope.cn/mcp)；一键复制安装命令 / `mcpServers` 配置片段；通过 `source`/`sourceUpdated` frontmatter 检查技能更新。市场数据只存进程内存（30 分钟 TTL），绝不落盘。
+- **工具过滤（v0.3.0+）** —— 每 server 的 MCP 工具 allow 名单（`settings.yaml` 的 `connector.toolFilters`），提示词隐藏 + 执行期拦截；不配 = 全放行。
 
 ```jsonc
-"dependencies": { "@omdp/dsh-connector": "^0.2.6" }
+"dependencies": { "@omdp/dsh-connector": "^0.3.0" }
 ```
 
 #### `@omdp/dsh-key-fallback` — 多 key API 池 + 轮换（`v3.1.5`）
@@ -256,7 +258,7 @@ omdp/
 ```jsonc
 // ~/.dsh/profiles/<name>/package.json —— 可用其一或自由组合
 "dependencies": {
-  "@omdp/dsh-connector": "^0.2.6",
+  "@omdp/dsh-connector": "^0.3.0",
   "@omdp/dsh-vision-bridge": "^0.1.9",
   "@omdp/dsh-key-fallback": "^3.1.4"
 }

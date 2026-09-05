@@ -103,7 +103,9 @@ window.__ModuleLoader__.load({
       '.pm_chip{cursor:pointer;font:inherit;font-size:11.5px;padding:4px 12px;border-radius:999px;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.35));background:transparent;color:var(--dsw-alias-label-secondary,#9aa);transition:all .12s}' +
       '.pm_chip:hover{color:var(--dsw-alias-label-primary,#ddd);border-color:var(--dsw-alias-brand-primary,#5b8cff)}' +
       '.pm_chip.active{background:color-mix(in srgb,var(--dsw-alias-brand-primary,#5b8cff) 26%,transparent);color:var(--dsw-alias-brand-primary,#7aa2ff);border-color:color-mix(in srgb,var(--dsw-alias-brand-primary,#5b8cff) 60%,transparent)}' +
-      '.pm_chipToggle{color:var(--dsw-alias-brand-primary,#5b8cff);border-style:dashed}'
+      '.pm_chipToggle{color:var(--dsw-alias-brand-primary,#5b8cff);border-style:dashed}' +
+      '.pm_toolFilter{margin-top:10px;padding-top:10px;border-top:1px dashed var(--dsw-alias-border-l1,rgba(128,128,128,.22));display:flex;flex-direction:column;gap:8px}' +
+      '.pm_toolFilterHead{font-size:12px;font-weight:600;color:var(--dsw-alias-label-primary,#eee);display:flex;align-items:center;gap:8px;flex-wrap:wrap}'
 
     if (typeof document !== 'undefined' && document.querySelector('style[data-plugin-css="@omdp/dsh-connector/section"]') === null) {
       var tag = document.createElement('style')
@@ -236,6 +238,119 @@ window.__ModuleLoader__.load({
 
     /* ─────────────────────────── MCP servers ─────────────────────────── */
 
+    /* ─────────────────── MCP 工具过滤（tool-filter）───────────────────
+     * 每个 server 一张卡片下的工具多选区：勾选 = allow 放行，未勾 = prompt 隐藏
+     * + 执行期硬拦截。无配置 = 全量放行。规则存 settings.yaml `connector:` 节，
+     * 保存后新会话即生效（无需重启；当前会话的已加载 schema 下次请求刷新）。
+     * 工具列表来自 host 的 GET /api/mcp/tools/:serverName（读 tools.schemas()
+     * 的实时注册）；server 未连接时列表为空，显示提示而非多选框。
+     * ─────────────────────────────────────────────────────────────── */
+
+    // 全 server 的过滤规则缓存：key: serverName → { tools: [publicName], allow: [rawName] }。
+    // 注意：这是普通函数（非 Hook），由 McpPane 直接调用；内部的 useState/useEffect
+    // 之所以合法，是因为 McpPane 每次渲染都以相同顺序调用它（servers 为空时也调用，
+    // 只是 effect 内提前返回）。servers 变化才重拉。
+    function useToolFilters(servers) {
+      var _a = react.useState({})
+      var cache = _a[0]
+      var setCache = _a[1]
+      react.useEffect(function () {
+        var cancelled = false
+        var names = (servers || []).map(function (s) { return s.serverName }).filter(Boolean)
+        if (!names.length) { setCache({}); return }
+        Promise.all(names.map(function (n) {
+          return api('/mcp/tools/' + encodeURIComponent(n), { method: 'GET' })
+            .then(function (r) { return { name: n, data: r } })
+            .catch(function () { return { name: n, data: null } })
+        })).then(function (pairs) {
+          if (cancelled) return
+          var next = {}
+          pairs.forEach(function (p) {
+            if (p.data && !p.data.error) next[p.name] = { tools: p.data.tools || [], allow: p.data.allow || [] }
+          })
+          setCache(next)
+        })
+        return function () { cancelled = true }
+      }, [(servers || []).map(function (s) { return s.serverName }).join(',')])
+      return [cache, setCache]
+    }
+
+    function ToolFilterBadge(props) {
+      // 卡片头徽标：有过滤规则才显示“已过滤 N/M”，无规则不占位。
+      var info = (props.cache || {})[props.serverName]
+      if (!info || !info.allow.length || !info.tools.length) return null
+      return badge('已过滤 ' + info.allow.length + '/' + info.tools.length, 'brand')
+    }
+
+    function ToolFilterBox(props) {
+      var info = (props.cache || {})[props.serverName]
+      var _a = react.useState(false)
+      var saving = _a[0]
+      var setSaving = _a[1]
+      var _b = react.useState('')
+      var err = _b[0]
+      var setErr = _b[1]
+      if (!props.serverName) return null
+      if (!info) return createElement('div', { className: 'pm_meta' }, '工具列表加载中…')
+      if (!info.tools.length) return createElement('div', { className: 'pm_meta' }, '该 server 暂无已注册工具（未连接或无需过滤）。')
+      var allow = info.allow
+      // raw 名 = 公开名去掉 `mcp__<server>__` 前缀。serverName 本身可含下划线
+      // 但公开名用双下划线分隔、且 server 是第一段，所以按 `__` 切分取第一段
+      // 校验后余下 join 回 raw（与 host 侧 splitPublicName 同逻辑）。
+      function rawOf(publicName) {
+        var parts = String(publicName).slice(5).split('__')
+        if (parts.length >= 2 && parts[0] === props.serverName) return parts.slice(1).join('__')
+        var prefix = 'mcp__' + props.serverName + '__'
+        if (String(publicName).indexOf(prefix) === 0) return String(publicName).slice(prefix.length)
+        return publicName
+      }
+      function toggle(raw) {
+        var next = allow.indexOf(raw) === -1 ? allow.concat([raw]) : allow.filter(function (t) { return t !== raw })
+        save(next)
+      }
+      function save(next) {
+        setSaving(true)
+        setErr('')
+        var body = { filters: {} }
+        // 读当前全量规则：只改这一个 server，其余保持（避免并发覆盖）。
+        api('/mcp/filters', { method: 'GET' }).then(function (r) {
+          var filters = (r && r.filters) || {}
+          if (!next.length) delete filters[props.serverName]
+          else filters[props.serverName] = { allow: next }
+          body.filters = filters
+          return api('/mcp/filters', { method: 'PUT', body: JSON.stringify(body) })
+        }).then(function (r) {
+          if (r && r.error) { setErr(r.error); return }
+          changed()
+        }).catch(function (e) {
+          setErr(String(e))
+        }).finally(function () { setSaving(false) })
+      }
+      return createElement('div', { className: 'pm_toolFilter' },
+        createElement('div', { className: 'pm_toolFilterHead' },
+          '工具过滤 Tool filter',
+          saving ? createElement('span', { className: 'pm_spinner' }) : null,
+          allow.length
+            ? createElement('button', { className: 'pm_btn', onClick: function () { save([]) } }, '清除（全量放行）')
+            : createElement('span', { className: 'pm_meta' }, '未配置 = 全量放行'),
+        ),
+        err ? createElement('div', { className: 'pm_err' }, err) : null,
+        createElement('div', { className: 'pm_chips' },
+          info.tools.map(function (pub) {
+            var raw = rawOf(pub)
+            var on = allow.indexOf(raw) !== -1
+            return createElement('button', {
+              key: pub,
+              className: 'pm_chip' + (on ? ' active' : ''),
+              title: pub,
+              onClick: function () { toggle(raw) },
+            }, (on ? '✓ ' : '') + raw)
+          }),
+        ),
+        createElement('div', { className: 'pm_meta' }, '保存后新会话即生效，无需重启。未勾选的工具模型不可见、调用被拒。'),
+      )
+    }
+
     function McpPane(props) {
       var _a = react.useState(null)
       var editing = _a[0]
@@ -243,6 +358,14 @@ window.__ModuleLoader__.load({
       var _b = react.useState('')
       var err = _b[0]
       var setErr = _b[1]
+      var _c = useToolFilters(props.mcp.servers)
+      var filterCache = _c[0]
+      var setFilterCache = _c[1]
+      // 刷新后工具列表可能变化（server 重连/改名），清掉旧缓存重拉。
+      function changed() {
+        setFilterCache({})
+        props.onChanged()
+      }
 
       function save(server) {
         api('/mcp', {
@@ -252,7 +375,7 @@ window.__ModuleLoader__.load({
           if (r && r.error) { setErr(r.error); return }
           setErr('')
           setEditing(null)
-          props.onChanged()
+          changed()
         })
       }
       function remove(id) {
@@ -262,7 +385,7 @@ window.__ModuleLoader__.load({
         }).then(function (r) {
           if (r && r.error) { setErr(r.error); return }
           setErr('')
-          props.onChanged()
+          changed()
         })
       }
 
@@ -271,12 +394,14 @@ window.__ModuleLoader__.load({
           createElement('div', { className: 'pm_cardHead' },
             createElement('span', { className: 'pm_name' }, s.name || s.id),
             badge(s.transport || 'stdio', 'muted'),
+            createElement(ToolFilterBadge, { serverName: s.serverName, cache: filterCache }),
           ),
           createElement('div', { className: 'pm_meta' }, s.url ? 'url: ' + s.url : (s.command ? 'cmd: ' + s.command : '')),
           createElement('div', { className: 'pm_actions' },
             createElement('button', { className: 'pm_btn', onClick: function () { setEditing(s) } }, '编辑 Edit'),
             createElement('button', { className: 'pm_btn danger', onClick: function () { remove(s.id) } }, '删除 Delete'),
           ),
+          createElement(ToolFilterBox, { serverName: s.serverName, cache: filterCache, onChanged: changed }),
         )
       })
 
@@ -1033,6 +1158,7 @@ window.__ModuleLoader__.load({
     }
 
     exports.apply = apply
+    exports.inject = ['slots']
     return module.exports
   },
 })

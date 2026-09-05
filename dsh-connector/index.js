@@ -27,6 +27,7 @@ import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 import { JSDOM, VirtualConsole } from 'jsdom'
+import z from '@deepseek-ai/schemastery'
 
 const API_PREFIX = '/connector/api'
 const SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
@@ -41,6 +42,54 @@ const TRANSPORTS = new Set(['stdio', 'streamable-http'])
 // the single-token rules; this catches the rest defensively.
 const CONTROL_CHARS = /[\x00-\x1f\x7f]/
 export const inject = ['webServer']
+
+// ── MCP 工具过滤（tool-filter, 0.3.0 新增）────────────────────────────
+// dsh-mcp-client 的 Config schema 是封闭的：未知键会拒收并导致下次启动失败，
+// 所以过滤规则不能写进 mcp-* 行的 config，只能放在 connector 自己的 settings
+// namespace（settings.yaml `connector:` 节）里：
+//   connector:
+//     toolFilters:
+//       <serverName>:
+//         allow: [<rawToolName>, ...]   # 只放行这些工具；空/缺失 = 全量放行
+//
+// 生效三件套（抄 hyqhyq3/dsh-mcp-manager 的做法）：
+//   1. systemPrompt.tools(provider) —— 提示词里的 schema 列表先过滤，模型看不到被滤掉的工具；
+//   2. ctx.tools.guard —— 执行期硬拦截（guard 返回 reason 即拒收），补 provider 漏网；
+//   3. UI 多选框 —— 见 client.js ServerForm 的工具过滤区 + GET /api/mcp/tools/:serverName。
+// 无配置 = 全量放行（零回归）；guard 是同步函数，读的是 apply 时缓存 + watch 刷新的快照。
+const CONNECTOR_SETTINGS_NS = 'connector'
+const ToolFilterSchema = z.object({
+  toolFilters: z.dict(z.object({ allow: z.array(String).default([]) })).default({}),
+})
+function readToolFilters(ctx) {
+  try {
+    const settings = ctx.get('settings')
+    const value = settings ? settings.get(CONNECTOR_SETTINGS_NS) : undefined
+    const filters = value && typeof value === 'object' ? value.toolFilters : undefined
+    if (!filters || typeof filters !== 'object' || Array.isArray(filters)) return {}
+    const out = {}
+    for (const [server, rule] of Object.entries(filters)) {
+      const allow = rule && Array.isArray(rule.allow) ? rule.allow.filter((t) => typeof t === 'string' && t.length > 0) : []
+      out[server] = { allow }
+    }
+    return out
+  } catch { return {} }
+}
+// 公开名 `mcp__<server>__<raw>` 反解回 (server, raw)：注意 serverName 本身可含
+// 下划线，所以按 `mcp__` 前缀 + __ 分段取“第一段”为 server，余下 join 回 raw。
+function splitPublicName(publicName) {
+  if (typeof publicName !== 'string' || !publicName.startsWith('mcp__')) return null
+  const parts = publicName.slice(5).split('__')
+  if (parts.length < 2 || !parts[0]) return null
+  return { server: parts[0], raw: parts.slice(1).join('__') }
+}
+function isToolAllowed(filters, publicName) {
+  const split = splitPublicName(publicName)
+  if (!split) return true // 非 MCP 工具：不过滤
+  const rule = filters[split.server]
+  if (!rule || !rule.allow.length) return true // 该 server 无配置 = 全量放行
+  return rule.allow.includes(split.raw)
+}
 export { validateServer, commandResolvable }
 
 function resolveHome() {
@@ -874,6 +923,46 @@ async function readBody(req) {
 }
 
 export function apply(ctx) {
+  // ── 工具过滤三件套之 (0)：settings namespace 注册 + 快照缓存 ──
+  // settings 服务可选（无 provider 时 ctx.inject 回调不跑，过滤保持全放行）。
+  let toolFilters = {}
+  const refreshFilters = () => { toolFilters = readToolFilters(ctx) }
+  ctx.inject(['settings'], (settingsCtx) => {
+    settingsCtx.settings.register(CONNECTOR_SETTINGS_NS, ToolFilterSchema, { base: { toolFilters: {} } })
+    refreshFilters()
+    settingsCtx.effect(() => settingsCtx.settings.watch(() => refreshFilters()), 'connector: watch tool filters')
+  })
+
+  // ── 三件套之 (1)：prompt 层过滤 —— 被滤掉的工具不进模型 schema ──
+  // tools provider 在每次 assembly 时求值，读最新快照；无 tools/systemPrompt
+  // 服务时跳过（ctx.get 可选读，失败隔离：connector 照常提供设置页）。
+  try {
+    const systemPrompt = ctx.get('systemPrompt')
+    if (systemPrompt && typeof systemPrompt.tools === 'function') {
+      ctx.effect(() => systemPrompt.tools(() => {
+        let schemas = []
+        try {
+          const tools = ctx.get('tools')
+          schemas = tools ? tools.schemas() : []
+        } catch { return { schemas: [] } }
+        const kept = schemas.filter((s) => isToolAllowed(toolFilters, s && s.name))
+        return { schemas: kept, knownNames: schemas.map((s) => s && s.name).filter(Boolean) }
+      }), 'connector: mcp tool filter provider')
+    }
+  } catch {}
+  // ── 三件套之 (2)：执行期硬拦截 —— 补 provider 漏网（如 guard 注册时序）──
+  try {
+    const tools = ctx.get('tools')
+    if (tools && typeof tools.guard === 'function') {
+      ctx.effect(() => tools.guard((exec) => {
+        if (!exec || typeof exec.name !== 'string') return undefined
+        if (isToolAllowed(toolFilters, exec.name)) return undefined
+        const split = splitPublicName(exec.name)
+        return `connector: 工具 ${exec.name} 已被过滤（server "${split ? split.server : '?'}” 的 allow 列表未包含它）`
+      }), 'connector: mcp tool filter guard')
+    }
+  } catch {}
+
   async function route(req, res) {
     const url = new URL(req.url, 'http://localhost')
     const path = url.pathname
@@ -945,6 +1034,66 @@ export function apply(ctx) {
         await writeFile(tmp, next, 'utf8')
         await rename(tmp, target)
         return json(res, 200, { ok: true })
+      }
+
+      // GET /api/mcp/tools/:serverName — 该 server 当前注册的工具公开名
+      // （供 UI 渲染 allow 多选框；server 未连接/无工具时返回空列表）。
+      const toolsMatch = path.match(new RegExp('^' + API_PREFIX + '/mcp/tools/([^/]+)$'))
+      if (req.method === 'GET' && toolsMatch) {
+        const serverName = decodeURIComponent(toolsMatch[1])
+        if (!SERVER_NAME_RE.test(serverName)) return json(res, 400, { error: 'invalid server name' })
+        let names = []
+        try {
+          const tools = ctx.get('tools')
+          const schemas = tools ? tools.schemas() : []
+          names = schemas.map((s) => s && s.name).filter((n) => {
+            const split = splitPublicName(n)
+            return split && split.server === serverName
+          })
+        } catch (error) {
+          return json(res, 500, { error: String(error?.message ?? error).slice(0, 200) })
+        }
+        const filters = readToolFilters(ctx)
+        const rule = filters[serverName]
+        return json(res, 200, { server: serverName, tools: names.sort(), allow: rule ? rule.allow : [] })
+      }
+
+      // GET /api/mcp/filters — 全部 server 的过滤规则（UI 批量展示用）
+      if (req.method === 'GET' && path === API_PREFIX + '/mcp/filters') {
+        return json(res, 200, { filters: readToolFilters(ctx) })
+      }
+
+      // PUT /api/mcp/filters — 保存过滤规则 → settings.yaml `connector:` 节
+      // body: { filters: { <serverName>: { allow: [rawTool,...] } } }。
+      // 空 allow = 全量放行（删除该 server 规则与显式空列表等价）。
+      if (req.method === 'PUT' && path === API_PREFIX + '/mcp/filters') {
+        const body = await readBody(req)
+        const incoming = body && typeof body === 'object' && !Array.isArray(body) ? body.filters : undefined
+        if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) {
+          return json(res, 400, { error: 'malformed request body: filters must be an object' })
+        }
+        const clean = {}
+        for (const [server, rule] of Object.entries(incoming)) {
+          if (!SERVER_NAME_RE.test(server)) {
+            return json(res, 400, { error: `invalid server name ${JSON.stringify(server)}` })
+          }
+          const allow = rule && Array.isArray(rule.allow) ? rule.allow : []
+          for (const t of allow) {
+            if (typeof t !== 'string' || !t.length || CONTROL_CHARS.test(t) || /\s/.test(t)) {
+              return json(res, 400, { error: `invalid tool name ${JSON.stringify(t)} for server ${JSON.stringify(server)}` })
+            }
+          }
+          if (allow.length) clean[server] = { allow: [...new Set(allow)].sort() }
+        }
+        try {
+          const settings = ctx.get('settings')
+          if (!settings) return json(res, 503, { error: 'settings service unavailable' })
+          await settings.update(CONNECTOR_SETTINGS_NS, { toolFilters: clean })
+        } catch (error) {
+          return json(res, 500, { error: String(error?.message ?? error).slice(0, 300) })
+        }
+        refreshFilters()
+        return json(res, 200, { ok: true, filters: readToolFilters(ctx) })
       }
 
       // GET /api/skills — list
