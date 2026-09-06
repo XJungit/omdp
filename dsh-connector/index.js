@@ -941,22 +941,19 @@ export function apply(ctx) {
     }
   }
 
-  // ── 三件套之 (1)：prompt 层过滤 —— 被滤掉的工具不进模型 schema ──
-  // tools provider 在每次 assembly 时求值，读最新快照；无 tools/systemPrompt
-  // 服务时跳过（ctx.get 可选读，失败隔离：connector 照常提供设置页）。
+  // ── 三件套之 (1)：prompt 层过滤 —— assemble waterfall 真替换 ──
+  // 注意：systemPrompt.tools(provider) 是追加合并语义（各 provider 输出拼在一起），
+  // 只能加不能减，做减法必须监听 system-prompt/assemble，await next() 后替换 tools 数组。
+  // 成熟参照：hyqhyq3/dsh-mcp-manager 就是 ctx.on('system-prompt/assemble', …, { global: true })。
+  // { global: true } 让 scope filter 放行（见 dsh-scope scopeTarget 的 hook.global 短路）。
   try {
-    const systemPrompt = ctx.get('systemPrompt')
-    if (systemPrompt && typeof systemPrompt.tools === 'function') {
-      ctx.effect(() => systemPrompt.tools(() => {
-        let schemas = []
-        try {
-          const tools = ctx.get('tools')
-          schemas = tools ? tools.schemas() : []
-        } catch { return { schemas: [] } }
-        const kept = schemas.filter((s) => isToolAllowed(toolFilters, s && s.name))
-        return { schemas: kept, knownNames: schemas.map((s) => s && s.name).filter(Boolean) }
-      }), 'connector: mcp tool filter provider')
-    }
+    ctx.on('system-prompt/assemble', async (_assembly, _context, next) => {
+      const assembled = await next()
+      if (!assembled || !Array.isArray(assembled.tools)) return assembled
+      const kept = assembled.tools.filter((t) => isToolAllowed(toolFilters, t && t.name))
+      if (kept.length === assembled.tools.length) return assembled
+      return { ...assembled, tools: kept }
+    }, { global: true })
   } catch {}
   // ── 三件套之 (2)：执行期硬拦截 —— 补 provider 漏网（如 guard 注册时序）──
   try {
