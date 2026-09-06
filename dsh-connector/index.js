@@ -41,7 +41,7 @@ const TRANSPORTS = new Set(['stdio', 'streamable-http'])
 // patch file itself (NUL, control chars). Tab/newline are already rejected by
 // the single-token rules; this catches the rest defensively.
 const CONTROL_CHARS = /[\x00-\x1f\x7f]/
-export const inject = ['webServer']
+export const inject = ['webServer', 'settings']
 
 // ── MCP 工具过滤（tool-filter, 0.3.0 新增）────────────────────────────
 // dsh-mcp-client 的 Config schema 是封闭的：未知键会拒收并导致下次启动失败，
@@ -924,14 +924,22 @@ async function readBody(req) {
 
 export function apply(ctx) {
   // ── 工具过滤三件套之 (0)：settings namespace 注册 + 快照缓存 ──
-  // settings 服务可选（无 provider 时 ctx.inject 回调不跑，过滤保持全放行）。
+  // settings 经声明式 inject 依赖保证就绪（见上方 export const inject），
+  // 这里同步拿服务；万一缺失不炸，过滤保持全放行（零回归）。
+  // 注：cordis 的 ctx.inject(deps, cb) 回调按 (ctx, config) 调用，不是服务展开，
+  // 不能拿回调参数当 service 用 —— 0.3.0 曾因此 register 从未落地。
+  const settings = ctx.get('settings')
   let toolFilters = {}
   const refreshFilters = () => { toolFilters = readToolFilters(ctx) }
-  ctx.inject(['settings'], (settingsCtx) => {
-    settingsCtx.settings.register(CONNECTOR_SETTINGS_NS, ToolFilterSchema, { base: { toolFilters: {} } })
-    refreshFilters()
-    settingsCtx.effect(() => settingsCtx.settings.watch(() => refreshFilters()), 'connector: watch tool filters')
-  })
+  if (settings) {
+    try {
+      const scope = settings.register(CONNECTOR_SETTINGS_NS, ToolFilterSchema, { base: { toolFilters: {} } })
+      refreshFilters()
+      ctx.effect(() => scope.watch(() => refreshFilters()), 'connector: watch tool filters')
+    } catch (error) {
+      console.error('[dsh-connector] register tool filter settings failed:', error?.message ?? error)
+    }
+  }
 
   // ── 三件套之 (1)：prompt 层过滤 —— 被滤掉的工具不进模型 schema ──
   // tools provider 在每次 assembly 时求值，读最新快照；无 tools/systemPrompt
