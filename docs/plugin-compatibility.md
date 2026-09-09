@@ -2,8 +2,8 @@
 
 > ⚠️ **本文档为演进记录**：`@omdp/dsh-gitbash-win` 与 `@omdp/dsh-resume-stream`
 > 已于 2026-08-25 归档（源码移至 `archive/`，不再维护或发布）。下方对 gitbash
-> 的评估保留作为历史架构参考；当前活跃插件版本见各节标题（connector `0.3.0` /
-> vision-bridge `0.1.9` / key-fallback `3.1.5`）。
+> 的评估保留作为历史架构参考；当前活跃插件版本见各节标题（connector `0.3.2` /
+> vision-bridge `0.1.10` / key-fallback `3.1.5`）。
 >
 > 评估内容：各插件对 DSH（DeepSeek Harness）更新的抗崩溃能力。
 > 核心问题：DSH 更新后，插件会不会导致 DSH 崩溃？
@@ -11,7 +11,13 @@
 **结论先行**：活跃插件都采用**抗崩溃架构**——DSH 更新时**不会因插件而崩溃**（硬保证），
 最坏情况只是单个插件功能需要适配更新。插件之间互不影响。
 
-**DSH `v0.1.2-rc.1`（`next` dist-tag）适配结论（2026-09-03）**：三个插件**源码零改动即兼容** DSH next。逐项核查（npm `dist-tags`：`latest=0.1.1-rc.2`、`next=0.1.2-rc.1`、`alpha=0.1.2-alpha.5`）：`@deepseek-ai/dsh-credentials`/`@deepseek-ai/dsh-llm`/`@deepseek-ai/dsh-settings` 从 `0.1.2-alpha.2`→`alpha.3`→`alpha.4`→`alpha.5`→`0.1.2-rc.1` **逐字节一致（`Compare-Object` NO DIFF）**；`ctx.credentials`（`resolve`/`set`/`unset`/`describe`→`{configured,source,writable}`）、`ctx.llm`（`registerAdapter`/`stream`/`listProviders`/`listConfigurableProviders`/`resolveModelInfo`/`inputModalities`）、`ctx.webServer`（`register({kind:'prefix'|'exact'})`、`ctx.get('webServer')?.port`）、`agent/request(-error)`、`tools.register`、`attachments.readImage`、`window.__ModuleLoader__.load` client 挂载——全部保留。node engines `^22.19.0 || >=24.0.0` 不变（DSH 主包依赖 `cordis^4.0.2`、`schemastery^3.18.2` 仍在枚举内）。**结论：三插件源码零改动兼容 next；唯一动作是把 next 系列版本追加进 `@omdp/dsh-key-fallback` 的 peer 枚举（已实测一致才放行）**。
+**DSH `v0.1.2-rc.1`（`next` dist-tag）适配结论（2026-09-03）**：三个插件 host 侧**源码零改动即兼容** DSH next（仅 peer 枚举动作）。逐项核查（npm `dist-tags`：`latest=0.1.1-rc.2`、`next=0.1.2-rc.1`、`alpha=0.1.2-alpha.5`）：`@deepseek-ai/dsh-credentials`/`@deepseek-ai/dsh-llm`/`@deepseek-ai/dsh-settings` 从 `0.1.2-alpha.2`→`alpha.3`→`alpha.4`→`alpha.5`→`0.1.2-rc.1` **逐字节一致（`Compare-Object` NO DIFF）**；`ctx.credentials`（`resolve`/`set`/`unset`/`describe`→`{configured,source,writable}`）、`ctx.llm`（`registerAdapter`/`stream`/`listProviders`/`listConfigurableProviders`/`resolveModelInfo`/`inputModalities`）、`ctx.webServer`（`register({kind:'prefix'|'exact'})`、`ctx.get('webServer')?.port`）、`agent/request(-error)`、`tools.register`、`attachments.readImage`、`window.__ModuleLoader__.load` client 挂载——全部保留。node engines `^22.19.0 || >=24.0.0` 不变（DSH 主包依赖 `cordis^4.0.2`、`schemastery^3.18.2` 仍在枚举内）。**结论：三插件 host 源码零改动兼容 next；唯一动作是把 next 系列版本追加进 `@omdp/dsh-key-fallback` 的 peer 枚举（已实测一致才放行）**。
+
+> ⚠️ **client UI 层 caveat（2026-09-09 补充）**：上述"零改动兼容"仅覆盖 **host/API 层**。
+> `0.1.2-rc.1` 把 composer 换成 **Lexical contenteditable**（不再是 `<textarea>`），vision-bridge
+> client 的粘贴插入逻辑因此回归（0.1.9 只认 TEXTAREA/INPUT → 文本模型粘贴路径插不进）。
+> 该 client 行为差异在 0.1.10 修复（见 §3）。经验：**client 侧的宿主 UI 结构变化（composer/输入框
+> 元素类型、slot 树）不会反映在 host API 兼容核查里，需单独做浏览器层验证**。
 
 **DSH `v0.1.2-alpha.1` / `v0.1.2-alpha.2` 适配结论（2026-08-28 / 2026-08-31）**：三个插件**源码零改动即同时兼容**
 当前版本 `0.1.1-rc.2` 与新版 `v0.1.2-alpha.1`、`v0.1.2-alpha.2`。逐项核查过的 API 面（版本间源码逐字对比）：
@@ -105,13 +111,19 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 
 ---
 
-## 3. @omdp/dsh-vision-bridge（v0.1.9）【活跃插件】
+## 3. @omdp/dsh-vision-bridge（v0.1.10）【活跃插件】
 
 ### 架构
 
 - **ESM bundle**：`index.js` 在 `apply()` 内用动态 `import()` 解析 `@deepseek-ai/*` 工具与接口（同 dsh-key-fallback）
 - **多模态包装 + 工具注册**：`ctx.llm.registerAdapter` / `ctx.tools.register` / `ctx.attachments`
 - **Client 半支持粘贴/拖拽走 bridge（`vision_bridge_read_image`）或原生路径**
+- **client 插入目标兼容 Lexical composer（v0.1.10）**：DSH `0.1.2-rc.1` 起 composer 从 `<textarea>`
+  换成 Lexical contenteditable（`<div contenteditable role="textbox" data-composer-input>`）。
+  0.1.9 的 `insertText` 只认 `TEXTAREA/INPUT` → 文本模型粘贴路径插不进 = "没反应"（图片已被截获上传，
+  但路径未入输入框）。0.1.10 改为向上解析可编辑宿主（textarea/input/contenteditable），
+  contenteditable 走 `execCommand('insertText')` 触发 Lexical 的 beforeinput/input 同步
+  （失败兜底派发合成 `beforeinput`）；焦点不在可编辑宿主时放行原生事件不再吞图。
 
 ### 依赖的 DSH 接口
 
@@ -182,8 +194,8 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 | 插件 | 版本 | 第三方依赖 | DSH 硬依赖 | 抗崩溃设计 | 最大风险点 |
 |---|---|---|---|---|---|
 | dsh-gitbash-win（归档） | 0.1.6 | 无（动态加载 5 个 @deepseek-ai/*） | `tools`/`subprocess`/`systemPrompt`/`shellEnv` | 顶层零依赖 + 动态加载 + 失败隔离 | `dsh-sandbox`（Windows ACL 上游 bug） |
-| dsh-connector | 0.3.0 | `yaml`（+ peer `schemastery` 仅过滤用） | `webServer`（`settings`/`tools.guard`/`systemPrompt` 可选） | 纯静态 + try/catch + 可选服务失败隔离 | `ctx.webServer` API 变化 |
-| dsh-vision-bridge | 0.1.9 | 无 | `tools`/`attachments`/`llm`/`credentials` | 纯静态 + 零 @deepseek-ai + 防御性编码 | `ctx.llm` API 变化 |
+| dsh-connector | 0.3.2 | `yaml`（+ peer `schemastery` 仅过滤用） | `webServer`（`settings`/`tools.guard`/`systemPrompt` 可选） | 纯静态 + try/catch + 可选服务失败隔离 | `ctx.webServer` API 变化 |
+| dsh-vision-bridge | 0.1.10 | 无 | `tools`/`attachments`/`llm`/`credentials` | 纯静态 + 零 @deepseek-ai + 防御性编码 | `ctx.llm` API 变化 / composer 输入层变化 |
 | dsh-key-fallback | 3.1.5 | 无（reference 半边 dsh-credentials） | `credentials`/`llm`/`settings`（`webServer`/`slots` 可选） | ESM import + `agent/*` 事件 + `process.env + credentials.set` 双写 + 防御性编码 | `agent/request-error` 载荷 / `webServer` API 变化 |
 
 ## 总体结论

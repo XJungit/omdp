@@ -38,25 +38,59 @@ window.__ModuleLoader__.load({
       return files
     }
 
-    function insertText(target, text) {
-      var el =
-        target && (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT')
-          ? target
-          : document.activeElement
-      if (!el || (el.tagName !== 'TEXTAREA' && el.tagName !== 'INPUT')) return
-      el.focus()
+    // Locate the editable surface for an insertion. DSH 0.1.2-rc.1 replaced the
+    // composer's <textarea> with a Lexical contenteditable host
+    // (<div contenteditable="true" role="textbox" data-composer-input>), so the
+    // paste target (or a descendant of it) may be any of: TEXTAREA, INPUT, or a
+    // contenteditable element. Walk up from the target to the real host.
+    function editableHostOf(node) {
+      if (!node || node.nodeType !== 1) return null
+      var el = node
+      while (el && el.nodeType === 1) {
+        if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') return el
+        var attr = el.getAttribute && el.getAttribute('contenteditable')
+        if (attr === 'true' || attr === 'plaintext-only') return el
+        el = el.parentElement
+      }
+      return null
+    }
+
+    // Insert plain text into an already-resolved editable host.
+    // - TEXTAREA/INPUT: execCommand insertText, falling back to the value
+    //   setter + synthetic input event (legacy DSH composer behaviour).
+    // - contenteditable (Lexical): execCommand insertText lets the browser run
+    //   the native editing pipeline, which fires beforeinput/input that the
+    //   Lexical editor syncs into its draft model; if the command is not
+    //   honoured, dispatch a synthetic beforeinput insertText as a last resort.
+    function insertText(host, text) {
+      if (!host) return
+      var isField = host.tagName === 'TEXTAREA' || host.tagName === 'INPUT'
+      host.focus()
       var inserted = false
       try {
         inserted = document.execCommand('insertText', false, text)
-      } catch {
+      } catch (err) {
         inserted = false
       }
-      if (!inserted) {
+      if (inserted) return
+      if (isField) {
         var proto =
-          el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype
+          host.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype
         var setter = Object.getOwnPropertyDescriptor(proto, 'value').set
-        setter.call(el, el.value + text)
-        el.dispatchEvent(new Event('input', { bubbles: true }))
+        setter.call(host, host.value + text)
+        host.dispatchEvent(new Event('input', { bubbles: true }))
+        return
+      }
+      try {
+        var evt = new InputEvent('beforeinput', {
+          bubbles: true,
+          cancelable: true,
+          inputType: 'insertText',
+          data: text,
+        })
+        host.dispatchEvent(evt)
+      } catch (err) {
+        console.warn('[dsh-vision-bridge] contenteditable insert fallback failed: ' + (err && err.message ? err.message : err))
       }
     }
 
@@ -238,16 +272,20 @@ window.__ModuleLoader__.load({
         if (decision === 'pending') fetchCapabilities(label)
         return
       }
+      // Resolve the editable host synchronously. If the paste is not landing on
+      // a text field or a contenteditable surface (e.g. focus elsewhere), do not
+      // swallow the event — let DSH's own path handle it.
+      var host = editableHostOf(event.target) || editableHostOf(document.activeElement)
+      if (!host) return
       event.preventDefault()
       event.stopImmediatePropagation()
-      var target = event.target
       Promise.all(files.map(uploadOne))
         .then((results) => {
           var text = results
             .map((r) => r.path)
             .filter(Boolean)
             .join(' ')
-          if (text) insertText(target, text + ' ')
+          if (text) insertText(host, text + ' ')
         })
         .catch((error) => {
           console.error('[dsh-vision-bridge] paste-to-path failed: ' + (error && error.message ? error.message : error))
@@ -301,14 +339,15 @@ window.__ModuleLoader__.load({
         if (decision === 'pending') fetchCapabilities(label)
         return
       }
+      var host = editableHostOf(event.target) || editableHostOf(document.activeElement)
+      if (!host) return
       resetFileDropOverlay()
       event.preventDefault()
       event.stopImmediatePropagation()
-      var target = event.target
       Promise.all(files.map(uploadOne))
         .then(function (results) {
           var text = results.map(function (r) { return r.path }).filter(Boolean).join(' ')
-          if (text) insertText(target, text + ' ')
+          if (text) insertText(host, text + ' ')
         })
         .catch(function (error) {
           console.error('[dsh-vision-bridge] drop-to-path failed: ' + (error && error.message ? error.message : error))

@@ -1,6 +1,6 @@
 # dsh-vision-bridge
 
-**让纯文本模型也能"看图"的视觉桥插件**（`v0.1.9`）：自动区分多模态 / 文本模型。零第三方依赖。
+**让纯文本模型也能"看图"的视觉桥插件**（`v0.1.10`）：自动区分多模态 / 文本模型。零第三方依赖。
 
 ## Requirements
 
@@ -23,6 +23,11 @@ DSH 视觉桥插件：让**纯文本模型也能"看图"**。自动区分多模�
 - 粘贴图片 → 自动截获为临时路径文本 → 模型调 `vision_bridge_read_image` → Agnes 返回文字描述 OK
 - 本地图片 → 转 data URL → 识别成功 OK
 - 公网 URL → 取决于 Agnes 能否抓取（raw.githubusercontent 常不可达，建议用 data URL 或可达图床）
+
+> **DSH 0.1.2-rc.1 适配（v0.1.10，2026-09-09）**：该版本把 composer 换成 Lexical
+> contenteditable 后，0.1.9 的 `insertText` 只认 textarea/input 导致文本模型粘贴"没反应"
+> （图片已被截获上传但路径插不进）。host 侧 `/vision-bridge/capabilities` 与 paste 路由在
+> 0.1.2-rc.1 下已直连验证正常；client 插入适配已按 Lexical 同步机制修复，待活体验证。
 
 ## Quick start
 
@@ -57,6 +62,7 @@ pnpm add @omdp/dsh-vision-bridge
 
 - **多模态模型**：粘贴图片走 DSH 原生上传，插件不拦截。是否多模态由前端查询 host 的 `/vision-bridge/capabilities`（基于 `llm.resolveModelInfo` 的真实 `inputModalities` 判定）；已知视觉别名（如 DSV4FV）在查询完成前也会快速放行。
 - **纯文本模型**：捕获 paste → POST /vision-bridge/paste → 临时文件 → 路径文本入输入框。
+  - **DSH 0.1.2-rc.1 起 composer 改为 Lexical contenteditable**（`<div contenteditable role="textbox" data-composer-input>`，不再有 `<textarea>`）。v0.1.10 起插入逻辑会向上解析可编辑宿主（textarea / input / contenteditable），contenteditable 走浏览器 `execCommand('insertText')` 触发 Lexical 的 beforeinput/input 同步（失败再兜底派发合成 `beforeinput`），textarea/input 保持原 value-setter 回退。粘贴/拖拽时若焦点不在可编辑宿主上则**放行原生事件，不再吞图**。
 - **多模态模型拖拽**：不拦截，交给 DSH 原生图片处理器和文件拖拽插件。
 - **纯文本模型拖拽**：由本插件捕获，上传到 `/vision-bridge/paste` 并插入临时路径；捕获前会向文件拖拽插件发送空 drop 复位事件，避免“拖拽到 ❌”覆盖层卡死且不重复插入路径。
 - 不会触发宿主图片准入（`inputModalities` 拒绝），因此文本模型仍能通过粘贴或拖拽路径"发图"。
@@ -125,7 +131,7 @@ pnpm install --lockfile-only --offline
 
 ```jsonc
 "dependencies": {
-  "@omdp/dsh-vision-bridge": "^0.1.9"
+  "@omdp/dsh-vision-bridge": "^0.1.10"
 }
 ```
 
@@ -268,4 +274,10 @@ MIT License。安全问题请通过 GitHub Issues 私密报告（https://github.
 | DSH 大版本（`ctx.llm` API 变化） | ✅ DSH 不崩；LLM 相关功能可能降级（适配器/流式），需适配 |
 | DSH 服务缺失 | ✅ 优雅降级（防御性编码） |
 
-**最后验证**：DSH `0.1.0-rc.8`（2026-08-20，已在本机运行实例活体验证 paste 路由；autoRead 改用 rc.8 pre-step 载荷的 `payload.agent` 获取当前路由模型）。rc.8 起 DeepSeek 适配器支持原生图片请求，多模态模型场景下 autoRead 会自动放行不再代看。当前 npm 版本 `0.1.9`（2026-09-03 发布）。多模态误判修复：`agent/pre-step` 改用 `agent.options` / `agent.session.requestHeader()` / `agent.session.requestContext()` 三级回退，避免声明 `image` 的模型被当纯文本走 Agnes 代看。
+**最后验证**：DSH `0.1.0-rc.8`（2026-08-20，已在本机运行实例活体验证 paste 路由；autoRead 改用 rc.8 pre-step 载荷的 `payload.agent` 获取当前路由模型）。rc.8 起 DeepSeek 适配器支持原生图片请求，多模态模型场景下 autoRead 会自动放行不再代看。当前 npm 版本 `0.1.10`（2026-09-09 发布，client 适配 Lexical contenteditable composer）。多模态误判修复：`agent/pre-step` 改用 `agent.options` / `agent.session.requestHeader()` / `agent.session.requestContext()` 三级回退，避免声明 `image` 的模型被当纯文本走 Agnes 代看。
+
+> **0.1.2-rc.1 兼容性核查记录（2026-09-09）**：`/vision-bridge/capabilities`（label=deepseek-v4-flash →
+> `{"known":true,"multimodal":false}`）与 paste 路由（GET→405 = 已注册）在运行实例直连验证正常，
+> 证明 host 侧无回归。client 侧 0.1.9 的插入目标只认 `TEXTAREA/INPUT`，而 0.1.2-rc.1 的 composer
+> 是 Lexical contenteditable → 文本模型粘贴路径插不进 = "没反应"。v0.1.10 的修复与 Lexical 的
+> beforeinput/input 同步机制对齐，浏览器活体验证待部署后补充。
