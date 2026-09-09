@@ -27,7 +27,8 @@ DSH 视觉桥插件：让**纯文本模型也能"看图"**。自动区分多模�
 > **DSH 0.1.2-rc.1 适配（v0.1.10，2026-09-09）**：该版本把 composer 换成 Lexical
 > contenteditable 后，0.1.9 的 `insertText` 只认 textarea/input 导致文本模型粘贴"没反应"
 > （图片已被截获上传但路径插不进）。host 侧 `/vision-bridge/capabilities` 与 paste 路由在
-> 0.1.2-rc.1 下已直连验证正常；client 插入适配已按 Lexical 同步机制修复，待活体验证。
+> 0.1.2-rc.1 下已直连验证正常；client 插入适配已按 Lexical 同步机制修复，**活体验证通过**
+> （2026-09-09：文本模型下粘贴生成 `vision-bridge-paste-*/paste.png` 临时路径并成功入输入框）。
 
 ## Quick start
 
@@ -280,4 +281,4 @@ MIT License。安全问题请通过 GitHub Issues 私密报告（https://github.
 > `{"known":true,"multimodal":false}`）与 paste 路由（GET→405 = 已注册）在运行实例直连验证正常，
 > 证明 host 侧无回归。client 侧 0.1.9 的插入目标只认 `TEXTAREA/INPUT`，而 0.1.2-rc.1 的 composer
 > 是 Lexical contenteditable → 文本模型粘贴路径插不进 = "没反应"。v0.1.10 的修复与 Lexical 的
-> beforeinput/input 同步机制对齐，浏览器活体验证待部署后补充。
+> beforeinput/input 同步机制对齐，**浏览器活体验证通过**（2026-09-09，粘贴生成临时路径并入输入框）。

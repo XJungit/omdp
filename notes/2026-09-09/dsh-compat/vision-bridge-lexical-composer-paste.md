@@ -49,8 +49,9 @@
   不反映在 host API 核查里，需单独做浏览器层验证（详见 `docs/plugin-compatibility.md` 头部 caveat）。
 - 排查顺序建议：先直连 host 路由（capabilities/paste 405 探测）排除 host，再读 client bundle
   的宿主假设；浏览器 console 满屏第三方噪音要会过滤。
-- 验证状态：host 侧 0.1.2-rc.1 下已直连验证；client 插入修复逻辑与 Lexical 同步机制对齐，
-  浏览器活体验证待 0.1.10 部署后补充（README 已如实标注，未虚报）。
+- 验证状态：host 侧 0.1.2-rc.1 下直连验证；client 插入修复于 2026-09-09 部署 0.1.10 后
+  **浏览器活体验证通过**（文本模型粘贴生成 `vision-bridge-paste-*/paste.png` 临时路径并入输入框，
+  用户确认"插件正常了"）。
 
 ## 相关文件
 
