@@ -34,6 +34,12 @@ omdp/
 │   ├── cordis.patch.yml # bundle activation row
 │   ├── package.json
 │   └── README.md
+├── dsh-archived-sessions/ # archived-session manager (fork of @muwinds, DSH 0.1.5-rc.1)
+│   ├── lib/index.js     # host half (ESM)
+│   ├── lib/client.js    # client half (Web UI settings tab)
+│   ├── cordis.patch.yml # bundle activation row
+│   ├── package.json
+│   └── README.md
 ├── archive/             # archived plugins retained for historical reference
 │   ├── dsh-gitbash-win/
 │   ├── resume-stream/
@@ -81,16 +87,32 @@ A zero-dependency plugin that gives **text-only models** vision: it auto-detects
 "dependencies": { "@omdp/dsh-vision-bridge": "^0.1.10" }
 ```
 
+#### `@omdp/dsh-archived-sessions` — archived-session manager (`v0.3.0`)
+
+Fork of [`@muwinds/dsh-archived-sessions`](https://github.com/MuWinds/dsh-archived-sessions) 0.2.0, adapted for **DSH 0.1.5-rc.1** (upstream unmaintained and broken on that version: `sessionPersistence.list()` returns snapshots, `locate()` was removed). Adds **Settings → 归档会话**:
+
+- List archived sessions with title / ID / workspace / disk usage / running state;
+- **Release** (释放): move a session out of the archive set (no data deleted);
+- **Delete** (删除): delete the session directory + prune the archive id (two-step confirm);
+- **Tree delete**: deleting a main session also deletes its `parentSession` subtree (fixes upstream issue #2 — orphan subagents);
+- **Orphan sweep**: scan and clean leftover subagent dirs whose parent session is already gone;
+- Deletion safety: refuses to delete any path whose directory name is not a session dir (`session-<uuid>` or bare UUID).
+
+```jsonc
+"dependencies": { "@omdp/dsh-archived-sessions": "^0.3.0" }
+```
+
 ### Installing from npm (recommended)
 
-All three plugins are published to **npm** automatically by GitHub Actions on every `v*` tag. This is the **preferred** install path — it avoids the git-`#path:` normalization, cross-resolution, and `allowBuilds` friction that GitHub installs cause (see the history in `docs/npm-publish.md`).
+All four plugins are published to **npm** automatically by GitHub Actions on every `v*` tag. This is the **preferred** install path — it avoids the git-`#path:` normalization, cross-resolution, and `allowBuilds` friction that GitHub installs cause (see the history in `docs/npm-publish.md`).
 
 ```jsonc
 // ~/.dsh/profiles/<name>/package.json — you can use one or mix-and-match
 "dependencies": {
   "@omdp/dsh-connector": "^0.3.0",
   "@omdp/dsh-vision-bridge": "^0.1.10",
-  "@omdp/dsh-key-fallback": "^3.1.6"
+  "@omdp/dsh-key-fallback": "^3.1.6",
+  "@omdp/dsh-archived-sessions": "^0.3.0"
 }
 ```
 
@@ -103,7 +125,7 @@ Updating is a standard `pnpm update`:
 
 ```sh
 cd ~/.dsh/profiles/<name>
-pnpm update @omdp/dsh-connector @omdp/dsh-vision-bridge @omdp/dsh-key-fallback
+pnpm update @omdp/dsh-connector @omdp/dsh-vision-bridge @omdp/dsh-key-fallback @omdp/dsh-archived-sessions
 ```
 
 ### Remote installs from GitHub (alternative)
@@ -114,6 +136,7 @@ Each active plugin is a standalone npm package in its own subdirectory, so it ca
 dsh plugin --profile web add github:XJungit/omdp#path:dsh-connector
 dsh plugin --profile web add github:XJungit/omdp#path:dsh-vision-bridge
 dsh plugin --profile web add github:XJungit/omdp#path:dsh-key-fallback
+dsh plugin --profile web add github:XJungit/omdp#path:dsh-archived-sessions
 ```
 
 > **Command availability** — the `dsh plugin add` commands above assume `dsh` is on your `PATH`. If you run DSH via `npx` per the official docs (no global `dsh` command), those lines fail with `command not found: dsh` — prefix each line with `npx @deepseek-ai/dsh` instead (no `dsh` on PATH required).
@@ -127,6 +150,7 @@ allowBuilds:
   '@omdp/dsh-connector': true
   '@omdp/dsh-vision-bridge': true
   '@omdp/dsh-key-fallback': true
+  '@omdp/dsh-archived-sessions': true
 ```
 
 Then re-run the `add`. (These plugins are plain JavaScript with no build step, so the whitelist is the only hurdle — no `prepare` script is needed. See the official [publish.md](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/user/develop/basic/publish.md) for the full "build-script catch".) Treat the allowance as permission to run the package's code at install time; for untrusted sources, pin a commit (`github:XJungit/omdp#<sha>&path:<subdir>`).
@@ -204,6 +228,12 @@ omdp/
 │   ├── cordis.patch.yml # bundle 激活行
 │   ├── package.json
 │   └── README.md
+├── dsh-archived-sessions/ # 归档会话管理（fork @muwinds，适配 DSH 0.1.5-rc.1）
+│   ├── lib/index.js     # host 半区（ESM）
+│   ├── lib/client.js    # client 半区（Web UI 设置页）
+│   ├── cordis.patch.yml # bundle 激活行
+│   ├── package.json
+│   └── README.md
 ├── archive/             # 已归档插件，留作历史参考
 │   ├── dsh-gitbash-win/
 │   ├── resume-stream/
@@ -251,16 +281,32 @@ omdp/
 "dependencies": { "@omdp/dsh-vision-bridge": "^0.1.10" }
 ```
 
+#### `@omdp/dsh-archived-sessions` — 归档会话管理（`v0.3.0`）
+
+fork 自 [`@muwinds/dsh-archived-sessions`](https://github.com/MuWinds/dsh-archived-sessions) 0.2.0，适配 **DSH 0.1.5-rc.1**（上游已一个月未维护，且在该版本下损坏：`sessionPersistence.list()` 返回快照、`locate()` 被移除）。新增 **设置 → 归档会话**：
+
+- 列表显示归档会话的标题 / ID / 工作区 / 磁盘占用 / 运行状态；
+- **释放**：把会话移出归档集合（不删数据）；
+- **删除**：删会话目录 + 移除归档标记（两步确认）；
+- **按树删除**：删主会话时连同其 `parentSession` 子树一起删（修复上游 issue #2——孤儿子代理）；
+- **孤儿清理**：扫描并清理「父会话已删除、自己还在盘上」的残留子会话目录；
+- 删除安全：目录名不是会话目录（`session-<uuid>` 或裸 UUID）一律拒绝删除。
+
+```jsonc
+"dependencies": { "@omdp/dsh-archived-sessions": "^0.3.0" }
+```
+
 ### 从 npm 安装（推荐）
 
-三个插件都会由 GitHub Actions 在每次打 `v*` tag 时自动发布到 **npm**。这是**首选**安装路径——绕开 GitHub 安装带来的 git-`#path:` 规范化、交叉解析与 `allowBuilds` 摩擦（历史详见 `docs/npm-publish.md`）。
+四个插件都会由 GitHub Actions 在每次打 `v*` tag 时自动发布到 **npm**。这是**首选**安装路径——绕开 GitHub 安装带来的 git-`#path:` 规范化、交叉解析与 `allowBuilds` 摩擦（历史详见 `docs/npm-publish.md`）。
 
 ```jsonc
 // ~/.dsh/profiles/<name>/package.json —— 可用其一或自由组合
 "dependencies": {
   "@omdp/dsh-connector": "^0.3.0",
   "@omdp/dsh-vision-bridge": "^0.1.10",
-  "@omdp/dsh-key-fallback": "^3.1.6"
+  "@omdp/dsh-key-fallback": "^3.1.6",
+  "@omdp/dsh-archived-sessions": "^0.3.0"
 }
 ```
 
@@ -273,7 +319,7 @@ pnpm install
 
 ```sh
 cd ~/.dsh/profiles/<name>
-pnpm update @omdp/dsh-connector @omdp/dsh-vision-bridge @omdp/dsh-key-fallback
+pnpm update @omdp/dsh-connector @omdp/dsh-vision-bridge @omdp/dsh-key-fallback @omdp/dsh-archived-sessions
 ```
 
 ### 从 GitHub 远程安装（备选）
@@ -284,6 +330,7 @@ pnpm update @omdp/dsh-connector @omdp/dsh-vision-bridge @omdp/dsh-key-fallback
 dsh plugin --profile web add github:XJungit/omdp#path:dsh-connector
 dsh plugin --profile web add github:XJungit/omdp#path:dsh-vision-bridge
 dsh plugin --profile web add github:XJungit/omdp#path:dsh-key-fallback
+dsh plugin --profile web add github:XJungit/omdp#path:dsh-archived-sessions
 ```
 
 > **安装命令前提**：上面的 `dsh plugin add` 假设 `dsh` 已在 PATH。若你是按官方文档用 `npx` 运行 dsh（没有全局 `dsh` 命令），这几行会报 `command not found: dsh` —— 每行前面加 `npx @deepseek-ai/dsh` 即可（不要求 `dsh` 在 PATH）。
@@ -297,6 +344,7 @@ allowBuilds:
   '@omdp/dsh-connector': true
   '@omdp/dsh-vision-bridge': true
   '@omdp/dsh-key-fallback': true
+  '@omdp/dsh-archived-sessions': true
 ```
 
 然后重新执行 `add`。（这些插件是纯 JavaScript、无构建步骤，所以白名单是唯一障碍——不需要 `prepare` 脚本。官方 [publish.md](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/user/develop/basic/publish.md) 有完整的"构建脚本坑"说明。）放行等于允许在安装时运行该包的代码；对不可信来源，请固定到具体 commit（`github:XJungit/omdp#<sha>&path:<子目录>`）。
