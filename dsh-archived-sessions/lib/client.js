@@ -1,5 +1,5 @@
 window.__ModuleLoader__.load({
-  id: "@muwinds/dsh-archived-sessions",
+  id: "@omdp/dsh-archived-sessions",
   factory: (require) => {
     var module = { exports: {} };
     var exports = module.exports;

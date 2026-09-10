@@ -256,8 +256,39 @@ function projectKey(cwd) {
   return `--${(readable.replace(/^-+/, "") || "root").slice(0, 251)}--`;
 }
 
-/** Candidate JSONL session roots, probed in order. */
-const CANDIDATE_ROOTS = ["C:\\Users\\xj\\.dsh\\sessions"];
+/** Read an environment variable without assuming `process` exists. */
+function env(name) {
+  try {
+    return typeof process !== "undefined" && process.env ? process.env[name] : undefined;
+  } catch (e) {
+    return undefined;
+  }
+}
+
+/**
+ * Candidate JSONL session roots, probed in order at call time.
+ *
+ * DSH stores every session under `<DSH_HOME>/sessions` (DSH_HOME defaults to
+ * `~/.dsh`), and the abstract sessionPersistence service exposes no root, so the
+ * location is derived from the environment rather than hard-coded — the plugin
+ * then works on any machine and any DSH_HOME.
+ */
+function candidateRoots() {
+  const out = [];
+  const push = (p) => {
+    if (typeof p !== "string" || p.length === 0) return;
+    const trimmed = p.replace(/[\\/]+$/, "");
+    if (trimmed.length > 0 && !out.includes(trimmed)) out.push(trimmed);
+  };
+  const home = env("DSH_HOME");
+  if (typeof home === "string" && home.replace(/[\\/]+$/, "").length > 0) {
+    push(home + "/sessions");
+  } else {
+    const userHome = env("USERPROFILE") || env("HOME");
+    if (typeof userHome === "string" && userHome.length > 0) push(userHome + "/.dsh/sessions");
+  }
+  return out;
+}
 
 /** Build one session's on-disk directory path under a candidate root. */
 function buildSessionDir(root, header) {
@@ -275,8 +306,10 @@ function buildSessionDir(root, header) {
 async function resolveSessionLocation(ctx, header) {
   const fsSvc = ctx.get("fs");
   const backend = jsonlBackend && typeof jsonlBackend.sessionDir === "function" ? jsonlBackend : null;
+  const roots = candidateRoots();
+  if (roots.length === 0) return { path: "", found: false };
   let last = null;
-  for (const root of CANDIDATE_ROOTS) {
+  for (const root of roots) {
     let dirPath;
     if (backend && typeof jsonlBackend.projectDir === "function") {
       try {
@@ -611,7 +644,7 @@ async function handleOrphans(ctx) {
     } catch (e) {
       location = null;
     }
-    if (!location) continue;
+    if (!location || typeof location.path !== "string" || location.path.length === 0) continue;
     const dirPath = location.path;
     let sizeBytes = 0;
     if (fsSvc) {
@@ -655,7 +688,7 @@ async function handleSweep(ctx) {
     } catch (e) {
       location = null;
     }
-    if (!location) continue;
+    if (!location || typeof location.path !== "string" || location.path.length === 0) continue;
     const dirPath = location.path;
     try {
       await removeDir(ctx, dirPath);

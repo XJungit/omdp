@@ -1,6 +1,6 @@
 {
   "name": "@omdp/dsh-archived-sessions",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Archived-sessions manager for the DeepSeek Harness web UI: list / unarchive / delete / detail from Settings. · DSH 归档会话管理：设置页查看、释放、删除已归档会话（含按树删除子会话与孤儿清理）。",
   "type": "module",
   "main": "lib/index.js",
