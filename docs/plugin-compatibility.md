@@ -3,7 +3,7 @@
 > ⚠️ **本文档为演进记录**：`@omdp/dsh-gitbash-win` 与 `@omdp/dsh-resume-stream`
 > 已于 2026-08-25 归档（源码移至 `archive/`，不再维护或发布）。下方对 gitbash
 > 的评估保留作为历史架构参考；当前活跃插件版本见各节标题（connector `0.3.2` /
-> vision-bridge `0.1.10` / key-fallback `3.1.6` / archived-sessions `0.3.0`）。
+> vision-bridge `0.1.10` / key-fallback `3.1.6` / archived-sessions `0.3.1`）。
 >
 > 评估内容：各插件对 DSH（DeepSeek Harness）更新的抗崩溃能力。
 > 核心问题：DSH 更新后，插件会不会导致 DSH 崩溃？
@@ -17,7 +17,7 @@
 - `@deepseek-ai/dsh-tools`（`register`/`guard` 保留）、`@deepseek-ai/dsh-attachment`（`readImage`/`fileHostPath` 保留，新增文件存储半边）、`@deepseek-ai/dsh-system-prompt`（`system-prompt/assemble` 事件保留）、`@deepseek-ai/dsh-agent-loop`（`agent/pre-step`/`agent/request`/`agent/request-error` 保留，`preStep` 的 dispatch 语句**逐字相同**）、`@deepseek-ai/dsh-web-app`（`webServer.register` 未变；仅 `launchedThroughSsh` 改从 `dsh-launch-environment` 导入）、`@deepseek-ai/dsh-mcp-client`（仅新增重复 cursor 防护）；
 - client 侧：`settings.section` slot 保留（`dsh-client-ui-settings-general`/`-plugins` 仍声明）、composer 仍是 Lexical contenteditable（`data-composer-input` + `__lexicalEditor` 标记俱在）→ §3 的 0.1.10 修复继续有效。
 - ⚠️ **本版破坏性变更均不在本插件使用面内**：移除 `ctx.agent`、Inbox API 调整、Session 格式升级 V3 / `SessionHandle` 生命周期、`conversation` slot 迁移为 `main` 的 key、`tool/code-dispatch` 改名 `tool/ptc-dispatch`、persona 前缀/后缀拆分——三插件均未触及。
-- ⚠️ **但 0.1.5-rc.1 的 Session 契约变更破坏了第三方插件**：`sessionPersistence.list()` 由裸 `SessionHeader[]` 改为 `SessionPersistenceSnapshot[]`，且抽象服务移除 `locate(meta)`——`@muwinds/dsh-archived-sessions` 0.2.0 因此全部列表显示「文件缺失」、删除退化为释放。omdp 已 fork 修复为 §5 `@omdp/dsh-archived-sessions` 0.3.0。
+- ⚠️ **但 0.1.5-rc.1 的 Session 契约变更破坏了第三方插件**：`sessionPersistence.list()` 由裸 `SessionHeader[]` 改为 `SessionPersistenceSnapshot[]`，且抽象服务移除 `locate(meta)`——`@muwinds/dsh-archived-sessions` 0.2.0 因此全部列表显示「文件缺失」、删除退化为释放。omdp 已 fork 修复为 §5 `@omdp/dsh-archived-sessions` 0.3.1。
 - ⚠️ **仍需单独做的验证**：本结论是**源码级**核查（逐包逐文件哈希 + 类型声明 diff），未在真实 `0.1.5-rc.1` 运行时上跑回归；client 浏览器层（composer/slot 实际行为）也应另做活体验证，理由见下方 caveat。
 
 **DSH `v0.1.2-rc.1`（`next` dist-tag）适配结论（2026-09-03）**：三个插件 host 侧**源码零改动即兼容** DSH next（仅 peer 枚举动作）。逐项核查（npm `dist-tags`：`latest=0.1.1-rc.2`、`next=0.1.2-rc.1`、`alpha=0.1.2-alpha.5`）：`@deepseek-ai/dsh-credentials`/`@deepseek-ai/dsh-llm`/`@deepseek-ai/dsh-settings` 从 `0.1.2-alpha.2`→`alpha.3`→`alpha.4`→`alpha.5`→`0.1.2-rc.1` **逐字节一致（`Compare-Object` NO DIFF）**；`ctx.credentials`（`resolve`/`set`/`unset`/`describe`→`{configured,source,writable}`）、`ctx.llm`（`registerAdapter`/`stream`/`listProviders`/`listConfigurableProviders`/`resolveModelInfo`/`inputModalities`）、`ctx.webServer`（`register({kind:'prefix'|'exact'})`、`ctx.get('webServer')?.port`）、`agent/request(-error)`、`tools.register`、`attachments.readImage`、`window.__ModuleLoader__.load` client 挂载——全部保留。node engines `^22.19.0 || >=24.0.0` 不变（DSH 主包依赖 `cordis^4.0.2`、`schemastery^3.18.2` 仍在枚举内）。**结论：三插件 host 源码零改动兼容 next；唯一动作是把 next 系列版本追加进 `@omdp/dsh-key-fallback` 的 peer 枚举（已实测一致才放行）**。
@@ -198,7 +198,7 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 
 ---
 
-## 5. @omdp/dsh-archived-sessions（v0.3.0）【活跃插件】
+## 5. @omdp/dsh-archived-sessions（v0.3.1）【活跃插件】
 
 > fork 自 `@muwinds/dsh-archived-sessions` 0.2.0。上游在 DSH 0.1.5-rc.1 下损坏（见下方风险点），作者已一个月未维护，2026-09-10 决定 fork 并入 omdp。
 
@@ -225,7 +225,8 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 - **路径解析是最大变数**：0.1.5-rc.1 抽象服务移除 `locate()`，本 fork 按 DSH JSONL 后端同款编码（`encodeSegment`：保留 `[A-Za-z0-9._-]`，其余 `~XXXX`；`projectKey`：`/\:` → `-`）自行拼 `session-<uuid>` 目录；已用真实磁盘核对（67 条归档 → 1 条存在 66 条缺失，与盘一致）。若 DSH 改目录布局（如文件名/代际），列表可能再出现「文件缺失」——但**删除安全护栏**（目录名必须是会话目录才允许删）保证不会误删。
 - **上游 0.2.0 损坏根因**（本 fork 已修）：`list()` 返回快照数组后按裸 header 取 `header.id` → undefined；`locate(header)` 返回 undefined → `.path` 抛 TypeError 被 catch 吞 → `no-artifact` 分支 → 全列表「文件缺失」+ 删除退化为仅移除归档标记。
 - **删除是危险操作**：有 `assertSessionDirName` 校验（只删 `session-<uuid>` 或裸 UUID 目录）+ 运行中会话拒绝删除 + 两步确认；孤儿清理单独确认。
-- **peer 声明**：`@deepseek-ai/cordis` `^4.0.1`、`@deepseek-ai/dsh-session-persistence-jsonl` `0.1.5-rc.1`（路径解析用，仅实测版本）。
+- **peer 声明**：仅 `@deepseek-ai/cordis` `^4.0.1`。`@deepseek-ai/dsh-session-persistence-jsonl` **不声明为 peer**——它只随 DSH 自带（profile 未直装，profile 是 `autoInstallPeers:false`），硬声明会引入 pnpm 解析摩擦，改用可选 `import()` + 内置路径编码 fallback。
+- **发布事故教训（0.3.0 → 0.3.1）**：0.3.0 的 npm tarball **只有 4 个文件、没有 `lib/`**（仓库 `.gitignore` 的 `**/lib/` 规则把 fork 的源码目录整个忽略了，`git add -A` 静默跳过 → CI checkout 里就没有源码 → 打包自然没有），安装后插件加载失败会拖垮 DSH。修复：`.gitignore` 加例外（`!dsh-archived-sessions/lib/` + `!dsh-archived-sessions/lib/**`，两行缺一不可——git 无法重新包含仍被忽略的目录下的文件）。**发布前必须验证 tarball 内容**（`npm pack` 后 `tar -tzf` 核对文件清单）。
 
 ### 结论
 
@@ -246,7 +247,7 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 | dsh-connector | 0.3.2 | `yaml`（+ peer `schemastery` 仅过滤用） | `webServer`（`settings`/`tools.guard`/`systemPrompt` 可选） | 纯静态 + try/catch + 可选服务失败隔离 | `ctx.webServer` API 变化 |
 | dsh-vision-bridge | 0.1.10 | 无 | `tools`/`attachments`/`llm`/`credentials` | 纯静态 + 零 @deepseek-ai + 防御性编码 | `ctx.llm` API 变化 / composer 输入层变化 |
 | dsh-key-fallback | 3.1.6 | 无（reference 半边 dsh-credentials） | `credentials`/`llm`/`settings`（`webServer`/`slots` 可选） | ESM import + `agent/*` 事件 + `process.env + credentials.set` 双写 + 防御性编码 | `agent/request-error` 载荷 / `webServer` API 变化 |
-| dsh-archived-sessions | 0.3.0 | `@deepseek-ai/dsh-session-persistence-jsonl`（peer） | `webServer`（`sessionPersistence`/`workspaceRegistry`/`sessionQuery`/`fs`/`shell` 可选） | 路径自解析 + 删除目录名校验 + try/catch + 可选服务失败隔离 | `sessionPersistence` 路径布局 / `workspaceRegistry` 字段变化 |
+| dsh-archived-sessions | 0.3.1 | 无（jsonl 后端可选 import + 内置编码 fallback） | `webServer`（`sessionPersistence`/`workspaceRegistry`/`sessionQuery`/`fs`/`shell` 可选） | 路径自解析 + 删除目录名校验 + try/catch + 可选服务失败隔离 | `sessionPersistence` 路径布局 / `workspaceRegistry` 字段变化 |
 
 ## 总体结论
 

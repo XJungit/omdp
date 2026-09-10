@@ -87,7 +87,7 @@ A zero-dependency plugin that gives **text-only models** vision: it auto-detects
 "dependencies": { "@omdp/dsh-vision-bridge": "^0.1.10" }
 ```
 
-#### `@omdp/dsh-archived-sessions` — archived-session manager (`v0.3.0`)
+#### `@omdp/dsh-archived-sessions` — archived-session manager (`v0.3.1`)
 
 Fork of [`@muwinds/dsh-archived-sessions`](https://github.com/MuWinds/dsh-archived-sessions) 0.2.0, adapted for **DSH 0.1.5-rc.1** (upstream unmaintained and broken on that version: `sessionPersistence.list()` returns snapshots, `locate()` was removed). Adds **Settings → 归档会话**:
 
@@ -99,7 +99,7 @@ Fork of [`@muwinds/dsh-archived-sessions`](https://github.com/MuWinds/dsh-archiv
 - Deletion safety: refuses to delete any path whose directory name is not a session dir (`session-<uuid>` or bare UUID).
 
 ```jsonc
-"dependencies": { "@omdp/dsh-archived-sessions": "^0.3.0" }
+"dependencies": { "@omdp/dsh-archived-sessions": "^0.3.1" }
 ```
 
 ### Installing from npm (recommended)
@@ -112,7 +112,7 @@ All four plugins are published to **npm** automatically by GitHub Actions on eve
   "@omdp/dsh-connector": "^0.3.0",
   "@omdp/dsh-vision-bridge": "^0.1.10",
   "@omdp/dsh-key-fallback": "^3.1.6",
-  "@omdp/dsh-archived-sessions": "^0.3.0"
+  "@omdp/dsh-archived-sessions": "^0.3.1"
 }
 ```
 
@@ -281,7 +281,7 @@ omdp/
 "dependencies": { "@omdp/dsh-vision-bridge": "^0.1.10" }
 ```
 
-#### `@omdp/dsh-archived-sessions` — 归档会话管理（`v0.3.0`）
+#### `@omdp/dsh-archived-sessions` — 归档会话管理（`v0.3.1`）
 
 fork 自 [`@muwinds/dsh-archived-sessions`](https://github.com/MuWinds/dsh-archived-sessions) 0.2.0，适配 **DSH 0.1.5-rc.1**（上游已一个月未维护，且在该版本下损坏：`sessionPersistence.list()` 返回快照、`locate()` 被移除）。新增 **设置 → 归档会话**：
 
@@ -293,7 +293,7 @@ fork 自 [`@muwinds/dsh-archived-sessions`](https://github.com/MuWinds/dsh-archi
 - 删除安全：目录名不是会话目录（`session-<uuid>` 或裸 UUID）一律拒绝删除。
 
 ```jsonc
-"dependencies": { "@omdp/dsh-archived-sessions": "^0.3.0" }
+"dependencies": { "@omdp/dsh-archived-sessions": "^0.3.1" }
 ```
 
 ### 从 npm 安装（推荐）
@@ -306,7 +306,7 @@ fork 自 [`@muwinds/dsh-archived-sessions`](https://github.com/MuWinds/dsh-archi
   "@omdp/dsh-connector": "^0.3.0",
   "@omdp/dsh-vision-bridge": "^0.1.10",
   "@omdp/dsh-key-fallback": "^3.1.6",
-  "@omdp/dsh-archived-sessions": "^0.3.0"
+  "@omdp/dsh-archived-sessions": "^0.3.1"
 }
 ```
 

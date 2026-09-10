@@ -10,6 +10,13 @@ node_modules/
 # archived plugin snapshots: their bundled lib/ is historical source, keep it
 !archive/**/lib/
 
+# @omdp/dsh-archived-sessions: lib/ IS the plugin source (forked upstream layout).
+# Both lines are required — git cannot re-include files under a still-ignored dir.
+# Without this, `git add -A` silently skips the plugin's only code and npm
+# publishes a lib-less tarball (0.3.0 shipped 4 files and broke DSH on install).
+!dsh-archived-sessions/lib/
+!dsh-archived-sessions/lib/**
+
 # lockfiles (profile-managed, not part of the plugin source)
 **/pnpm-lock.yaml
 package-lock.json
@@ -17,6 +24,9 @@ package-lock.json
 # os / editor
 .DS_Store
 *.log
+
+# npm pack artifacts (a stray *.tgz once landed in a release commit)
+*.tgz
 
 # dsh runtime data / regenerable caches / session artifacts (not source)
 .dsh-meow/

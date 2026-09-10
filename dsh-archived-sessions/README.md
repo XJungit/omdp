@@ -65,6 +65,7 @@ pnpm add @omdp/dsh-archived-sessions -w
 
 ### 变更记录
 
+- **0.3.1**（2026-09-10）：**修复 0.3.0 的发布事故**——0.3.0 的 tarball 里没有 `lib/`（仓库 `.gitignore` 的 `**/lib/` 规则把源码吞了，npm 只打包到 4 个文件），安装后插件加载失败会拖垮 DSH；0.3.1 补回 `lib/index.js` + `lib/client.js`（发布前已核对 tarball 内容）。
 - **0.3.0**（2026-09-10）：fork 自 0.2.0；适配 DSH 0.1.5-rc.1（list 快照形状 + 路径自解析）；按树删除子会话；孤儿清理；删除路径安全校验。
 
 ---
@@ -126,6 +127,7 @@ pnpm add @omdp/dsh-archived-sessions -w
 
 ### Changelog
 
+- **0.3.1** (2026-09-10): **fixes a 0.3.0 release accident** — the 0.3.0 tarball contained no `lib/` (the repo's `**/lib/` gitignore rule swallowed the source, so npm packed only 4 files); installing it broke the plugin load and could take DSH down. 0.3.1 restores `lib/index.js` + `lib/client.js` (tarball contents verified before publishing).
 - **0.3.0** (2026-09-10): forked from 0.2.0; DSH 0.1.5-rc.1 support (snapshot list shape + self path resolution); tree delete; orphan sweep; deletion path safety check.
 
 ## License
