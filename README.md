@@ -79,12 +79,12 @@ Sits between the LLM adapter and the credential store. Before each request the p
 "dependencies": { "@omdp/dsh-key-fallback": "^3.1.6" }
 ```
 
-#### `@omdp/dsh-vision-bridge` — vision for text-only models (`v0.1.10`)
+#### `@omdp/dsh-vision-bridge` — vision for text-only models (`v0.1.11`)
 
 A zero-dependency plugin that gives **text-only models** vision: it auto-detects whether the routed model supports images (`llm.resolveModelInfo().inputModalities`), and for text-only models forwards pasted / attached images to a configurable OpenAI-compatible multimodal endpoint (default Agnes `agnes-2.5-flash`) and feeds the returned text back as evidence. Ships a `vision_bridge_read_image` tool, a paste/drop → temp-path browser handler, a wrapped `(vision bridge)` provider entry, and an `agent/pre-step` auto-read hook.
 
 ```jsonc
-"dependencies": { "@omdp/dsh-vision-bridge": "^0.1.10" }
+"dependencies": { "@omdp/dsh-vision-bridge": "^0.1.11" }
 ```
 
 #### `@omdp/dsh-archived-sessions` — archived-session manager (`v0.3.3`)
@@ -110,7 +110,7 @@ All four plugins are published to **npm** automatically by GitHub Actions on eve
 // ~/.dsh/profiles/<name>/package.json — you can use one or mix-and-match
 "dependencies": {
   "@omdp/dsh-connector": "^0.3.0",
-  "@omdp/dsh-vision-bridge": "^0.1.10",
+  "@omdp/dsh-vision-bridge": "^0.1.11",
   "@omdp/dsh-key-fallback": "^3.1.6",
   "@omdp/dsh-archived-sessions": "^0.3.3"
 }
@@ -273,12 +273,12 @@ omdp/
 "dependencies": { "@omdp/dsh-key-fallback": "^3.1.6" }
 ```
 
-#### `@omdp/dsh-vision-bridge` — 给纯文本模型的视觉（`v0.1.10`）
+#### `@omdp/dsh-vision-bridge` — 给纯文本模型的视觉（`v0.1.11`）
 
 零依赖插件，给**纯文本模型**装上视觉：自动探测被路由模型是否支持图片（`llm.resolveModelInfo().inputModalities`）；对纯文本模型，把粘贴/附加的图片转发到可配置的 OpenAI 兼容多模态端点（默认 Agnes `agnes-2.5-flash`），并把返回文本喂回作为证据。附带 `vision_bridge_read_image` 工具、粘贴/拖拽 → 临时路径的浏览器处理器、一个包装后的 `(vision bridge)` provider 条目，以及 `agent/pre-step` 自动读取钩子。
 
 ```jsonc
-"dependencies": { "@omdp/dsh-vision-bridge": "^0.1.10" }
+"dependencies": { "@omdp/dsh-vision-bridge": "^0.1.11" }
 ```
 
 #### `@omdp/dsh-archived-sessions` — 归档会话管理（`v0.3.3`）
@@ -304,7 +304,7 @@ fork 自 [`@muwinds/dsh-archived-sessions`](https://github.com/MuWinds/dsh-archi
 // ~/.dsh/profiles/<name>/package.json —— 可用其一或自由组合
 "dependencies": {
   "@omdp/dsh-connector": "^0.3.0",
-  "@omdp/dsh-vision-bridge": "^0.1.10",
+  "@omdp/dsh-vision-bridge": "^0.1.11",
   "@omdp/dsh-key-fallback": "^3.1.6",
   "@omdp/dsh-archived-sessions": "^0.3.3"
 }

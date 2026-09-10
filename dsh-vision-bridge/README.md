@@ -1,6 +1,6 @@
 # dsh-vision-bridge
 
-**让纯文本模型也能"看图"的视觉桥插件**（`v0.1.10`）：自动区分多模态 / 文本模型。零第三方依赖。
+**让纯文本模型也能"看图"的视觉桥插件**（`v0.1.11`）：自动区分多模态 / 文本模型。零第三方依赖。
 
 ## Requirements
 
@@ -30,6 +30,17 @@ DSH 视觉桥插件：让**纯文本模型也能"看图"**。自动区分多模�
 > 0.1.2-rc.1 下已直连验证正常；client 插入适配已按 Lexical 同步机制修复，**活体验证通过**
 > （2026-09-09：文本模型下粘贴生成 `vision-bridge-paste-*/paste.png` 临时路径并成功入输入框）。
 
+> **路由误判修复（v0.1.11，2026-09-10）**：会话中途切换模型（如 `chain888/gpt-5.6-luna`
+> → `agentrouter/deepseek-v4-flash`）后，0.1.10 仍优先读 `agent.options`——那是 Agent
+> **构造时的快照**，切模型不会更新（`dsh-agent-loop` 构造函数里 `this.options = options`；
+> 实时路由走 `agent/request` 并持久化到 `session.requestHeader().config`）。于是纯文本路由
+> 被误判成多模态：`vision_bridge_read_image` 回"无需调用本桥"、`agent/pre-step` 又跳过图片
+> 转写，**两头都读不到图**（模型只能看到"当前模型支持图片输入"和原生 `read_image` 的
+> `model "deepseek-v4-flash" does not declare image input` 相互打脸）。
+> 现在三处判定（工具 / autoRead / 兜底标签匹配）统一以 **本次请求真实路由** 为准：
+> `requestHeader().config` → `requestContext()` → `agent.options`；并给工具加了
+> `force=true` 逃生口。
+
 ## Quick start
 
 ```sh
@@ -53,11 +64,18 @@ pnpm add @omdp/dsh-vision-bridge
 
 工具执行时调用 `llm.resolveModelInfo().inputModalities` 判断当前路由模型能力。
 
+**路由取值规则（v0.1.11 起，务必遵守）**：当前路由 = `session.requestHeader().config`
+（本次请求真实路由）→ `session.requestContext()` → `agent.options`（仅最后兜底）。
+**不要优先读 `agent.options`**：它是 Agent 构造时的快照，会话中途切换模型后不会更新，
+会把纯文本模型误判成多模态（详见 `notes/2026-09-10/dsh-internals/agent-options-vs-live-route.md`）。
+
 ### 2. read_image 工具（`vision_bridge_read_image`）
 
-- 参数：`path`（单图）/ `paths`（多图）/ `prompt`（文本模型的意图）/ `json`（结构化输出）
+- 参数：`path`（单图）/ `paths`（多图）/ `prompt`（文本模型的意图）/ `json`（结构化输出）/ `force`（强制代读）
 - 支持本地路径、http(s) URL、粘贴生成的临时路径
-- 多模态模型调用 → 直接阅读；文本模型 → 调多模态端点代看
+- 多模态模型调用 → 返回"无需调用本桥"（除非 `force=true`）；文本模型 → 调多模态端点代看
+- `force=true`：即使当前模型声明支持图片输入也强制走多模态端点代读——当原生读图不可用
+  （切换过模型导致路由已变、原生 `read_image` 报 `does not declare image input` 等）时的逃生口
 
 ### 3. 粘贴 / 拖拽图片（client.js）
 
@@ -77,6 +95,9 @@ pnpm add @omdp/dsh-vision-bridge
 ### 5. agent/pre-step 自动识别（autoRead）
 
 - `autoRead`: `true` 强制开启 / `false` 关闭 / 缺省自动（多模态跳过，纯文本自动转证据）
+- 能力判定同样以**本次请求真实路由**为准（`requestHeader().config` 优先）；
+  只有路由缺失或 `resolveModelInfo` 未给出 `inputModalities`（未知）时才退回标签匹配，
+  `resolveModelInfo` 明确回答"无 image"时以它为准（v0.1.11 起）
 
 ### 6. 临时文件生命周期
 
@@ -132,7 +153,7 @@ pnpm install --lockfile-only --offline
 
 ```jsonc
 "dependencies": {
-  "@omdp/dsh-vision-bridge": "^0.1.10"
+  "@omdp/dsh-vision-bridge": "^0.1.11"
 }
 ```
 
@@ -275,7 +296,7 @@ MIT License。安全问题请通过 GitHub Issues 私密报告（https://github.
 | DSH 大版本（`ctx.llm` API 变化） | ✅ DSH 不崩；LLM 相关功能可能降级（适配器/流式），需适配 |
 | DSH 服务缺失 | ✅ 优雅降级（防御性编码） |
 
-**最后验证**：DSH `0.1.0-rc.8`（2026-08-20，已在本机运行实例活体验证 paste 路由；autoRead 改用 rc.8 pre-step 载荷的 `payload.agent` 获取当前路由模型）。rc.8 起 DeepSeek 适配器支持原生图片请求，多模态模型场景下 autoRead 会自动放行不再代看。当前 npm 版本 `0.1.10`（2026-09-09 发布，client 适配 Lexical contenteditable composer）。多模态误判修复：`agent/pre-step` 改用 `agent.options` / `agent.session.requestHeader()` / `agent.session.requestContext()` 三级回退，避免声明 `image` 的模型被当纯文本走 Agnes 代看。
+**最后验证**：DSH `0.1.0-rc.8`（2026-08-20，已在本机运行实例活体验证 paste 路由；autoRead 改用 rc.8 pre-step 载荷的 `payload.agent` 获取当前路由模型）。rc.8 起 DeepSeek 适配器支持原生图片请求，多模态模型场景下 autoRead 会自动放行不再代看。当前 npm 版本 `0.1.11`（2026-09-10 发布）。历次修复：0.1.9 多模态误判改用 `agent.options` / `agent.session.requestHeader()` / `agent.session.requestContext()` 三级回退；**0.1.11 修正该回退的优先级**——`agent.options` 是 Agent 构造快照、切换模型后过时，必须以 `requestHeader().config` 为准（否则切换模型后纯文本路由被误判为多模态，工具与 autoRead 双双放弃读图），并新增 `force=true` 逃生口。
 
 > **0.1.2-rc.1 兼容性核查记录（2026-09-09）**：`/vision-bridge/capabilities`（label=deepseek-v4-flash →
 > `{"known":true,"multimodal":false}`）与 paste 路由（GET→405 = 已注册）在运行实例直连验证正常，

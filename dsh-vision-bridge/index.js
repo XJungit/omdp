@@ -266,6 +266,46 @@ function abortableWait(promise, signal) {
   })
 }
 
+// ---------- 当前路由解析（切换模型后 agent.options 会过时） ----------
+// DSH 的模型切换由 dsh-agent 的 installModelSelection 经 agent/request 生效，
+// 并落到 session.requestHeader().config（每次请求持久化，会话日志里就是
+// request/header 行）；agent.options 则是 Agent 构造时赋值一次的快照，会话中途
+// 切换模型后不再更新（dsh-agent-loop 构造函数 this.options = options）。
+// 所以若优先读 agent.options，中途从多模态模型切到纯文本模型后会把纯文本路由
+// 误判成多模态：工具回"无需调用本桥"、pre-step 又跳过图片转写 —— 两条路都堵死。
+// 优先级：requestHeader.config（本次请求真实路由）> requestContext > agent.options。
+function toRoute(candidate) {
+  const provider = typeof candidate?.provider === 'string' ? candidate.provider.trim() : ''
+  const model = typeof candidate?.model === 'string' ? candidate.model.trim() : ''
+  return provider && model ? { provider, model } : null
+}
+
+function resolveLiveRoute(agent) {
+  let header = null
+  try { header = agent?.session?.requestHeader?.()?.config ?? null } catch {}
+  let context = null
+  try { context = agent?.session?.requestContext?.() ?? null } catch {}
+  return toRoute(header) ?? toRoute(context) ?? toRoute(agent?.options)
+}
+
+// true = 支持图片输入；false = 明确不支持；null = 路由缺失或模态未知。
+// null 不能当 false 用：调用方要么按文本处理，要么另找兜底，别把未知当结论。
+async function routeSupportsImage(ctx, route, signal) {
+  if (!route) return null
+  const svc = ctx.get('llm') ?? ctx.llm
+  if (!svc?.resolveModelInfo) return null
+  try {
+    const info = await svc.resolveModelInfo(route.provider, route.model, signal)
+    return Array.isArray(info?.inputModalities) ? info.inputModalities.includes('image') : null
+  } catch (error) {
+    console.error('[dsh-vision-bridge] resolveModelInfo(' + route.provider + '/' + route.model + ') failed:', error && error.message)
+    return null
+  }
+}
+
+// 仅供测试使用：暴露纯函数，便于对"路由优先级"做离线回归。
+export const __internals = { toRoute, resolveLiveRoute, routeSupportsImage }
+
 // ---------- 工具注册：read_image / vision_bridge_read_image ----------
 
 function registerReadImageTool(ctx, config) {
@@ -275,7 +315,8 @@ function registerReadImageTool(ctx, config) {
     description:
       '通过 vision bridge 识别图片：支持本地文件路径、http(s) 图片 URL、聊天中粘贴的图片路径。' +
       '若当前模型支持图片输入则直接阅读；否则由插件调用配置的多模态模型（baseUrl+apiKey+model）代看并返回文字描述。' +
-      '可传单张 path 或多张 paths；prompt 参数由你（文本模型）决定对图片的具体意图；json=true 返回结构化结果。',
+      '可传单张 path 或多张 paths；prompt 参数由你（文本模型）决定对图片的具体意图；json=true 返回结构化结果。' +
+      '若返回"无需调用本桥"但你实际读不到图（原生读图报错、切换过模型等），带 force=true 重新调用即可强制代读。',
     // NOTE: registered via ctx.tools.register (installed-bundle path), which
     // forwards `parameters` verbatim to the OpenAI-compatible provider. A
     // per-property map (no top-level `type`) arrives as `type: null` and the
@@ -300,6 +341,10 @@ function registerReadImageTool(ctx, config) {
         json: {
           type: 'boolean',
           description: '可选：true 时返回结构化 JSON（含原始文字），否则返回纯文本描述',
+        },
+        force: {
+          type: 'boolean',
+          description: '可选：true 时即使当前模型声明支持图片输入也强制走多模态端点代读（原生读图不可用时的逃生口）',
         },
       },
       additionalProperties: false,
@@ -332,28 +377,19 @@ function registerReadImageTool(ctx, config) {
       const images = args?.path ? [args.path] : (Array.isArray(args?.paths) ? args.paths : [])
       if (images.length === 0) throw new Error(toolName + ' 需要 path 或 paths')
       // 1) 判断当前路由模型是否支持图片输入
-      const opt2 = exec.agent?.options
-      const headerCfg2 = exec.agent?.session?.requestHeader?.()?.config
-      const ctxCfg2 = exec.agent?.session?.requestContext?.()
-      const routed = (opt2?.provider && opt2?.model ? opt2 : null)
-        ?? (headerCfg2?.provider && headerCfg2?.model ? headerCfg2 : null)
-        ?? (ctxCfg2?.provider && ctxCfg2?.model ? { provider: ctxCfg2.provider, model: ctxCfg2.model } : null)
-        ?? exec.agent?.session?.requestHeader?.()?.config
-        ?? exec.agent?.options
-      const provider = routed?.provider ?? exec.agent?.options?.provider
-      const model = routed?.model ?? exec.agent?.options?.model
-      let capable = false
-      if (provider && model && (ctx.get('llm') ?? ctx.llm)?.resolveModelInfo) {
-        try {
-          const svc = ctx.get('llm') ?? ctx.llm
-          const info = await svc.resolveModelInfo(provider, model, exec.signal)
-          capable = Array.isArray(info?.inputModalities) && info.inputModalities.includes('image')
-        } catch (error) {
-          console.error('[dsh-vision-bridge] resolveModelInfo failed:', error && error.message)
+      //    必须用「本次请求的真实路由」（session.requestHeader().config 优先），
+      //    不能优先 agent.options —— 那是 Agent 构造时的快照，中途切换模型后
+      //    不会更新，会把纯文本模型误判成多模态（详见 resolveLiveRoute 注释）。
+      const route = resolveLiveRoute(exec.agent)
+      const capable = await routeSupportsImage(ctx, route, exec.signal)
+      if (capable === true && args?.force !== true) {
+        return {
+          ok: true,
+          branch: 'multimodal',
+          text: '当前模型（' + route.provider + '/' + route.model + '）声明支持图片输入，请直接阅读图片附件或图片内容，无需调用本桥。' +
+            '若你实际上读不到图片（例如原生读图工具报错、或会话中途切换过模型使路由已变），' +
+            '请带 force=true 再调用本工具一次，我会改用多模态端点代读并返回文字描述。',
         }
-      }
-      if (capable) {
-        return { ok: true, branch: 'multimodal', text: '当前模型支持图片输入，请直接阅读图片附件或图片内容，无需调用本桥。' }
       }
       // 2) 文本分支：逐图调多模态端点
       const prompt = args?.prompt || config?.defaultPrompt || '请完整描述这张图片的内容，包括所有文字、布局、元素和细节。'
@@ -671,34 +707,22 @@ function registerAutoRead(ctx, appConfig) {
     if (decision.kind !== 'enter') return decision
     if (!decision.messages.some((message) => contentHasImage(message.content))) return decision
     // 检测当前路由模型是否支持图片输入。
-    // pre-step 载荷: { agent, messages, turn, step, signal } — provider/model
-    // 在 agent.options + session 折叠头里。agent 本身没有 requestHeader，
-    // 旧代码 payload.agent?.requestHeader / decision.session 都是错路径，
-    // 导致 oc/muse-spark 这类声明了 image 的多模态模型被误判为纯文本。
-    const opt = payload.agent?.options
-    const headerCfg = payload.agent?.session?.requestHeader?.()?.config
-    const ctxCfg = payload.agent?.session?.requestContext?.()
-    const sessionCfg = (opt?.provider && opt?.model ? opt : null)
-      ?? (headerCfg?.provider && headerCfg?.model ? headerCfg : null)
-      ?? (ctxCfg?.provider && ctxCfg?.model ? { provider: ctxCfg.provider, model: ctxCfg.model } : null)
-    const provider = sessionCfg?.provider
-    const model = sessionCfg?.model
-    let capable = false
-    const llmSvc = ctx.get('llm') ?? ctx.llm
-    if (provider && model && llmSvc?.resolveModelInfo) {
+    // pre-step 载荷: { agent, messages, turn, step, signal }。provider/model 必须取
+    // 「本次请求的真实路由」（requestHeader().config 优先）—— 老代码优先读
+    // agent.options，会话中途切到纯文本模型后仍判为多模态、图片块不转写，纯文本
+    // 模型就再也读不到图（详见 resolveLiveRoute 注释）。
+    const route = resolveLiveRoute(payload.agent)
+    let capable = await routeSupportsImage(ctx, route, payload.signal)
+    // 兜底：仅当路由缺失或模态未知（null）时用标签匹配（与 /capabilities 同款），
+    // 避免声明了 image 的多模态模型因拿不到 inputModalities 被误送去走 Agnes；
+    // resolveModelInfo 明确回答「无 image」时以它为准，不再被标签覆盖。
+    if (capable === null && route?.model && typeof resolveMultimodalByLabel === 'function') {
       try {
-        const info = await llmSvc.resolveModelInfo(provider, model, payload.signal)
-        capable = Array.isArray(info?.inputModalities) && info.inputModalities.includes('image')
+        const r = await resolveMultimodalByLabel(ctx, route.model)
+        capable = r?.known ? !!r.multimodal : null
       } catch {}
     }
-    // 兜底：provider/model 仍取不到或 resolveModelInfo 未暴露 image 模态时，
-    // 用标签匹配（与 /capabilities 同款）判定，避免多模态被误判成纯文本去走 Agnes。
-    if (!capable && model && typeof resolveMultimodalByLabel === 'function') {
-      try {
-        const r = await resolveMultimodalByLabel(ctx, model)
-        capable = !!r?.multimodal
-      } catch {}
-    }
+    if (capable === null) capable = false
     // 未显式配置时：多模态跳过转换，纯文本自动转换
     if (configured === undefined && capable) return decision
     if (configured === false) return decision
