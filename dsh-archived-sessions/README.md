@@ -65,6 +65,7 @@ pnpm add @omdp/dsh-archived-sessions -w
 
 ### 变更记录
 
+- **0.3.3**（2026-09-10）：**修复 0.3.2 的删除回归**——0.3.2 把会话根目录改为 `DSH_HOME` 推导时拼出了**混合分隔符**路径（`C:\Users\xj\.dsh/sessions/...`），而删除前校验 `assertSessionDirName` 的 basename 提取对混合分隔符失效（先按 `/` 切再按 `\` 切，把名字切成残缺片段），导致所有删除被"拒绝删除非会话目录"拦截。修复：① basename 提取改为按分隔符整体切分；② 根目录统一为 `/`。删除/孤儿清理恢复正常。
 - **0.3.2**（2026-09-10）：修两处 fork 遗留——① client 半区的模块 id 仍是 `@muwinds/dsh-archived-sessions`（未随包名改），浏览器端按 `@omdp/...` 找不到模块、设置页不显示；② 会话根目录改为从 `DSH_HOME` 环境变量推导（`<DSH_HOME>/sessions`，缺省 `~/.dsh/sessions`），不再硬编码本机路径。
 - **0.3.1**（2026-09-10）：**修复 0.3.0 的发布事故**——0.3.0 的 tarball 里没有 `lib/`（仓库 `.gitignore` 的 `**/lib/` 规则把源码吞了，npm 只打包到 4 个文件），安装后插件加载失败会拖垮 DSH；0.3.1 补回 `lib/index.js` + `lib/client.js`（发布前已核对 tarball 内容）。
 - **0.3.0**（2026-09-10）：fork 自 0.2.0；适配 DSH 0.1.5-rc.1（list 快照形状 + 路径自解析）；按树删除子会话；孤儿清理；删除路径安全校验。
@@ -128,6 +129,7 @@ pnpm add @omdp/dsh-archived-sessions -w
 
 ### Changelog
 
+- **0.3.3** (2026-09-10): **fixes a 0.3.2 delete regression** — 0.3.2 derived the session root from `DSH_HOME` with a **mixed-separator** path (`C:\Users\xj\.dsh/sessions/...`), and the pre-delete guard `assertSessionDirName`'s basename extraction broke on mixed separators (it sliced by `/` then by `\`, producing a truncated fragment), so every delete was rejected with "拒绝删除非会话目录". Fixed: ① basename extraction now splits on either separator; ② roots are normalized to `/`. Delete and orphan sweep work again.
 - **0.3.2** (2026-09-10): fixes two fork leftovers — ① the client half's module id was still `@muwinds/dsh-archived-sessions` (not renamed with the package), so the browser could not find the module and the settings page never rendered; ② the session root is now derived from the `DSH_HOME` environment variable (`<DSH_HOME>/sessions`, falling back to `~/.dsh/sessions`) instead of a hard-coded local path.
 - **0.3.1** (2026-09-10): **fixes a 0.3.0 release accident** — the 0.3.0 tarball contained no `lib/` (the repo's `**/lib/` gitignore rule swallowed the source, so npm packed only 4 files); installing it broke the plugin load and could take DSH down. 0.3.1 restores `lib/index.js` + `lib/client.js` (tarball contents verified before publishing).
 - **0.3.0** (2026-09-10): forked from 0.2.0; DSH 0.1.5-rc.1 support (snapshot list shape + self path resolution); tree delete; orphan sweep; deletion path safety check.

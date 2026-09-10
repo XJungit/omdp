@@ -118,7 +118,8 @@ function dangerPolicy(ctx) {
  */
 function assertSessionDirName(dirPath) {
   const last = dirPath.replace(/[\\/]+$/, "");
-  const name = last.slice(last.lastIndexOf("/") + 1, last.length).slice(last.lastIndexOf("\\") + 1);
+  const parts = last.split(/[\\/]/);
+  const name = parts[parts.length - 1];
   const ok = /^session-[0-9a-fA-F-]{36}$/.test(name) || /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(name);
   if (!ok) throw new Error("拒绝删除非会话目录: " + dirPath);
 }
@@ -277,7 +278,7 @@ function candidateRoots() {
   const out = [];
   const push = (p) => {
     if (typeof p !== "string" || p.length === 0) return;
-    const trimmed = p.replace(/[\\/]+$/, "");
+    const trimmed = p.replace(/[\\/]+$/, "").replace(/\\/g, "/");
     if (trimmed.length > 0 && !out.includes(trimmed)) out.push(trimmed);
   };
   const home = env("DSH_HOME");
