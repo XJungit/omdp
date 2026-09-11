@@ -16,7 +16,7 @@ export const name = 'dsh-vision-bridge'
 
 import { appendFileSync as __logFs } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, extname, join } from 'node:path'
 
 // Registration log lives in the OS temp dir so the bundle is portable
 // (the original hardcoded C:\Users\xj\... path broke on other machines).
@@ -46,6 +46,26 @@ const PASTE_SNIFFS = [
   { ext: '.webp', test: (b) => b.length >= 12 && b.toString('ascii', 0, 4) === 'RIFF' && b.toString('ascii', 8, 12) === 'WEBP' },
   { ext: '.heic', test: (b) => b.length >= 12 && b.toString('ascii', 4, 8) === 'ftyp' },
 ]
+// attachments（DSH 附件服务）只接受这四种媒体类型（ImageMediaType）。
+// 用途：当前模型能原生看图时，把本地图片文件直接提交成附件、以 ImageBlock
+// 随工具结果交回模型 —— 免得"能看图的模型调用本桥"只换来一句"无需调用"。
+const ATTACHABLE_MEDIA = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
+const EXT_MEDIA = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
+}
+// 与 DSH dsh-tool-fs 的 read_image 同款魔数嗅探（扩展名只作声明，字节才是准的）。
+function sniffAttachableMediaType(buf) {
+  if (buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return 'image/png'
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg'
+  if (buf.length >= 6 && buf.toString('ascii', 0, 3) === 'GIF') return 'image/gif'
+  if (buf.length >= 12 && buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP') return 'image/webp'
+  return undefined
+}
+
 const PASTE_MAX_BYTES = 25 * 1024 * 1024
 // Local files bigger than this are rejected before being base64-encoded, to
 // avoid loading a huge image into memory (data URL inflates ~33%).
@@ -162,6 +182,118 @@ async function pathToImageUrl(path) {
     webp: 'image/webp', gif: 'image/gif', heic: 'image/heic', heif: 'image/heif',
   }[ext] || 'application/octet-stream'
   return 'data:' + mime + ';base64,' + buf.toString('base64')
+}
+
+// ---------- 多模态路由：本地图片直接以 ImageBlock 交回模型 ----------
+// 契约来源（DSH 0.1.5-rc.1，dsh-tool-fs/lib/index.js 的 read_image）：
+//   attachments.saveImages([{ data, mediaType, name }]) → ImageAttachmentRef[]
+//   工具 output.render 可返回 [{ type:'text', text }, { type:'image', attachment: ref }]
+// 所以"当前模型能自己看图"时不必只回一句"无需调用本桥"：把图片真正递到模型
+// 眼前，这次调用就不白费（与 DSH 原生 read_image 的行为对齐）。
+
+async function readLocalImage(filePath) {
+  const raw = typeof filePath === 'string' ? filePath.trim() : ''
+  if (raw === '') throw new Error('路径为空')
+  if (/^https?:\/\//i.test(raw)) throw new Error('http(s) URL 无法直接入上下文')
+  const { readFile, stat } = await import('node:fs/promises')
+  let info
+  try {
+    info = await stat(raw)
+  } catch (error) {
+    throw new Error(error && error.code === 'ENOENT' ? 'file not found: ' + raw : String((error && error.message) || error))
+  }
+  if (typeof info.isFile === 'function' && !info.isFile()) throw new Error('不是普通文件: ' + raw)
+  if (info.size > FILE_MAX_BYTES) throw new Error('文件过大 ' + Math.round(info.size / 1024 / 1024) + 'MB')
+  const buf = await readFile(raw)
+  const declared = EXT_MEDIA[extname(raw).toLowerCase()]
+  const mediaType = ATTACHABLE_MEDIA.includes(declared) ? declared : sniffAttachableMediaType(buf)
+  if (!mediaType) throw new Error('不是 attachments 支持的 PNG/JPEG/WebP/GIF（HEIC 等改走代读端点）')
+  return { buf, mediaType, name: basename(raw) }
+}
+
+/**
+ * 尝试把本地图片提交成附件并直接交回模型。
+ * @returns {{ok: true, images: Array<{path: string, image: object}>} | {ok: false, reason: string}}
+ */
+async function tryNativeImageDelivery(ctx, paths) {
+  const attachments = ctx.get('attachments')
+  if (attachments === undefined) return { ok: false, reason: '附件服务不可用' }
+  // 批量 saveImages 是服务契约里的具体方法（一次校验全部、再逐张落盘）；
+  // DSH 核心的 read_image 用的是抽象方法 saveImage。两个都认，先批量后单张，
+  // 任一可用即可 —— 不去赌某个版本上哪个方法存在。
+  const canBatch = typeof attachments.saveImages === 'function'
+  const canSingle = typeof attachments.saveImage === 'function'
+  if (!canBatch && !canSingle) return { ok: false, reason: '附件服务不可用（无 saveImage/saveImages）' }
+  const limits = attachments.imageLimits
+  if (limits !== undefined && limits !== null && Number.isFinite(limits.maxImagesPerMessage) && paths.length > limits.maxImagesPerMessage) {
+    return { ok: false, reason: '超过单条消息图片数上限（' + limits.maxImagesPerMessage + '）' }
+  }
+  const byteCap = limits !== undefined && limits !== null && Number.isFinite(limits.maxImageBytes) && Number.isFinite(limits.maxMessageImageBytes)
+    ? Math.min(limits.maxImageBytes, limits.maxMessageImageBytes)
+    : undefined
+  try {
+    const images = []
+    const inputs = []
+    for (const p of paths) {
+      const file = await readLocalImage(p)
+      if (Array.isArray(limits?.mediaTypes) && !limits.mediaTypes.includes(file.mediaType)) throw new Error('本部署不接受 ' + file.mediaType)
+      if (byteCap !== undefined && file.buf.length > byteCap) throw new Error('文件超过部署字节上限（' + byteCap + ' bytes）')
+      images.push({ path: p, file })
+      inputs.push({ data: file.buf, mediaType: file.mediaType, name: file.name })
+    }
+    const refs = canBatch
+      ? await attachments.saveImages(inputs)
+      : await (async () => {
+        const saved = []
+        for (const input of inputs) saved.push(await attachments.saveImage(input))
+        return saved
+      })()
+    return { ok: true, images: refs.map((ref, index) => ({ path: images[index].path, image: imageRefValue(ref) })) }
+  } catch (error) {
+    return { ok: false, reason: (error && error.message ? String(error.message) : String(error)).slice(0, 200) }
+  }
+}
+
+/** 只取 ImageAttachmentRef 的标量字段 —— 宿主对象绝不整体搬运/序列化。 */
+function imageRefValue(ref) {
+  const value = {
+    attachmentId: ref.attachmentId,
+    mediaType: ref.mediaType,
+    bytes: ref.bytes,
+    width: ref.width,
+    height: ref.height,
+  }
+  if (typeof ref.name === 'string') value.name = ref.name
+  if (ref.originalDimensions !== undefined) {
+    value.originalDimensions = { width: ref.originalDimensions.width, height: ref.originalDimensions.height }
+  }
+  return value
+}
+
+/** 文本信封（对齐 DSH read_image 的输出形状）；图片本体由随后的 image 块承载。 */
+function imageEnvelope(route, images) {
+  const lines = images.map((item) => {
+    const img = item.image
+    const scaled = img.originalDimensions !== undefined
+      ? ` (downscaled from ${img.originalDimensions.width}x${img.originalDimensions.height} px)`
+      : ''
+    return `<path>${item.path}</path>\n<type>image</type>\n<content>\n${img.mediaType} image, ${img.width}x${img.height} px, ${img.bytes} bytes${scaled}\n</content>`
+  })
+  return '当前路由模型（' + route.provider + '/' + route.model + '）声明支持图片输入，图片已随本次工具结果直接附上'
+    + '（等价原生 read_image，字节已由 vision bridge 归一化）。直接看图即可，不必再调用本工具或 read_image；'
+    + '若确实需要文字描述，带 force=true 重试本工具。\n\n'
+    + lines.join('\n\n')
+}
+
+/** 工具结果渲染：native-image 分支带上真正的图片块。 */
+function renderReadImageResult(value) {
+  const images = Array.isArray(value?.images) ? value.images : []
+  if (value?.branch === 'native-image' && images.length > 0) {
+    const blocks = [{ type: 'text', text: value.text ?? '' }]
+    for (const item of images) if (item?.image?.attachmentId !== undefined) blocks.push({ type: 'image', attachment: item.image })
+    return blocks
+  }
+  return [{ type: 'text', text: value?.text ?? String(value) }]
 }
 
 // ---------- 图片块 → 证据文本（文本分支核心） ----------
@@ -303,8 +435,16 @@ async function routeSupportsImage(ctx, route, signal) {
   }
 }
 
-// 仅供测试使用：暴露纯函数，便于对"路由优先级"做离线回归。
-export const __internals = { toRoute, resolveLiveRoute, routeSupportsImage }
+// 仅供测试使用：暴露纯函数/纯交付函数，便于对"路由优先级""结果渲染""附件交付"做离线与活体回归。
+export const __internals = {
+  toRoute,
+  resolveLiveRoute,
+  routeSupportsImage,
+  renderReadImageResult,
+  imageEnvelope,
+  readLocalImage,
+  tryNativeImageDelivery,
+}
 
 // ---------- 工具注册：read_image / vision_bridge_read_image ----------
 
@@ -313,10 +453,11 @@ function registerReadImageTool(ctx, config) {
   const tool = {
     name: toolName,
     description:
-      '通过 vision bridge 识别图片：支持本地文件路径、http(s) 图片 URL、聊天中粘贴的图片路径。' +
-      '若当前模型支持图片输入则直接阅读；否则由插件调用配置的多模态模型（baseUrl+apiKey+model）代看并返回文字描述。' +
-      '可传单张 path 或多张 paths；prompt 参数由你（文本模型）决定对图片的具体意图；json=true 返回结构化结果。' +
-      '若返回"无需调用本桥"但你实际读不到图（原生读图报错、切换过模型等），带 force=true 重新调用即可强制代读。',
+      '通过 vision bridge 读图（**仅当当前模型不能自己看图时才需要**）：支持本地文件路径、http(s) 图片 URL、聊天中粘贴的图片路径。' +
+      '当前模型声明支持图片输入时，请优先用内置 read_image；若仍调用本工具，插件会把本地图片直接附进本次结果（等价原生读图，不空转）；' +
+      'URL 与 HEIC 等无法直接入上下文的，则由插件调用配置的多模态模型（baseUrl+apiKey+model）代看并返回文字描述。' +
+      '纯文本模型一律走代读端点，返回文字证据。可传单张 path 或多张 paths；prompt 参数由你（文本模型）决定对图片的具体意图；json=true 返回结构化结果。' +
+      '若你实际读不到图（原生读图报错、切换过模型等），带 force=true 重新调用即可强制代读。',
     // NOTE: registered via ctx.tools.register (installed-bundle path), which
     // forwards `parameters` verbatim to the OpenAI-compatible provider. A
     // per-property map (no top-level `type`) arrives as `type: null` and the
@@ -358,10 +499,11 @@ function registerReadImageTool(ctx, config) {
           branch: { type: 'string' },
           model: { type: 'string' },
           results: { type: 'array' },
+          images: { type: 'array' },
         },
         additionalProperties: true,
       },
-      render: (_args, value) => [{ type: 'text', text: value?.text ?? String(value) }],
+      render: (_args, value) => renderReadImageResult(value),
     },
     timeoutMs: (config?.timeoutMs || 120000) + 20000,
     isConcurrencySafe: () => true,
@@ -382,13 +524,25 @@ function registerReadImageTool(ctx, config) {
       //    不会更新，会把纯文本模型误判成多模态（详见 resolveLiveRoute 注释）。
       const route = resolveLiveRoute(exec.agent)
       const capable = await routeSupportsImage(ctx, route, exec.signal)
+      let nativeNote = ''
       if (capable === true && args?.force !== true) {
-        return {
-          ok: true,
-          branch: 'multimodal',
-          text: '当前模型（' + route.provider + '/' + route.model + '）声明支持图片输入，请直接阅读图片附件或图片内容，无需调用本桥。' +
-            '若你实际上读不到图片（例如原生读图工具报错、或会话中途切换过模型使路由已变），' +
-            '请带 force=true 再调用本工具一次，我会改用多模态端点代读并返回文字描述。',
+        // 多模态路由：把本地图片直接提交成附件、以 ImageBlock 随结果交回模型，
+        // 而不是回一句"无需调用本桥"让这次调用白费（与 DSH read_image 行为对齐）。
+        const native = await tryNativeImageDelivery(ctx, images)
+        if (native.ok) {
+          return {
+            ok: true,
+            branch: 'native-image',
+            images: native.images,
+            text: imageEnvelope(route, native.images),
+          }
+        }
+        // 交付不了（URL / HEIC / 附件服务不可用 / 超配额）→ 不空转：接着走代读端点，
+        // 并把原因写进结果里，模型知道为什么拿到的是文字而不是图片。
+        if (native.reason === undefined || native.reason === null) {
+          nativeNote = '（图片无法直接入上下文，已改由多模态端点代读）'
+        } else {
+          nativeNote = '（当前路由可原生看图，但图片无法直接入上下文：' + native.reason + '，已改由多模态端点代读）'
         }
       }
       // 2) 文本分支：逐图调多模态端点
@@ -399,9 +553,13 @@ function registerReadImageTool(ctx, config) {
         const result = await askMultimodal(ctx, config, imageUrl, prompt, exec.signal, config?.timeoutMs)
         results.push({ image: imgPath, text: result.text, model: result.model })
       }
-      if (args?.json) return { ok: true, branch: 'text', results }
+      if (args?.json) {
+        return nativeNote === ''
+          ? { ok: true, branch: 'text', results }
+          : { ok: true, branch: 'text', results, note: nativeNote }
+      }
       const text = results.map((r, i) => (results.length > 1 ? '【图' + (i + 1) + '】' + r.text : r.text)).join('\n')
-      return { ok: true, branch: 'text', model: results[0]?.model, text }
+      return { ok: true, branch: 'text', model: results[0]?.model, text: nativeNote + (nativeNote === '' ? '' : '\n') + text }
     },
   }
   try {

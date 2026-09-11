@@ -3,7 +3,7 @@
 > ⚠️ **本文档为演进记录**：`@omdp/dsh-gitbash-win` 与 `@omdp/dsh-resume-stream`
 > 已于 2026-08-25 归档（源码移至 `archive/`，不再维护或发布）。下方对 gitbash
 > 的评估保留作为历史架构参考；当前活跃插件版本见各节标题（connector `0.3.2` /
-> vision-bridge `0.1.11` / key-fallback `3.1.6` / archived-sessions `0.3.3`）。
+> vision-bridge `0.1.12` / key-fallback `3.1.6` / archived-sessions `0.3.3`）。
 >
 > 评估内容：各插件对 DSH（DeepSeek Harness）更新的抗崩溃能力。
 > 核心问题：DSH 更新后，插件会不会导致 DSH 崩溃？
@@ -120,7 +120,7 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 
 ---
 
-## 3. @omdp/dsh-vision-bridge（v0.1.11）【活跃插件】
+## 3. @omdp/dsh-vision-bridge（v0.1.12）【活跃插件】
 
 ### 架构
 
@@ -134,6 +134,12 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
   工具回"无需调用本桥"、`agent/pre-step` 跳过图片转写，纯文本模型两头读不到图。
   0.1.11 统一为 `requestHeader().config` → `requestContext()` → `agent.options`，
   并新增 `force=true` 逃生口（原生读图不可用时强制走多模态端点代读）。
+- **多模态路由直接交付图片（v0.1.12）**：多模态模型调用本工具时不再回"无需调用本桥"
+  （那会让这次调用白费、模型仍拿不到图），而是把本地图片提交成附件
+  （`attachments.saveImages`，缺失时回退到 DSH 核心 `read_image` 用的 `saveImage`）→
+  `ImageAttachmentRef`，并以 `[{type:'text'}, {type:'image', attachment}]` 随工具结果交回，
+  与 DSH 原生 `read_image` 同契约。交付不了（URL / HEIC / 超配额 / 附件服务不可用）时
+  自动落到代读端点并把原因写进结果，不再拒绝服务；`force=true` 仍可强制代读（只想拿文字时用）。
 - **client 插入目标兼容 Lexical composer（v0.1.10）**：DSH `0.1.2-rc.1` 起 composer 从 `<textarea>`
   换成 Lexical contenteditable（`<div contenteditable role="textbox" data-composer-input>`）。
   0.1.9 的 `insertText` 只认 `TEXTAREA/INPUT` → 文本模型粘贴路径插不进 = "没反应"（图片已被截获上传，
@@ -254,7 +260,7 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 |---|---|---|---|---|---|
 | dsh-gitbash-win（归档） | 0.1.6 | 无（动态加载 5 个 @deepseek-ai/*） | `tools`/`subprocess`/`systemPrompt`/`shellEnv` | 顶层零依赖 + 动态加载 + 失败隔离 | `dsh-sandbox`（Windows ACL 上游 bug） |
 | dsh-connector | 0.3.2 | `yaml`（+ peer `schemastery` 仅过滤用） | `webServer`（`settings`/`tools.guard`/`systemPrompt` 可选） | 纯静态 + try/catch + 可选服务失败隔离 | `ctx.webServer` API 变化 |
-| dsh-vision-bridge | 0.1.11 | 无 | `tools`/`attachments`/`llm`/`credentials` | 纯静态 + 零 @deepseek-ai + 防御性编码 | `ctx.llm` API 变化 / composer 输入层变化 / Agent 路由载荷变化（`requestHeader().config`） |
+| dsh-vision-bridge | 0.1.12 | 无 | `tools`/`attachments`/`llm`/`credentials` | 纯静态 + 零 @deepseek-ai + 防御性编码 | `ctx.llm` API 变化 / composer 输入层变化 / Agent 路由载荷变化（`requestHeader().config`） |
 | dsh-key-fallback | 3.1.6 | 无（reference 半边 dsh-credentials） | `credentials`/`llm`/`settings`（`webServer`/`slots` 可选） | ESM import + `agent/*` 事件 + `process.env + credentials.set` 双写 + 防御性编码 | `agent/request-error` 载荷 / `webServer` API 变化 |
 | dsh-archived-sessions | 0.3.3 | 无（jsonl 后端可选 import + 内置编码 fallback） | `webServer`（`sessionPersistence`/`workspaceRegistry`/`sessionQuery`/`fs`/`shell` 可选） | 路径自解析（root 由 `DSH_HOME` 推导）+ 删除目录名校验 + try/catch + 可选服务失败隔离 | `sessionPersistence` 路径布局 / `workspaceRegistry` 字段变化 |
 

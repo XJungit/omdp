@@ -1,6 +1,6 @@
 # dsh-vision-bridge
 
-**让纯文本模型也能"看图"的视觉桥插件**（`v0.1.11`）：自动区分多模态 / 文本模型。零第三方依赖。
+**让纯文本模型也能"看图"的视觉桥插件**（`v0.1.12`）：自动区分多模态 / 文本模型。零第三方依赖。
 
 ## Requirements
 
@@ -41,6 +41,15 @@ DSH 视觉桥插件：让**纯文本模型也能"看图"**。自动区分多模�
 > `requestHeader().config` → `requestContext()` → `agent.options`；并给工具加了
 > `force=true` 逃生口。
 
+> **多模态路由不再空转（v0.1.12，2026-09-10）**：既然当前模型自己能看图，
+> 再把图片"代读"成文字是画蛇添足，只回一句"无需调用本桥"又让这次调用白费
+> （模型已经调了、还拿不到图）。0.1.12 起，**多模态路由下本地图片直接以
+> `ImageBlock` 随工具结果交回模型**——契约与 DSH 原生 `read_image` 完全一致：
+> `attachments.saveImages([{data, mediaType, name}])` → `ImageAttachmentRef`，
+> 工具 `output.render` 返回 `[{type:'text'}, {type:'image', attachment: ref}]`。
+> 交付不了的情况（URL、HEIC、超配额、附件服务不可用）不再"拒绝服务"，而是**自动
+> 落到代读端点**把文字描述给模型，并在结果里说明原因；`force=true` 仍可强制代读。
+
 ## Quick start
 
 ```sh
@@ -73,9 +82,16 @@ pnpm add @omdp/dsh-vision-bridge
 
 - 参数：`path`（单图）/ `paths`（多图）/ `prompt`（文本模型的意图）/ `json`（结构化输出）/ `force`（强制代读）
 - 支持本地路径、http(s) URL、粘贴生成的临时路径
-- 多模态模型调用 → 返回"无需调用本桥"（除非 `force=true`）；文本模型 → 调多模态端点代看
+- **路由分流（v0.1.12）**：
+  - **多模态路由 + 本地图片** → 直接提交成附件，以 `ImageBlock` 随工具结果交回模型
+    （等价原生 `read_image`，图是模型自己看的，不经代读端点）→ `branch: 'native-image'`
+  - **多模态路由 + 拿不到图**（URL / HEIC / 超配额 / 附件服务不可用）→ 自动改走代读端点，
+    结果开头注明原因（不空转、不拒绝服务）
+  - **纯文本路由** → 调多模态端点代看，返回文字描述 → `branch: 'text'`
 - `force=true`：即使当前模型声明支持图片输入也强制走多模态端点代读——当原生读图不可用
-  （切换过模型导致路由已变、原生 `read_image` 报 `does not declare image input` 等）时的逃生口
+  （切换过模型导致路由已变、原生 `read_image` 报 `does not declare image input` 等）、
+  或你只想拿**文字**描述（OCR/摘要）时的逃生口
+- 工具描述里已写明「仅当当前模型不能自己看图时才需要调用」，多模态模型应优先用原生 `read_image`
 
 ### 3. 粘贴 / 拖拽图片（client.js）
 
@@ -153,7 +169,7 @@ pnpm install --lockfile-only --offline
 
 ```jsonc
 "dependencies": {
-  "@omdp/dsh-vision-bridge": "^0.1.11"
+  "@omdp/dsh-vision-bridge": "^0.1.12"
 }
 ```
 
@@ -296,7 +312,7 @@ MIT License。安全问题请通过 GitHub Issues 私密报告（https://github.
 | DSH 大版本（`ctx.llm` API 变化） | ✅ DSH 不崩；LLM 相关功能可能降级（适配器/流式），需适配 |
 | DSH 服务缺失 | ✅ 优雅降级（防御性编码） |
 
-**最后验证**：DSH `0.1.0-rc.8`（2026-08-20，已在本机运行实例活体验证 paste 路由；autoRead 改用 rc.8 pre-step 载荷的 `payload.agent` 获取当前路由模型）。rc.8 起 DeepSeek 适配器支持原生图片请求，多模态模型场景下 autoRead 会自动放行不再代看。当前 npm 版本 `0.1.11`（2026-09-10 发布）。历次修复：0.1.9 多模态误判改用 `agent.options` / `agent.session.requestHeader()` / `agent.session.requestContext()` 三级回退；**0.1.11 修正该回退的优先级**——`agent.options` 是 Agent 构造快照、切换模型后过时，必须以 `requestHeader().config` 为准（否则切换模型后纯文本路由被误判为多模态，工具与 autoRead 双双放弃读图），并新增 `force=true` 逃生口。
+**最后验证**：DSH `0.1.0-rc.8`（2026-08-20，已在本机运行实例活体验证 paste 路由；autoRead 改用 rc.8 pre-step 载荷的 `payload.agent` 获取当前路由模型）。rc.8 起 DeepSeek 适配器支持原生图片请求，多模态模型场景下 autoRead 会自动放行不再代看。当前 npm 版本 `0.1.12`（2026-09-10 发布）。历次修复：0.1.9 多模态误判改用 `agent.options` / `agent.session.requestHeader()` / `agent.session.requestContext()` 三级回退；**0.1.11 修正该回退的优先级**——`agent.options` 是 Agent 构造快照、切换模型后过时，必须以 `requestHeader().config` 为准（否则切换模型后纯文本路由被误判为多模态，工具与 autoRead 双双放弃读图），并新增 `force=true` 逃生口；**0.1.12 补齐多模态路由的行为**——多模态模型调用本工具时不再回"无需调用本桥"，而是把本地图片按 `attachments.saveImages`/`saveImage` → `ImageAttachmentRef` 提交，并以 `[{type:'text'}, {type:'image', attachment}]` 随结果交回（与 DSH 原生 `read_image` 同契约）；交付不了就自动落到代读端点，绝不拒绝服务。
 
 > **0.1.2-rc.1 兼容性核查记录（2026-09-09）**：`/vision-bridge/capabilities`（label=deepseek-v4-flash →
 > `{"known":true,"multimodal":false}`）与 paste 路由（GET→405 = 已注册）在运行实例直连验证正常，
