@@ -570,7 +570,11 @@ window.__ModuleLoader__.load({
 
       ctx.slots.inject("settings.section", function () {
         return ctx.slots.register(
-          { name: "settings.section", id: "archived-sessions", order: 30, label: function () { return "归档会话"; } },
+          // id 必须全局唯一：DSH 0.1.6-alpha.1 起 web-app 自带原生客户端
+          // @deepseek-ai/dsh-client-ui-settings-unarchive-sessions，它在同一槽位注册
+          // id "archived-sessions"（order 25）。同名注册会撞 slot 冲突、整页 Web boot
+          // 报「Failed to load plugins」，故本插件用带前缀的 omdp- id 与原生项共存。
+          { name: "settings.section", id: "omdp-archived-sessions", order: 30, label: function () { return "归档会话管理"; } },
           function () { return react.createElement(ArchivedSessionsPage); }
         );
       });

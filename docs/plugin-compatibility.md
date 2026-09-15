@@ -3,13 +3,24 @@
 > ⚠️ **本文档为演进记录**：`@omdp/dsh-gitbash-win` 与 `@omdp/dsh-resume-stream`
 > 已于 2026-08-25 归档（源码移至 `archive/`，不再维护或发布）。下方对 gitbash
 > 的评估保留作为历史架构参考；当前活跃插件版本见各节标题（connector `0.3.2` /
-> vision-bridge `0.1.12` / key-fallback `3.1.6` / archived-sessions `0.3.3`）。
+> vision-bridge `0.1.12` / key-fallback `3.1.7` / archived-sessions `0.3.4`）。
 >
 > 评估内容：各插件对 DSH（DeepSeek Harness）更新的抗崩溃能力。
 > 核心问题：DSH 更新后，插件会不会导致 DSH 崩溃？
 
 **结论先行**：活跃插件都采用**抗崩溃架构**——DSH 更新时**不会因插件而崩溃**（硬保证），
 最坏情况只是单个插件功能需要适配更新。插件之间互不影响。
+
+**DSH `v0.1.6-alpha.1`（`alpha` dist-tag）适配结论（2026-09-15）**：connector / vision-bridge / key-fallback **源码零改动兼容**（key-fallback 追加 peer 枚举升 `3.1.7`）；**archived-sessions `0.3.3` 与新版冲突**（slot id 撞名导致整页 Web UI 启动失败），已修复升 `0.3.4`。本轮除源码级核查（逐包逐文件 SHA256 + `.d.ts` 删除行比对，基线 = 本机在跑的 `0.1.5-rc.2`）外，**首次补做真实运行时冒烟**：在临时目录安装 `0.1.6-alpha.1`、以 `DSH_HOME` + 手工 profile（`dsh-base` + `dsh-web-app` + 发布版插件）启动 web，浏览器实测路由与设置页（releases + npm 双查：GitHub `dsh-v0.1.6-alpha.1` Pre-release 2026-09-15；npm `dist-tags`：`latest=0.1.5-rc.1`、`next=0.1.5-rc.2`、`alpha=0.1.6-alpha.1`）：
+- **逐字节一致（服务面零变化）**：`dsh-host-webserver`（`webServer.register` 提供方，四插件共同硬依赖）、`dsh-credentials`、`dsh-settings`、`dsh-fs`——lib 全部文件哈希一致，仅版本号/README 变化；
+- **附加式变化**：`dsh-tools`（guard 决策新增 `ask` 形态；`register`/`guard` 保留）、`dsh-attachment`（删 `readImageRequest`/`ImageRequestPolicy`，插件用的 `readImage`/`saveImage`/`saveImages`/`fileHostPath` 全保留）、`dsh-llm`（删 `priceImages` 与 `projectImagesForTextModel`/offload 系列——均不在插件调用面）、`dsh-mcp-client`（SDK v2 升级 + 新增 `server-context.d.ts`；connector 生成的配置键 `transport/serverName/command/args/env/url/headers/toolCallTimeoutMs` 全部保留，`.d.ts` 零删除行）、`dsh-workspace`/`dsh-storage-domain`/`dsh-session-query`/`dsh-session-persistence`（`.d.ts` 零删除行，`archivedSessionIds`/`setState`/`readTitleSnapshots`/`readSession`/`list()` 保留）；
+- **`dsh-session`**：`request-header.d.ts`/`.js`（vision-bridge 的 `requestHeader().config` 路由判定）**逐字节一致**；删除项（`deriveEventMessage`/`foldSurface`/`Session.create`/`fromRestore`）不在插件调用面；`dsh-session-persistence-jsonl` 的路径相关字符串字面量集**零增删**（`encodeSegment`、`session-` 前缀布局不变，archived-sessions 自解析路径继续有效）；
+- **`dsh-shell`**：破坏点在 `start()` 改可取消异步；archived-sessions 用的 `resolve`/`run` 抽象签名**一字未变**；`sandboxPolicy.resolve` 保留；
+- **client 面**：`settings.section` slot 保留；`__ModuleLoader__`/`dsh.client` manifest（`platform`/`inject`/`immediately`）/`dsh.bundle.patch` 机制保留（`--dump-config` 实测四插件激活行入树）；`/plugins/??…&rev=` combo 协议与新代码逐字一致；composer 仍是 Lexical（`data-composer-input`/`__lexicalEditor`/`contenteditable` 俱在）；
+- 🔴 **本轮唯一实际不兼容——archived-sessions slot id 撞名**：DSH 0.1.6 在 web-app 内置原生「已归档会话」设置页 `@deepseek-ai/dsh-client-ui-settings-unarchive-sessions`，注册 `settings.section` 的 id 恰为 `archived-sessions`（order 25），与插件 0.3.3 的 slot id **完全相同** → slot 冲突，**整个 Web UI 显示「Failed to load plugins」拦截页**。运行时二分定位（裸 profile 零错误 → 三插件零错误 → 单加 archived-sessions 复现）。修复：插件 slot id 改唯一 `omdp-archived-sessions` + 标签「归档会话管理」→ **0.3.4 修复实测**：四插件 + 原生项共存，浏览器控制台零错误、原生「已归档会话」与「归档会话管理」并列渲染、插件页数据加载正常（`/dsh-archived/*` 端到端）；
+- **release notes「其他变更」逐条排除**：`agent/session-start`→`agent/created`（插件未用）、Session 同步历史读取 `snapshotEvents`/`eventAt`/`ownEvents` 弃用（未用）、PTC/workflow 包服务改名 `ptc-runtime`/`workflow-ptc`（未用）、E2B 后端移除（未用）、`ShellExecutor.start` 异步化（插件用 `run`）、request 图片缓存迁移（服务内部）、DeepSeek 默认切 Messages 协议（配置层提醒：曾手动配置旧官方根地址的用户需改 `https://api.deepseek.com/anthropic` 或删除——vision-bridge 走 Agnes 中转 baseUrl 不受影响）；
+- ⚠️ **仍留的活体缺口**：vision-bridge client 的**粘贴/拖拽浏览器行为**未做人工实测（composer 加号菜单/附件按钮布局在 0.1.6 重排，但插入依赖的 Lexical 宿主标记俱在、源码级判定低风险）；key-fallback 的 `agent/request-error` **真实错误轮换**未注入坏 key 实测（事件与载荷源码级一致）。首次冒烟用的 tarball 是本地修复版（archived 0.3.4）与 npm 发布版 3.1.6→3.1.7（仅 peer 变化，无代码差异）。
+- 动作：`@omdp/dsh-key-fallback` `3.1.6` → **`3.1.7`**（credentials/llm/settings peer 枚举**追加** `0.1.6-alpha.1`，旧枚举全保留）；`@omdp/dsh-archived-sessions` `0.3.3` → **`0.3.4`**（slot id 重命名，唯一代码改动）；connector / vision-bridge 无 DSH 包 peer 枚举动作，兼容结论记录于此。发布（npm tag）另按 `docs/npm-publish.md` 流程执行。
 
 **DSH `v0.1.5-rc.1`（`next` dist-tag）适配结论（2026-09-10）**：三个插件**源码零改动即兼容**，唯一动作是给 `@omdp/dsh-key-fallback` 的 peer 枚举**追加** `0.1.5-rc.1`（升 `3.1.6`）。逐项核查（releases + npm 双查：GitHub `dsh-v0.1.5-rc.1` Pre-release 2026-09-10、npm `dist-tags`：`latest=0.1.2-rc.1`、`next=0.1.5-rc.1`、`alpha=0.1.5-alpha.2`）：
 - `@deepseek-ai/dsh-credentials`、`@deepseek-ai/dsh-settings`、`@deepseek-ai/dsh-base` 相对 `0.1.2-rc.1` **只有 `package.json` 版本号变化**（`lib` 逐文件 SHA256 一致）→ 服务面零变化；
@@ -84,7 +95,7 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 
 ---
 
-## 2. @omdp/dsh-connector（v0.3.0）【活跃插件】
+## 2. @omdp/dsh-connector（v0.3.2）【活跃插件】
 
 ### 架构
 
@@ -174,7 +185,7 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 
 ---
 
-## 4. @omdp/dsh-key-fallback（v3.1.6）【活跃插件】
+## 4. @omdp/dsh-key-fallback（v3.1.7）【活跃插件】
 
 ### 架构
 
@@ -211,7 +222,7 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 
 ---
 
-## 5. @omdp/dsh-archived-sessions（v0.3.3）【活跃插件】
+## 5. @omdp/dsh-archived-sessions（v0.3.4）【活跃插件】
 
 > fork 自 `@muwinds/dsh-archived-sessions` 0.2.0。上游在 DSH 0.1.5-rc.1 下损坏（见下方风险点），作者已一个月未维护，2026-09-10 决定 fork 并入 omdp。
 
@@ -219,7 +230,7 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 
 - **ESM bundle**：`lib/index.js` 为 `type: module`（`main`/`exports` → `./lib/index.js`），`inject: ['webServer']` 注册 `/dsh-archived/*` 前缀 HTTP 路由。
 - **Host 依赖**：`workspaceRegistry`（读/写 `archivedSessionIds`）、`sessionPersistence`（`list()` 快照）、`sessionQuery`（标题/详情）、`fs`（目录体积）、`shell`（删目录，danger-full-access 策略）、`sessions`/`agents`（活动/运行态）、`storageDomain`（注册表写入兜底）。
-- **Client**: 设置页 `Settings → 归档会话`，经 `slots.inject('settings.section')` + `slots.register` 注册（`id: 'archived-sessions'`, `order: 30`）。
+- **Client**: 设置页 `Settings → 归档会话管理`，经 `slots.inject('settings.section')` + `slots.register` 注册（自 0.3.4 起 `id: 'omdp-archived-sessions'`（原名 `archived-sessions`，因与 DSH 0.1.6 内置项撞名而改）, `order: 30`）。
 - **能力**：列表/释放/删除（两步确认）/详情；**按树删除**（`parentSession` 子树一并删，修 issue #2）；**孤儿清理**（`/orphans` 列表 + `/sweep` 清理父会话已不在盘的子会话）。
 
 ### 依赖的 DSH 接口
@@ -242,6 +253,7 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 - **发布事故教训（0.3.0 → 0.3.1）**：0.3.0 的 npm tarball **只有 4 个文件、没有 `lib/`**（仓库 `.gitignore` 的 `**/lib/` 规则把 fork 的源码目录整个忽略了，`git add -A` 静默跳过 → CI checkout 里就没有源码 → 打包自然没有），安装后插件加载失败会拖垮 DSH。修复：`.gitignore` 加例外（`!dsh-archived-sessions/lib/` + `!dsh-archived-sessions/lib/**`，两行缺一不可——git 无法重新包含仍被忽略的目录下的文件）。**发布前必须验证 tarball 内容**（`npm pack` 后 `tar -tzf` 核对文件清单）。
 - **fork 遗留清理（0.3.2）**：client 半区的模块 id 漏改成新包名（`@muwinds/...` → `@omdp/...`），浏览器按包名找不到模块、设置页不渲染；会话根目录原先是硬编码本机路径，已改为由 `DSH_HOME` 推导（`<DSH_HOME>/sessions`，缺省 `~/.dsh/sessions`）。教训：fork 一个包后要**全量 grep 旧包名**（`muwinds` 等），模块 id、注释、文档、硬编码路径都要过一遍——`sessionPersistence` 服务公开面（create/open/flush/stat/list）**不含 root**，路径只能从环境推导。
 - **混合分隔符路径回归（0.3.3）**：0.3.2 的 `DSH_HOME` 推导把 Windows 根拼成**混合分隔符**路径（`C:\Users\xj\.dsh/sessions/...`），而删除前校验 `assertSessionDirName` 的 basename 提取对混合分隔符失效（先按 `/` 切再按 `\` 切 → 名字被切成残缺片段），**所有删除被"拒绝删除非会话目录"拦截**。修复：basename 用分隔符感知切分（`split(/[\\/]/)` 取末段）+ root 统一 `/`。教训：**Windows 上拼接路径要统一分隔符**，basename 提取不要链式 `lastIndexOf` 两种分隔符，直接按分隔符整体切分。
+- **slot id 撞名炸穿整页 Web UI（0.3.4 修复，DSH 0.1.6-alpha.1 实测）**：DSH 0.1.6 内置原生「已归档会话」设置页（`@deepseek-ai/dsh-client-ui-settings-unarchive-sessions`），注册的 `settings.section` id 恰为 `archived-sessions`——与本插件旧 id 相同 → slot 冲突让**整个 web boot 失败**（浏览器报 `web boot: 1 entry did not activate` 并整页「Failed to load plugins」拦截，不只是本插件或原生项各自失效）。修复：本插件 slot id 改唯一前缀 `omdp-archived-sessions`、导航标签改「归档会话管理」与原生「已归档会话」区分。教训：**第三方插件的全局 slot id 必须带自己的命名空间前缀**——宿主随时可能在同槽位注册同名条目，撞名的爆炸半径是整页 UI 而不是单插件（抗崩溃架构对 client slot 注册冲突**不成立**，因为失败发生在宿主 boot 聚合处）。运行时定位法：插件子集二分 + 浏览器 console。
 
 ### 结论
 
@@ -261,8 +273,8 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 | dsh-gitbash-win（归档） | 0.1.6 | 无（动态加载 5 个 @deepseek-ai/*） | `tools`/`subprocess`/`systemPrompt`/`shellEnv` | 顶层零依赖 + 动态加载 + 失败隔离 | `dsh-sandbox`（Windows ACL 上游 bug） |
 | dsh-connector | 0.3.2 | `yaml`（+ peer `schemastery` 仅过滤用） | `webServer`（`settings`/`tools.guard`/`systemPrompt` 可选） | 纯静态 + try/catch + 可选服务失败隔离 | `ctx.webServer` API 变化 |
 | dsh-vision-bridge | 0.1.12 | 无 | `tools`/`attachments`/`llm`/`credentials` | 纯静态 + 零 @deepseek-ai + 防御性编码 | `ctx.llm` API 变化 / composer 输入层变化 / Agent 路由载荷变化（`requestHeader().config`） |
-| dsh-key-fallback | 3.1.6 | 无（reference 半边 dsh-credentials） | `credentials`/`llm`/`settings`（`webServer`/`slots` 可选） | ESM import + `agent/*` 事件 + `process.env + credentials.set` 双写 + 防御性编码 | `agent/request-error` 载荷 / `webServer` API 变化 |
-| dsh-archived-sessions | 0.3.3 | 无（jsonl 后端可选 import + 内置编码 fallback） | `webServer`（`sessionPersistence`/`workspaceRegistry`/`sessionQuery`/`fs`/`shell` 可选） | 路径自解析（root 由 `DSH_HOME` 推导）+ 删除目录名校验 + try/catch + 可选服务失败隔离 | `sessionPersistence` 路径布局 / `workspaceRegistry` 字段变化 |
+| dsh-key-fallback | 3.1.7 | 无（reference 半边 dsh-credentials） | `credentials`/`llm`/`settings`（`webServer`/`slots` 可选） | ESM import + `agent/*` 事件 + `process.env + credentials.set` 双写 + 防御性编码 | `agent/request-error` 载荷 / `webServer` API 变化 |
+| dsh-archived-sessions | 0.3.4 | 无（jsonl 后端可选 import + 内置编码 fallback） | `webServer`（`sessionPersistence`/`workspaceRegistry`/`sessionQuery`/`fs`/`shell` 可选） | 路径自解析（root 由 `DSH_HOME` 推导）+ 删除目录名校验 + try/catch + 可选服务失败隔离 | `sessionPersistence` 路径布局 / `workspaceRegistry` 字段变化 / 宿主同槽位撞 slot id（0.3.4 起用 `omdp-` 前缀免疫） |
 
 ## 总体结论
 

@@ -34,7 +34,7 @@ omdp/
 │   ├── cordis.patch.yml # bundle activation row
 │   ├── package.json
 │   └── README.md
-├── dsh-archived-sessions/ # archived-session manager (fork of @muwinds, DSH 0.1.5-rc.1)
+├── dsh-archived-sessions/ # archived-session manager (fork of @muwinds, DSH 0.1.5-rc.1 / 0.1.6-alpha.1)
 │   ├── lib/index.js     # host half (ESM)
 │   ├── lib/client.js    # client half (Web UI settings tab)
 │   ├── cordis.patch.yml # bundle activation row
@@ -65,7 +65,7 @@ One settings tab (**Connector**) that manages three things from the DSH Web UI:
 "dependencies": { "@omdp/dsh-connector": "^0.3.0" }
 ```
 
-#### `@omdp/dsh-key-fallback` — multi-key API key pool with rotation (`v3.1.6`)
+#### `@omdp/dsh-key-fallback` — multi-key API key pool with rotation (`v3.1.7`)
 
 Sits between the LLM adapter and the credential store. Before each request the plugin picks a key from the per-provider pool and pre-writes it into the provider's credential reference; on a configured trigger error it marks the failed key cooling and advances to the next key — **re-sending is left entirely to DSH's own `dsh-llm-retry`**. Ships an always-visible settings page (**Settings → API Key 回退**) with a redesigned UI:
 
@@ -76,7 +76,7 @@ Sits between the LLM adapter and the credential store. Before each request the p
 - Per-key `nextRef`, pool lock ("设为当前"), cooldown reset, and delete.
 
 ```jsonc
-"dependencies": { "@omdp/dsh-key-fallback": "^3.1.6" }
+"dependencies": { "@omdp/dsh-key-fallback": "^3.1.7" }
 ```
 
 #### `@omdp/dsh-vision-bridge` — vision for text-only models (`v0.1.12`)
@@ -87,9 +87,9 @@ A zero-dependency plugin that gives **text-only models** vision: it auto-detects
 "dependencies": { "@omdp/dsh-vision-bridge": "^0.1.12" }
 ```
 
-#### `@omdp/dsh-archived-sessions` — archived-session manager (`v0.3.3`)
+#### `@omdp/dsh-archived-sessions` — archived-session manager (`v0.3.4`)
 
-Fork of [`@muwinds/dsh-archived-sessions`](https://github.com/MuWinds/dsh-archived-sessions) 0.2.0, adapted for **DSH 0.1.5-rc.1** (upstream unmaintained and broken on that version: `sessionPersistence.list()` returns snapshots, `locate()` was removed). Adds **Settings → 归档会话**:
+Fork of [`@muwinds/dsh-archived-sessions`](https://github.com/MuWinds/dsh-archived-sessions) 0.2.0, adapted for **DSH 0.1.5-rc.1** and (since 0.3.4) **DSH 0.1.6-alpha.1** — upstream is unmaintained and broken on 0.1.5+ (`sessionPersistence.list()` returns snapshots, `locate()` was removed). Adds **Settings → 归档会话管理**, coexisting with the native archived-sessions page introduced in DSH 0.1.6:
 
 - List archived sessions with title / ID / workspace / disk usage / running state;
 - **Release** (释放): move a session out of the archive set (no data deleted);
@@ -99,7 +99,7 @@ Fork of [`@muwinds/dsh-archived-sessions`](https://github.com/MuWinds/dsh-archiv
 - Deletion safety: refuses to delete any path whose directory name is not a session dir (`session-<uuid>` or bare UUID).
 
 ```jsonc
-"dependencies": { "@omdp/dsh-archived-sessions": "^0.3.3" }
+"dependencies": { "@omdp/dsh-archived-sessions": "^0.3.4" }
 ```
 
 ### Installing from npm (recommended)
@@ -111,8 +111,8 @@ All four plugins are published to **npm** automatically by GitHub Actions on eve
 "dependencies": {
   "@omdp/dsh-connector": "^0.3.0",
   "@omdp/dsh-vision-bridge": "^0.1.12",
-  "@omdp/dsh-key-fallback": "^3.1.6",
-  "@omdp/dsh-archived-sessions": "^0.3.3"
+  "@omdp/dsh-key-fallback": "^3.1.7",
+  "@omdp/dsh-archived-sessions": "^0.3.4"
 }
 ```
 
@@ -162,8 +162,8 @@ The same monorepo layout is used by other DSH plugin collections, e.g. [zhu10900
 1. Bump `version` in the subdirectory's `package.json` (only the one(s) you touched).
 2. Commit, then tag and push:
    ```sh
-   git tag v3.1.6
-   git push origin master && git push origin v3.1.6
+   git tag v3.1.7
+   git push origin master && git push origin v3.1.7
    ```
 3. `.github/workflows/publish.yml` publishes the touched packages to npm with provenance (re-publishing an already-published version is a no-op — skip message is printed).
 4. Update your profile: `pnpm update @omdp/<plugin>`.
@@ -228,7 +228,7 @@ omdp/
 │   ├── cordis.patch.yml # bundle 激活行
 │   ├── package.json
 │   └── README.md
-├── dsh-archived-sessions/ # 归档会话管理（fork @muwinds，适配 DSH 0.1.5-rc.1）
+├── dsh-archived-sessions/ # 归档会话管理（fork @muwinds，适配 DSH 0.1.5-rc.1 / 0.1.6-alpha.1）
 │   ├── lib/index.js     # host 半区（ESM）
 │   ├── lib/client.js    # client 半区（Web UI 设置页）
 │   ├── cordis.patch.yml # bundle 激活行
@@ -259,7 +259,7 @@ omdp/
 "dependencies": { "@omdp/dsh-connector": "^0.3.0" }
 ```
 
-#### `@omdp/dsh-key-fallback` — 多 key API 池 + 轮换（`v3.1.6`）
+#### `@omdp/dsh-key-fallback` — 多 key API 池 + 轮换（`v3.1.7`）
 
 位于 LLM 适配器与凭据存储之间。每次请求前，插件从对应 provider 的 key 池里选一把，预写入 provider 的凭据引用；遇配置的触发错误时，把失败 key 标记为冷却并切到下一把——**重发完全交给 DSH 自带的 `dsh-llm-retry`**。带一个常驻可见的设置页（**设置 → API Key 回退**）与全新 UI：
 
@@ -270,7 +270,7 @@ omdp/
 - 每把 key 的 `nextRef`、池锁定（"设为当前"）、冷却重置与删除。
 
 ```jsonc
-"dependencies": { "@omdp/dsh-key-fallback": "^3.1.6" }
+"dependencies": { "@omdp/dsh-key-fallback": "^3.1.7" }
 ```
 
 #### `@omdp/dsh-vision-bridge` — 给纯文本模型的视觉（`v0.1.12`）
@@ -281,9 +281,9 @@ omdp/
 "dependencies": { "@omdp/dsh-vision-bridge": "^0.1.12" }
 ```
 
-#### `@omdp/dsh-archived-sessions` — 归档会话管理（`v0.3.3`）
+#### `@omdp/dsh-archived-sessions` — 归档会话管理（`v0.3.4`）
 
-fork 自 [`@muwinds/dsh-archived-sessions`](https://github.com/MuWinds/dsh-archived-sessions) 0.2.0，适配 **DSH 0.1.5-rc.1**（上游已一个月未维护，且在该版本下损坏：`sessionPersistence.list()` 返回快照、`locate()` 被移除）。新增 **设置 → 归档会话**：
+fork 自 [`@muwinds/dsh-archived-sessions`](https://github.com/MuWinds/dsh-archived-sessions) 0.2.0，适配 **DSH 0.1.5-rc.1**，0.3.4 起适配 **DSH 0.1.6-alpha.1**（上游已不维护，且在 0.1.5+ 下损坏：`sessionPersistence.list()` 返回快照、`locate()` 被移除）。新增 **设置 → 归档会话管理**，与 DSH 0.1.6 起内置的原生「已归档会话」页共存：
 
 - 列表显示归档会话的标题 / ID / 工作区 / 磁盘占用 / 运行状态；
 - **释放**：把会话移出归档集合（不删数据）；
@@ -293,7 +293,7 @@ fork 自 [`@muwinds/dsh-archived-sessions`](https://github.com/MuWinds/dsh-archi
 - 删除安全：目录名不是会话目录（`session-<uuid>` 或裸 UUID）一律拒绝删除。
 
 ```jsonc
-"dependencies": { "@omdp/dsh-archived-sessions": "^0.3.3" }
+"dependencies": { "@omdp/dsh-archived-sessions": "^0.3.4" }
 ```
 
 ### 从 npm 安装（推荐）
@@ -305,8 +305,8 @@ fork 自 [`@muwinds/dsh-archived-sessions`](https://github.com/MuWinds/dsh-archi
 "dependencies": {
   "@omdp/dsh-connector": "^0.3.0",
   "@omdp/dsh-vision-bridge": "^0.1.12",
-  "@omdp/dsh-key-fallback": "^3.1.6",
-  "@omdp/dsh-archived-sessions": "^0.3.3"
+  "@omdp/dsh-key-fallback": "^3.1.7",
+  "@omdp/dsh-archived-sessions": "^0.3.4"
 }
 ```
 
@@ -356,8 +356,8 @@ allowBuilds:
 1. 在子目录的 `package.json` 里 bump `version`（只 bump 你动过的）。
 2. 提交，然后打 tag 并推送：
    ```sh
-   git tag v3.1.6
-   git push origin master && git push origin v3.1.6
+   git tag v3.1.7
+   git push origin master && git push origin v3.1.7
    ```
 3. `.github/workflows/publish.yml` 把动过的包发布到 npm（带 provenance；已发布的版本重复发布是 no-op，会打印 skip 信息）。
 4. 更新你的 profile：`pnpm update @omdp/<plugin>`。

@@ -30,6 +30,16 @@ DSH 视觉桥插件：让**纯文本模型也能"看图"**。自动区分多模�
 > 0.1.2-rc.1 下已直连验证正常；client 插入适配已按 Lexical 同步机制修复，**活体验证通过**
 > （2026-09-09：文本模型下粘贴生成 `vision-bridge-paste-*/paste.png` 临时路径并成功入输入框）。
 
+> **DSH 0.1.6-alpha.1 兼容性核查（2026-09-15，源码级 + 运行时冒烟，零改动）**：路由判定依赖的
+> `dsh-session` `request-header.d.ts/.js` 与 0.1.5-rc.2 **逐字节一致**；`llm.registerAdapter/stream/
+> listModels/listProviders/listConfigurableProviders/resolveModelInfo/inputModalities`、`attachments.readImage/
+> saveImage/saveImages`、`agent/pre-step`、`llm/adapters-updated` 全部保留（0.1.6 删除的 `priceImages`/
+> request-image-offload 系列不在调用面）；composer 仍是 Lexical（`data-composer-input`/`__lexicalEditor` 俱在）；
+> 运行时在 0.1.6-alpha.1 实测加载、`/vision-bridge/capabilities` 200。注意：0.1.6 把 DeepSeek 官方默认
+> 切到 Messages 协议，若你在**本插件 provider 配置**里手填过旧官方根地址需改为
+> `https://api.deepseek.com/anthropic` 或删除（默认 Agnes 中转 `baseUrl` 不受影响）。
+> 详见 `docs/plugin-compatibility.md`。
+
 > **路由误判修复（v0.1.11，2026-09-10）**：会话中途切换模型（如 `chain888/gpt-5.6-luna`
 > → `agentrouter/deepseek-v4-flash`）后，0.1.10 仍优先读 `agent.options`——那是 Agent
 > **构造时的快照**，切模型不会更新（`dsh-agent-loop` 构造函数里 `this.options = options`；

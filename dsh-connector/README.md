@@ -1,12 +1,13 @@
 # @omdp/dsh-connector
 
-**MCP 服务器 + 用户 Skills + 魔搭市场浏览三合一设置页**（`v0.3.0`）。适合需要在 DSH 里频繁增删改 MCP server / skills、又不想手改 `cordis.patch.yml` 的用户。
+**MCP 服务器 + 用户 Skills + 魔搭市场浏览三合一设置页**（`v0.3.2`）。适合需要在 DSH 里频繁增删改 MCP server / skills、又不想手改 `cordis.patch.yml` 的用户。
 
 ## Requirements
 
 - DeepSeek Harness 带 `web` profile GUI（`npx @deepseek-ai/dsh web`）
 - Node.js `^22.19` 或 `>=24`
 - `@deepseek-ai/cordis` `4.0.1` / `4.0.2`（已实测版本；插件无 peer 声明，唯一 DSH 硬依赖是 `ctx.webServer`）
+- 已实测 DSH **0.1.5-rc.1**（源码级核查，2026-09-10）与 **0.1.6-alpha.1**（源码级 + 运行时冒烟：`/connector/api/*` 正常服务、设置页渲染，2026-09-15，见 `docs/plugin-compatibility.md`）
 
 ## Overview
 

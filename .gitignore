@@ -35,5 +35,8 @@ package-lock.json
 .run-*.log.zip
 .dshkf-*
 
+# compatibility-check scratch (packed dsh versions, smoke runtime/home) — regenerable, not source
+.compat-check/
+
 # external reference clone (deepseek harness docs), not part of this repo
 deepseek-harness-docs/
