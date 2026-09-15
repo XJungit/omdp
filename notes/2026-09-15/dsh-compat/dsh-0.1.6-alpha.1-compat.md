@@ -1,6 +1,6 @@
 # DSH 0.1.6-alpha.1 兼容性核查（首次引入运行时冒烟 + 发现 slot id 撞名冲突）
 
-日期：2026-09-15 ｜ 分类：dsh-compat ｜ 结论：**connector / vision-bridge 零改动兼容；key-fallback 追加 peer 枚举 → 3.1.7；archived-sessions 撞原生 slot id → 修复 → 0.3.4**
+日期：2026-09-15 ｜ 分类：dsh-compat ｜ 结论：**connector / vision-bridge 零改动兼容；key-fallback 追加 peer 枚举 → 3.1.7；archived-sessions 撞原生 slot id → 修复 → 0.3.4**（同日补声明 **0.1.5-rc.2**，见文末）
 
 ## 版本双查
 
@@ -92,3 +92,17 @@ node ...\bin.js --dump-config --profile smoke | ... -match '<plugin>"'
 # 本地修复版打包验证（发布前 tarball 内容核对，0.3.0 事故教训）：
 npm pack --pack-destination <scratch>; tar -tzf <tgz>
 ```
+
+## 补充（同日）：正式补声明 0.1.5-rc.2
+
+用户确认需要把本机在跑的 **0.1.5-rc.2** 也正式纳入声明，并问"新版插件能否回跑 rc.2"。做法与结果：
+
+1. **源码证据（规范 3 依据）**：`npm pack` 三对包（credentials/llm/settings @ 0.1.5-rc.1 vs rc.2）逐文件 SHA256——**除 `package.json`（版本号）外全部一致**。即 rc.2 相对已声明的 rc.1 零 API 变化；
+2. **枚举并入未发布的 3.1.7**：`0.1.5-rc.2` 插进 credentials/llm/settings 三行枚举（rc.1 与 alpha.1 之间，升序）。因 3.1.7 还没打过 tag，直接改 3.1.7 本体、不另升版本——重新 `npm pack` 后 tarball 内枚举已含 rc.2（行 42-44 验证）；
+3. **真实 rc.2 运行时冒烟**：`.compat-check\runtime-rc2\` 装 `dsh@0.1.5-rc.2`（518 包）；profile `smoke-home\profiles\rc2` 声明嵌套版本 pin 到 rc.2 生态（credentials/llm/settings=0.1.5-rc.2、cordis=4.0.2、schemastery=3.18.2，均与 `runtime-rc2\node_modules` 实测版本一致），插件用 `file:` 指向 **3.1.7 + 0.3.4 修复版** tarball + 发布版 connector/vision-bridge。**严格模式 `npm install`（不加 `--legacy-peer-deps`）通过**——peer 枚举修复的最硬证明；
+4. 启动（`--profile rc2 --port 7796`）+ 浏览器：console 零错误；设置页三项（归档会话管理/Connector 连接器/API Key 回退）渲染；**0.1.5 无原生「已归档会话」页、无撞名**（与预判一致——原生项是 0.1.6 才有）；归档页端到端取数 `{"items":[],"totalBytes":0}`；
+5. 路由四发：`/vision-bridge/capabilities` 200、`/connector/api/mcp` 200、`/dsh-key-fallback/providers` 200（真实 provider 列表）、`/dsh-archived/list` 200。
+
+**回答用户问题**：新插件版本（key-fallback 3.1.7 / archived-sessions 0.3.4）**在 0.1.5-rc.2 与 0.1.6-alpha.1 上双向可跑**——3.1.7 相对 3.1.6 仅动枚举零代码，0.3.4 相对 0.3.3 仅改 client 槽位 id/label（0.1.5 上该页照常工作，只是标签变「归档会话管理」）。
+
+踩坑补记：`npm pack` 落地文件名是 `deepseek-ai-<pkg>-<full-version>.tgz`（含 `0.1.5-rc.1` 完整串），批处理里用简写 `rc1` 拼路径会 "Failed to open archive"——解包循环里的版本串必须与 pack 输出逐字一致。

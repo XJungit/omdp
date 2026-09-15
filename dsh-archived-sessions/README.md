@@ -48,7 +48,7 @@ pnpm add @omdp/dsh-archived-sessions -w
 
 ### 要求 / Requirements
 
-- DeepSeek Harness **0.1.5-rc.1**、**0.1.6-alpha.1**（实测版本；0.3.4 起兼容 0.1.6-alpha.1，0.3.3 及更早与 0.1.6-alpha.1 **冲突**，见变更记录）
+- DeepSeek Harness **0.1.5-rc.1**、**0.1.5-rc.2**、**0.1.6-alpha.1**（实测版本；0.3.4 起三者全兼容，0.3.3 及更早与 0.1.6-alpha.1 **冲突**、与 0.1.5 系列兼容，见变更记录）
 - `@deepseek-ai/cordis` ^4.0.1（peer）
 - `@deepseek-ai/dsh-session-persistence-jsonl`（可选，随 DSH 自带；缺失时回退到内置路径编码）
 
@@ -113,7 +113,7 @@ pnpm add @omdp/dsh-archived-sessions -w
 
 ### Requirements
 
-- DeepSeek Harness **0.1.5-rc.1**, **0.1.6-alpha.1** (tested; 0.3.4+ is compatible with 0.1.6-alpha.1 — 0.3.3 and earlier *collide* with it, see changelog)
+- DeepSeek Harness **0.1.5-rc.1**, **0.1.5-rc.2**, **0.1.6-alpha.1** (tested; 0.3.4+ works on all three — 0.3.3 and earlier *collide* with 0.1.6-alpha.1 but are fine on 0.1.5, see changelog)
 - `@deepseek-ai/cordis` ^4.0.1 (peer)
 - `@deepseek-ai/dsh-session-persistence-jsonl` (optional, ships with DSH; falls back to the built-in path encoding when absent)
 
