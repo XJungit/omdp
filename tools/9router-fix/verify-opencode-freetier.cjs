@@ -6,8 +6,13 @@
  *
  * Runs three independent layers:
  *   A. upstream  - talks straight to opencode.ai, proving what the gate wants
- *   B. static    - loads the patched chunk, inspects buildHeaders() output
+ *   B. static    - loads the patched chunk, inspects buildHeaders()/transformRequest()
  *   C. e2e       - goes through the running 9router server with a local API key
+ *
+ * Both upstream LANES are covered. The executor routes muse-spark-* to
+ * /zen/v1/responses and everything else to /zen/v1/chat/completions, and the
+ * two want different tool shapes (flat {name} vs nested {function:{name}}),
+ * so a regression that only breaks one lane must show up here.
  *
  * usage:
  *   node verify-opencode-freetier.cjs                       # A + B + C (auto-detect)
@@ -33,6 +38,9 @@ const rnd = (n) => { let s = ''; for (let i = 0; i < n; i++) s += A[crypto.rando
 const canonical = (p) => p + crypto.randomBytes(6).toString('hex') + rnd(14);
 
 const FREE_MODELS = ['mimo-v2.5-free', 'nemotron-3-ultra-free', 'ling-3.0-flash-fin-free', 'nemotron-3.5-lightning-free'];
+// Models the executor routes to /zen/v1/responses instead of /chat/completions
+// (see the `o(a)` predicate feeding buildUrl in the OpenCode executor chunk).
+const RESPONSES_LANE_MODELS = ['muse-spark-1.3-contributor-free', 'muse-spark-1.2-contributor-free'];
 
 let failures = 0;
 const ok = (m) => console.log('  ok   ' + m);
@@ -230,6 +238,34 @@ function layerB(explicitDir) {
     else bad(`${label} -> stream=${body.stream} missing={${missing.join(',')}} tools=[${names.join(',')}]`);
   }
 
+  // The /responses lane needs the FLAT tool shape. Injecting chat's nested form
+  // there makes Zen reject the request with
+  //   400 `tools[0]` missing required field `name`
+  // so assert the shape per lane, using the same model predicate the executor
+  // uses to choose the endpoint (muse-spark-* -> /responses).
+  const laneCases = [
+    ['chat lane (mimo-v2.5-free)', 'mimo-v2.5-free', 'function'],
+    ['responses lane (muse-spark-1.3-contributor-free)', 'muse-spark-1.3-contributor-free', 'flat'],
+  ];
+  for (const [label, model, want] of laneCases) {
+    const e = new Exec();
+    e._currentSessionId = 'ses_' + crypto.randomUUID().replace(/-/g, '');
+    const body = { stream: false };
+    try {
+      e.transformRequest(model, body, true, { rawHeaders: {}, connectionId: 'verify' });
+    } catch (err) {
+      bad(`${label} -> transformRequest threw: ${err.message}`);
+      continue;
+    }
+    const injected = (body.tools || []).filter((t) => REQUIRED_TOOLS.includes(t?.function?.name || t?.name));
+    const okChat = injected.length && injected.every((t) => !!t.function && !!t.function.name && t.name === undefined);
+    const okFlat = injected.length && injected.every((t) => typeof t.name === 'string' && !t.function);
+    const good = want === 'flat' ? okFlat : okChat;
+    const shape = injected.map((t) => (t.function ? `nested(${t.function.name})` : `flat(${t.name})`)).join(' ');
+    if (good) ok(`${label} -> injected ${shape}`);
+    else bad(`${label} -> wrong tool shape, expected ${want}: ${shape || '(none injected)'}`);
+  }
+
   const src = fs.readFileSync(chunk, 'utf8');
   if (src.includes('?f:"opencode",')) bad('VULNERABLE: bare-UA anchor still present - re-run --apply');
   else ok('no bare-UA anchor (patch in place)');
@@ -266,11 +302,19 @@ async function layerC() {
 
   let live = 0;
   let transient = 0;
-  for (const m of FREE_MODELS) {
+  // Both lanes: FREE_MODELS ride /chat/completions, RESPONSES_LANE_MODELS ride
+  // /responses (the executor picks per model). A lane-specific shape bug shows
+  // up as a 400 `tools[0]` error, which is NOT a gate rejection, so it must be
+  // reported as a failure rather than swallowed as transient.
+  const targets = [
+    ...FREE_MODELS.map((m) => ({ m, lane: 'chat' })),
+    ...RESPONSES_LANE_MODELS.map((m) => ({ m, lane: 'responses' })),
+  ];
+  for (const { m, lane } of targets) {
     // A 200 with empty `content` is still a PASS: some free models are reasoning
     // models that put everything in `reasoning` and return content:null.
-    // Only a gate rejection (403 FreeTierError) is a real failure; upstream 429/5xx
-    // are transient and retried.
+    // Only a gate rejection (403 FreeTierError) or a shape rejection (400
+    // tools[0]) is a real failure; upstream 429/5xx are transient and retried.
     let verdict = null;
     for (let attempt = 1; attempt <= 3; attempt++) {
       let res;
@@ -288,18 +332,25 @@ async function layerC() {
       const t = await res.text();
       if (res.status === 200 && !/FreeTierError/.test(t)) { verdict = { kind: 'ok' }; break; }
       if (/FreeTierError/.test(t)) { verdict = { kind: 'gate', detail: t.replace(/\s+/g, ' ').slice(0, 160) }; break; }
+      // A malformed tool declaration is a bug in our injection, not upstream noise.
+      if (/tools\[\d+\]/.test(t) || /missing required field/.test(t)) {
+        verdict = { kind: 'shape', detail: t.replace(/\s+/g, ' ').slice(0, 200) };
+        break;
+      }
       // transient (429/5xx/anything non-gate) - back off and retry
       verdict = { kind: 'transient', detail: `${res.status} ${t.replace(/\s+/g, ' ').slice(0, 120)}` };
       await new Promise((r) => setTimeout(r, 1500 * attempt));
     }
 
-    if (verdict.kind === 'ok') { ok(`oc/${m} -> 200`); live++; }
-    else if (verdict.kind === 'gate') bad(`oc/${m} -> GATE REJECTED: ${verdict.detail}`);
-    else if (verdict.kind === 'network') { console.log(`  WARN oc/${m} -> unreachable: ${verdict.detail} (is 9router running?)`); transient++; }
-    else { console.log(`  WARN oc/${m} -> transient upstream error after retries: ${verdict.detail}`); transient++; }
+    const tag = `${m} [${lane}]`;
+    if (verdict.kind === 'ok') { ok(`oc/${tag} -> 200`); live++; }
+    else if (verdict.kind === 'gate') bad(`oc/${tag} -> GATE REJECTED: ${verdict.detail}`);
+    else if (verdict.kind === 'shape') bad(`oc/${tag} -> TOOL SHAPE REJECTED (injection bug): ${verdict.detail}`);
+    else if (verdict.kind === 'network') { console.log(`  WARN oc/${tag} -> unreachable: ${verdict.detail} (is 9router running?)`); transient++; }
+    else { console.log(`  WARN oc/${tag} -> transient upstream error after retries: ${verdict.detail}`); transient++; }
   }
 
-  console.log(`  ${live}/${FREE_MODELS.length} free models reached through 9router` + (transient ? `, ${transient} transient (not gate-related)` : ''));
+  console.log(`  ${live}/${targets.length} free models reached through 9router` + (transient ? `, ${transient} transient (not gate-related)` : ''));
   if (live === 0 && !transient) console.log('  hint: did you restart 9router after --apply?');
   if (live === 0 && transient) console.log('  hint: 9router may be down, or upstream is having an outage');
 }

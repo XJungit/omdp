@@ -141,21 +141,38 @@ const MARKER = 'NINEROUTER_OPENCODE_UA';
 const MARKER_CONTRACT = 'NINEROUTER_OPENCODE_FREE_TIER_CONTRACT';
 
 // Free-tier request contract (gates 3 + 4), injected at the top of
-// transformRequest. Forces `stream:true` upstream and merges any missing
-// member of Zen's required tool pair (read + bash) into body.tools as a no-op
+// transformRequest. Forces `stream:true` upstream and merges any missing member
+// of Zen's required tool pair (read + bash) into body.tools as a no-op
 // declaration, preserving whatever the caller already sent. `bash` is the
 // official shell tool id on every platform, so injecting it is what makes a
 // Windows host whose own shell tool is called `pwsh` acceptable.
+//
+// The injection is ENDPOINT-AWARE. The executor routes muse-spark-* to
+// /zen/v1/responses (`o(a)` is the very predicate buildUrl uses), and the two
+// lanes want different tool shapes:
+//   /chat/completions  { type:"function", function:{ name, description, parameters } }
+//   /responses         { type:"function", name, description, parameters }
+// Injecting the chat shape on the responses lane fails upstream with
+//   400 invalid_request_error `tools[0]` missing required field `name`
+// so the shape must follow `o(a)`. Existing caller tools are only *inspected*
+// (both shapes are recognized) and never rewritten.
 function contractSnippet() {
-  return `(function(b,d){try{if(process.env.NINEROUTER_OPENCODE_FREE_TIER_CONTRACT==="off")return;` +
+  return `(function(a,b,d){try{if(process.env.NINEROUTER_OPENCODE_FREE_TIER_CONTRACT==="off")return;` +
     'b.stream=true;' +
     'var N=' + JSON.stringify(REQUIRED_TOOLS) + ',T=b.tools;' +
     'if(!Array.isArray(T))T=[];' +
+    // `o` is the module-scope model predicate that buildUrl already relies on;
+    // guard it so an unexpected shape can only lose us the flat form.
+    'var R=false;try{R=!!o(a)}catch(_){}' +
     'var have={};' +
-    'for(var i=0;i<T.length;i++){var t=T[i];if(t&&t.function&&t.function.name)have[t.function.name]=1}' +
-    'for(var j=0;j<N.length;j++){if(!have[N[j]])T.push({type:"function",function:{name:N[j],' +
-    'description:"Declared by the OpenCode client.",parameters:{type:"object",properties:{},additionalProperties:true}}})}' +
-    'b.tools=T}catch(_){}})(b,d);';
+    'for(var i=0;i<T.length;i++){var t=T[i];' +
+    'var nm=t&&(void 0!==t.name?t.name:t.function&&t.function.name);' +
+    'if(nm)have[nm]=1}' +
+    'for(var j=0;j<N.length;j++){if(have[N[j]])continue;' +
+    'var D="Declared by the OpenCode client.",P={type:"object",properties:{},additionalProperties:true};' +
+    'if(R)T.push({type:"function",name:N[j],description:D,parameters:P});' +
+    'else T.push({type:"function",function:{name:N[j],description:D,parameters:P}})}' +
+    'b.tools=T}catch(_){}})(a,b,d);';
 }
 
 // The OpenCode executor's transformRequest opens with this exact statement.

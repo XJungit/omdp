@@ -90,9 +90,12 @@ Stop-Process -Id (Get-NetTCPConnection -State Listen -LocalPort 20128).OwningPro
 重启后务必跑一次验证（A 上游 / B 静态 / C 端到端，三层独立）：
 
 ```bash
-node verify-opencode-freetier.cjs            # 三层全跑
+node verify-opencode-freetier.cjs            # 三层全跑（含两条通道）
 node verify-opencode-freetier.cjs --no-e2e   # 只跑 A+B（9router 未启动时）
 ```
+
+C 层覆盖**两条通道**：4 个 chat 模型 + 2 个 `muse-spark-*`（走 `/responses`）。
+只测 chat 会漏掉工具形状类回归。
 
 ## 行为
 
@@ -104,6 +107,18 @@ node verify-opencode-freetier.cjs --no-e2e   # 只跑 A+B（9router 未启动时
   以 no-op 声明追加。`bash` 是官方 shell 工具在**所有平台**的 ID，
   所以即使调用方（如 Windows 上的 DSH）用自己的 `pwsh`，注入 `bash` 后也能通过。
 - **stream**：强制 `stream: true` 发往上游。
+- **注入的工具形状随通道变化**（重要）：执行器把 `muse-spark-*` 送到
+  `/zen/v1/responses`，其余送 `/zen/v1/chat/completions`，两条通道的工具结构不同：
+
+  | 通道 | 工具形状 |
+  |---|---|
+  | `/chat/completions` | `{ type: "function", function: { name, description, parameters } }` |
+  | `/responses` | `{ type: "function", name, description, parameters }`（**扁平**） |
+
+  注入时用执行器自身的判定谓词 `o(a)`（`buildUrl` 用的同一个）来选择形状。
+  形状错了不会 403，而是上游 **400 `tools[0]` missing required field `name`** ——
+  这是个**静默退化**：补丁看着「生效了」，但 `/responses` 通道整体不可用。
+  调用方已有的工具只被**读取检查**，从不改写。
 - 只改 `buildHeaders()` 与 `transformRequest()` 开头的注入块，均为纯函数，
   不触碰路由与其他请求语义。
 - 备份文件与目标同目录，命名 `318.js.bak-<ISO 时间戳>`；

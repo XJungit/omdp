@@ -140,6 +140,46 @@ DSH 也提供了 `dsh-tool-bash`（注册 `name: "bash"`），但 Windows 会话
 `--check` 能识别「只打了 v1（UA+session）」的中间态并报告缺 contract；
 写入前用 `vm.Script` 校验语法，语法不过**不落盘**。
 
+## 第三个坑：两条通道的工具形状不同（静默退化）
+
+修完 403 之后又发现一个**独立的**缺口——它不报 403，所以更容易漏掉。
+
+9router 的执行器里有个模型判定谓词，`buildUrl` 用它选 endpoint：
+
+```js
+let l=new Set(["muse-spark-1.2-contributor-free","muse-spark-1.3-contributor-free"]);
+function o(a){let b=n(a);return l.has(b)||(0,k.nh)(b)}          // k = 模块 59096
+buildUrl(a){return o(a)?`${b}/zen/v1/responses`:`${b}/zen/v1/chat/completions`}
+```
+
+`muse-spark-*` 走 `/zen/v1/responses`，**其余走 `/chat/completions`**。两条通道的工具结构**不一样**：
+
+| 通道 | 工具形状 |
+|---|---|
+| `/chat/completions` | `{ type:"function", function:{ name, description, parameters } }` |
+| `/responses` | `{ type:"function", name, description, parameters }`（**扁平**，无 `function` 包裹） |
+
+我第一版注入写死了 chat 形状，于是 `/responses` 通道报：
+
+```
+400 invalid_request_error  `tools[0]` missing required field `name`
+```
+
+**这不是 403，是 400** —— 没有 `FreeTierError`，补丁「看起来生效了」，
+但 `muse-spark-*` 整条通道不可用。修法：注入时用执行器**自身的**谓词 `o(a)`
+（和 `buildUrl` 同一个函数）选择形状；调用方已有工具只**读取检查**，从不改写。
+
+**可复用要点**：
+- **「修好了」要按功能面验证，不能只验一个通道**。同一 provider 的不同 endpoint
+  可能要求不同 wire 格式；只测默认通道会留下静默退化。
+- **注意区分错误类别**：`403 FreeTierError`（门禁）与 `400 invalid_request_error`（我的报文结构错）
+  是完全不同的信号。前者说明「指纹没补齐」，后者说明「补丁写错了」。
+  验证脚本里要把两者分开报，别把 400 当上游抖动重试掉。
+- 判据要**复用生产代码的判断函数**，不要自己另写一份等价逻辑——
+  自己写的会随上游变化而漂移，用 `o(a)` 则天然与 `buildUrl` 保持一致。
+- 顺带确认：`/responses` 通道**同样遵守 `read`+`bash` 规则**
+  （`with read only` → 403、`with pwsh instead of bash` → 403、`with read+bash` → 200）。
+
 ## 验证
 
 三层，全部由 `verify-opencode-freetier.cjs` 一键复跑：
@@ -148,10 +188,12 @@ DSH 也提供了 `dsh-tool-bash`（注册 `name: "bash"`），但 Windows 会话
   403 / 426 / 403 / 403（缺 read）/ 403（缺 bash，用 pwsh 顶替）/ 403 / 403（非流式）——四维独立必需。
 - **B 层（加载真实补丁产物）**：`buildHeaders()` 输出 UA 与规范 session；
   `transformRequest()` 对 `stream:false,无 tools` → `stream=true, tools=[read,bash]`，
-  对 **DSH 工具集（含 `pwsh`、无 `bash`）** → 追加 `bash` 后通过。
-- **C 层（端到端经 9router）**：**4/4 免费模型 HTTP 200**
-  （`mimo-v2.5-free`、`nemotron-3-ultra-free`、`ling-3.0-flash-fin-free`、`nemotron-3.5-lightning-free`）。
-  最终 **ALL CHECKS PASSED**。
+  对 **DSH 工具集（含 `pwsh`、无 `bash`）** → 追加 `bash` 后通过；
+  并**按通道断言工具形状**（chat 通道 → nested；responses 通道 → flat）。
+- **C 层（端到端经 9router，两条通道）**：**6/6 免费模型 HTTP 200** ——
+  4 个 chat（`mimo-v2.5-free`、`nemotron-3-ultra-free`、`ling-3.0-flash-fin-free`、
+  `nemotron-3.5-lightning-free`）+ 2 个 responses（`muse-spark-1.3-contributor-free`、
+  `muse-spark-1.2-contributor-free`）。最终 **ALL CHECKS PASSED**。
 
 另有 `probes/probe-official-contract.cjs` 按**官方源码契约**渲染请求并断言四维，
 含 `/responses` 通道（muse-spark-*）同样遵守 `read`+`bash` 规则。
