@@ -39,41 +39,86 @@ const ok = (m) => console.log('  ok   ' + m);
 const bad = (m) => { failures++; console.log('  FAIL ' + m); };
 
 // ------------------------------------------------------------------ A. upstream
-function upstreamHeaders(kind) {
-  if (kind === 'legacy') {
-    return {
-      Authorization: 'Bearer public', 'User-Agent': 'opencode', 'x-opencode-client': 'desktop',
-      'x-opencode-session': 'ses_' + crypto.randomUUID().replace(/-/g, ''),
-      'x-opencode-request': 'msg_' + crypto.randomUUID().replace(/-/g, ''), 'x-opencode-project': 'global',
-    };
-  }
+//
+// Zen fingerprints the official agentic client on FOUR axes; missing any one
+// yields 403 FreeTierError (a stale-but-versioned UA yields 426). Ground truth
+// is the official source (anomalyco/opencode @ b02acc1e, v1.18.31):
+//   session/llm/request.ts L18/L184/L191-194 - UA `opencode/<version>`, the
+//     x-opencode-* headers, and `tools` sent as a name-keyed record;
+//   schema/src/identifier.ts - the 26-char "ses_" id shape;
+//   tool/read.ts L64 - Tool.define("read", ...);
+//   tool/shell/id.ts - `export const ToolID = "bash"` on EVERY platform,
+//     Windows included (the official shell tool is never called "pwsh").
+// So the client always declares tools named exactly `read` and `bash`.
+// Live bisection matrix lives in notes/.
+const REQUIRED_TOOLS = ['read', 'bash'];
+const mkTool = (name) => ({
+  type: 'function',
+  function: { name, description: 'noop', parameters: { type: 'object', properties: {}, required: [] } },
+});
+/** A plausible official tool set: the pair plus the other builtins. */
+const officialTools = () =>
+  [...REQUIRED_TOOLS, 'glob', 'grep', 'edit', 'write', 'task', 'fetch', 'todo', 'search', 'skill'].map(mkTool);
+
+// `over` lets a probe break exactly one axis at a time.
+function upstreamHeaders(kind, over = {}) {
+  const legacy = kind === 'legacy';
   return {
-    Authorization: 'Bearer public', 'User-Agent': 'opencode/1.18.31', 'x-opencode-client': 'desktop',
-    'x-opencode-session': canonical('ses_'),
-    'x-opencode-request': canonical('msg_'), 'x-opencode-project': 'global',
+    Authorization: 'Bearer public',
+    'User-Agent': legacy ? 'opencode' : 'opencode/1.18.31',
+    'x-opencode-client': 'cli',
+    'x-opencode-session': legacy
+      ? 'ses_' + crypto.randomUUID().replace(/-/g, '')
+      : canonical('ses_'),
+    'x-opencode-request': canonical('msg_'),
+    'x-opencode-project': 'global',
+    ...over,
   };
 }
 
-async function chat(headers, model) {
+// body: stream + the tool pair are gate axes, so they are parameters.
+async function chat(headers, model, { stream = true, tools = officialTools() } = {}) {
+  const body = { model, messages: [{ role: 'user', content: 'hi' }], max_tokens: 8, stream };
+  if (tools) body.tools = tools;
   const r = await fetch('https://opencode.ai/zen/v1/chat/completions', {
     method: 'POST', headers: { 'Content-Type': 'application/json', ...headers },
-    body: JSON.stringify({ model, messages: [{ role: 'user', content: 'hi' }], max_tokens: 8, stream: false }),
+    body: JSON.stringify(body),
   });
   const t = await r.text();
-  let type = ''; try { type = JSON.parse(t)?.error?.type || ''; } catch {}
+  let type = '';
+  try { const j = JSON.parse(t); type = j?.error?.type || (j?.choices ? '' : j?.error?.message || ''); } catch { /* SSE/plain */ }
   return { status: r.status, type };
 }
 
 async function layerA() {
-  console.log('\n=== A. upstream gate behaviour ===');
+  console.log('\n=== A. upstream gate behaviour (all four axes) ===');
   for (const m of FREE_MODELS.slice(0, 2)) {
-    const legacy = await chat(upstreamHeaders('legacy'), m);
-    if (legacy.status === 403 && legacy.type === 'FreeTierError') ok(`legacy headers still reproduce 403 (control) [${m}]`);
+    // Control: the pre-2026-09-17 fingerprint must still be refused.
+    const legacy = await chat(upstreamHeaders('legacy'), m, { tools: null });
+    if (legacy.status === 403 && legacy.type === 'FreeTierError') ok(`legacy fingerprint still refused (403 FreeTierError) [${m}]`);
     else bad(`control expected 403 FreeTierError, got ${legacy.status} ${legacy.type} [${m}]`);
 
+    // Positive: the complete official fingerprint must be accepted.
     const fixed = await chat(upstreamHeaders('fixed'), m);
-    if (fixed.status === 200) ok(`canonical UA+session accepted (200) [${m}]`);
-    else bad(`expected 200 with canonical headers, got ${fixed.status} ${fixed.type} [${m}]`);
+    if (fixed.status === 200) ok(`official fingerprint accepted (200) [${m}]`);
+    else bad(`expected 200 with UA+session+read+bash+stream, got ${fixed.status} ${fixed.type} [${m}]`);
+
+    // Each axis is independently required.
+    const axes = [
+      ['UA dropped', upstreamHeaders('fixed', { 'User-Agent': 'opencode' }), {}],
+      ['UA stale (1.16.0)', upstreamHeaders('fixed', { 'User-Agent': 'opencode/1.16.0' }), {}],
+      ['session non-canonical', upstreamHeaders('fixed', { 'x-opencode-session': 'ses_' + crypto.randomUUID().replace(/-/g, '') }), {}],
+      ['read missing', upstreamHeaders('fixed'), { tools: officialTools().filter((t) => t.function.name !== 'read') }],
+      ['bash missing (pwsh instead)', upstreamHeaders('fixed'), { tools: [...officialTools().filter((t) => t.function.name !== 'bash'), mkTool('pwsh')] }],
+      ['tools missing', upstreamHeaders('fixed'), { tools: null }],
+      ['not streamed', upstreamHeaders('fixed'), { stream: false }],
+    ];
+    for (const [label, h, opts] of axes) {
+      const r = await chat(h, m, opts);
+      if (r.status === 403 || r.status === 426) ok(`${label} => ${r.status} ${r.type || ''}`.trim());
+      else bad(`${label} should be refused, got ${r.status} ${r.type} [${m}]`);
+      await new Promise((res) => setTimeout(res, 300));
+    }
   }
 }
 
@@ -158,9 +203,39 @@ function layerB(explicitDir) {
     else bad(`${label} -> UA=${h['User-Agent']} (${uaGood}) ses=${h['x-opencode-session']} (${sesGood})`);
   }
 
+  // The free-tier request contract (axes 3 + 4): transformRequest must force
+  // streaming and ensure the required tool pair (read + bash), whatever the
+  // caller sent. The third case is the DSH-on-Windows shape: a `pwsh` shell
+  // tool with no `bash`, which the official client would never emit.
+  const dshStyle = ['read', 'glob', 'grep', 'edit', 'write', 'pwsh', 'todo_write', 'web_search'].map(mkTool);
+  const bodyCases = [
+    ['caller: stream=false, no tools', { stream: false }],
+    ['caller: stream=false, 1 tool', { stream: false, tools: [mkTool('bash')] }],
+    ['caller: DSH tool set (pwsh, no bash)', { stream: true, tools: dshStyle }],
+    ['caller: read only, non-streamed', { stream: false, tools: [mkTool('read')] }],
+  ];
+  for (const [label, body] of bodyCases) {
+    const e = new Exec();
+    e._currentSessionId = 'ses_' + crypto.randomUUID().replace(/-/g, '');
+    try {
+      e.transformRequest('mimo-v2.5-free', body, true, { rawHeaders: {}, connectionId: 'verify' });
+    } catch (err) {
+      bad(`${label} -> transformRequest threw: ${err.message}`);
+      continue;
+    }
+    const names = Array.isArray(body.tools) ? body.tools.map((t) => t?.function?.name) : [];
+    const missing = REQUIRED_TOOLS.filter((q) => !names.includes(q));
+    const streamed = body.stream === true;
+    if (streamed && !missing.length) ok(`${label} -> stream=true tools=[${names.join(',')}]`);
+    else bad(`${label} -> stream=${body.stream} missing={${missing.join(',')}} tools=[${names.join(',')}]`);
+  }
+
   const src = fs.readFileSync(chunk, 'utf8');
   if (src.includes('?f:"opencode",')) bad('VULNERABLE: bare-UA anchor still present - re-run --apply');
   else ok('no bare-UA anchor (patch in place)');
+  if (!src.includes('NINEROUTER_OPENCODE_FREE_TIER_CONTRACT')) {
+    bad('VULNERABLE: free-tier contract missing (stream/tools injection) - re-run --apply');
+  } else ok('free-tier contract present (stream + read/bash injection)');
 }
 
 // ------------------------------------------------------------------ C. e2e

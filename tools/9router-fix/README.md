@@ -10,15 +10,46 @@ HTTP 403: {"type":"error","error":{"type":"FreeTierError",
 
 ## 为什么需要它
 
-OpenCode 于 2026-09-17 起在 `https://opencode.ai/zen/v1/*` 上加了客户端门禁，
-以下**两个条件必须同时满足**，否则 403：
+OpenCode Zen 在 `https://opencode.ai/zen/v1/*` 上对**官方 agent 客户端做四维指纹校验**，
+**四个条件必须同时满足**，缺任意一个即 403 `FreeTierError`（该门禁已两次加严）：
 
-1. `User-Agent` 为 `opencode/<maj>.<min>.<patch>` 且版本 **≥ 1.17.0**
-   （裸 `opencode` / 外来 UA → 403；有版本但 < 1.17.0 → 426 UpgradeRequired）；
-2. `x-opencode-session` 匹配 `^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$`。
+| # | 条件 | 反例 → 结果 |
+|---|---|---|
+| 1 | `User-Agent` = `opencode/<maj>.<min>.<patch>`，版本 **≥ 1.17.0** | 裸 `opencode`、`node`、`curl`、`opencode/<无版本>` → **403 FreeTierError**；`opencode/1.16.0`（有版本但过低）→ **426 UpgradeRequired** |
+| 2 | `x-opencode-session` 匹配 `^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$` | `ses_`+32hex、裸 UUID、`claude:...`、缺失 → **403** |
+| 3 | 请求体 `tools` 同时含**名为 `read` 和名为 `bash`** 的工具 | 缺 `read` → 403；缺 `bash`（例如 Windows 上 shell 工具叫 `pwsh`）→ 403；两者齐全 → 200 |
+| 4 | 请求体 `stream: true` | `stream:false`（`/chat/completions` 与 `/responses` 都是）→ **403** |
 
-9router（含当前上游 master）两者都违反：UA 发裸 `"opencode"`，
-session 发 `ses_` + 32 位 hex。本脚本就地修正编译产物中的这两处。
+### 判据 3 的精确定义（来自官方源码，非猜测）
+
+官方客户端（`anomalyco/opencode`）永远声明这两个名字：
+
+```
+packages/opencode/src/session/llm/request.ts        tools = resolveTools(input)   # 工具表按名下发
+packages/opencode/src/tool/read.ts       L64         Tool.define("read", ...)
+packages/opencode/src/tool/shell/id.ts               export const ToolID = "bash"
+```
+
+`tool/shell/id.ts` 的注释写明：shell 工具的 ID **在所有平台（含 Windows）都叫 `bash`**，
+「为兼容已有插件/权限保留，等 opencode 2.0 再改名」。
+所以官方客户端在 Windows 上**照样发 `bash`**，而 DSH 发的是 `pwsh` —— 这正是 DSH 类环境踩雷的原因。
+
+顺序无关、schema 形状无关、工具数量无关、额外工具无关。
+**`glob`/`grep` 不是判据**：早期「四件套 `{bash,glob,grep,read}`」的结论是对第一次二分的**过拟合**
+（四件套恰好包含必需的 `read`+`bash`，所以能过；而 `{bash,glob,grep}` 失败是因为缺 `read`，不是因为缺第四个名字）。
+
+9router（含当前上游 master v0.5.75）**四项全违反**：UA 发裸 `"opencode"`、
+session 发 `ses_`+32 位 hex、调用方工具集常常缺 `read`/`bash`、且经常非流式。
+本脚本就地修正编译产物中的这四处。
+
+### 已排除的因素（2026-09-18 实测）
+
+- `x-opencode-client` / `x-opencode-request` / `x-opencode-project` /
+  `x-session-affinity` / `X-Session-Id`：**不参与**门禁；
+- 传输层无关：HTTP/1.1 与 HTTP/2（ALPN h2）行为一致；
+- **换个真 Zen key 不能绕过免费层门禁**：同样 403 `FreeTierError`；
+  而同一 key 请求**付费模型**返回 401 `CreditsError` ——
+  说明门禁认的是「免费模型」而非凭据本身。
 
 ## 用法
 
@@ -35,11 +66,18 @@ node fix-opencode-freetier.cjs --apply --dir "C:\path\to\node_modules\9router"
 # 或设置环境变量 NINEROUTER_DIR
 ```
 
-可覆盖注入的默认版本号：
+打补丁时可覆盖注入值（写入产物，改动后需重新 `--apply`）：
 
 ```bash
-NINEROUTER_OPENCODE_UA=opencode/1.19.0 node fix-opencode-freetier.cjs --apply
-# 也可在 9router 运行时通过同名环境变量覆盖
+NINEROUTER_OPENCODE_UA_VERSION=1.19.0     node fix-opencode-freetier.cjs --apply
+NINEROUTER_OPENCODE_QUARTET=read,bash     node fix-opencode-freetier.cjs --apply
+```
+
+运行时仍可覆盖（无需重新打补丁）：
+
+```bash
+NINEROUTER_OPENCODE_UA=opencode/1.19.0       # 覆盖 UA
+NINEROUTER_OPENCODE_FREE_TIER_CONTRACT=off  # 关掉 stream/tools 注入
 ```
 
 **打完补丁必须重启 9router**——Next.js 构建产物在进程启动时载入内存：
@@ -49,17 +87,48 @@ NINEROUTER_OPENCODE_UA=opencode/1.19.0 node fix-opencode-freetier.cjs --apply
 Stop-Process -Id (Get-NetTCPConnection -State Listen -LocalPort 20128).OwningProcess -Force
 ```
 
+重启后务必跑一次验证（A 上游 / B 静态 / C 端到端，三层独立）：
+
+```bash
+node verify-opencode-freetier.cjs            # 三层全跑
+node verify-opencode-freetier.cjs --no-e2e   # 只跑 A+B（9router 未启动时）
+```
+
 ## 行为
 
-- 已是规范格式的 `x-opencode-session` **原样透传**；
-  其他值通过 `sha256` **确定性地**映射为规范格式，保证粘性会话与上游 prompt cache 不失效。
-- 下游 UA 若已是 `opencode/` 且版本 ≥ 1.17.0，**原样透传**（保留真实客户端标识）。
-- 只修改 `buildHeaders()` 中两个表达式，纯函数、无副作用，不触碰请求体或路由。
-- 备份文件与目标同目录，命名 `318.js.bak-<ISO 时间戳>`。
+- **UA**：下游已是 `opencode/` 且版本 ≥ 1.17.0 → 原样透传（保留真实客户端标识）；
+  否则回退 `process.env.NINEROUTER_OPENCODE_UA || "opencode/1.18.31"`。
+- **session**：已是规范格式 → 原样透传；其他值通过 `sha256` **确定性地**映射为
+  规范格式，保证粘性会话与上游 prompt cache 不失效。
+- **tools**：调用方工具**原样保留**，仅把缺失的必需工具（`read`、`bash`）
+  以 no-op 声明追加。`bash` 是官方 shell 工具在**所有平台**的 ID，
+  所以即使调用方（如 Windows 上的 DSH）用自己的 `pwsh`，注入 `bash` 后也能通过。
+- **stream**：强制 `stream: true` 发往上游。
+- 只改 `buildHeaders()` 与 `transformRequest()` 开头的注入块，均为纯函数，
+  不触碰路由与其他请求语义。
+- 备份文件与目标同目录，命名 `318.js.bak-<ISO 时间戳>`；
+  写入前用 `vm.Script` 校验语法，语法不过则**不落盘**。
 
 ## 注意
 
 这是对**已发布构建产物**的本地热补丁。上游 master 尚未修复，
 任何 `npm i -g 9router` 都会覆盖它——升级后重跑 `--apply` 即可。
 
-排查细节与实测数据见 `../../notes/2026-09-17/debug/9router-opencode-freetier-403.md`。
+上游若**再次轮换**可接受的条件，会以同样方式复发；
+`NINEROUTER_OPENCODE_QUARTET` 是「必需工具名」的单点改动位置。
+
+## 给 DSH 插件作者（如 opencode2dsh / 自研 provider）
+
+同一门禁也约束**任何**代理 Zen 免费层的 DSH provider 插件。自查清单：
+
+1. UA 必须是 `opencode/<版本>` 且版本 ≥ 1.17.0；
+2. `x-opencode-session` 必须是 `ses_` + 12 hex + 14 base62
+   （官方算法见 `packages/schema/src/identifier.ts`，**不是** `ses_`+32hex）；
+3. 下发的 `tools` 必须同时含名为 `read` 和名为 `bash` 的工具 ——
+   **Windows 上尤其注意**：DSH 本机 shell 工具叫 `pwsh`，
+   若原样透传工具集就会 403，必须补一个 `bash` 声明；
+4. 必须 `stream: true`。
+
+排查细节、完整判据矩阵与实测数据见
+[`../../notes/2026-09-18/debug/9router-opencode-freetier-403-tool-pair.md`](../../notes/2026-09-18/debug/9router-opencode-freetier-403-tool-pair.md)
+（第一波修复见 [`../../notes/2026-09-17/debug/9router-opencode-freetier-403.md`](../../notes/2026-09-17/debug/9router-opencode-freetier-403.md)）。

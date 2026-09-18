@@ -10,18 +10,48 @@
  *   raised for all `Authorization: Bearer public` models (oc/mimo-v2.5-free,
  *   oc/nemotron-3-ultra-free, oc/muse-spark-*-free, ...).
  *
- * ROOT CAUSE (OpenCode added a server-side client gate around 2026-09-17)
- *   Two INDEPENDENT factors must BOTH hold, otherwise 403:
- *     (a) User-Agent must be `opencode/<maj>.<min>.<patch>` with
+ * ROOT CAUSE (the gate tightened twice; v1 of this script only fixed axes 1-2)
+ *   OpenCode fingerprints the OFFICIAL AGENTIC CLIENT on four independent
+ *   axes at https://opencode.ai/zen/v1/*; missing any one => 403:
+ *     (1) User-Agent must be `opencode/<maj>.<min>.<patch>` with
  *         version >= 1.17.0.  A bare `opencode`, a foreign UA (`node`,
  *         `curl`), or an OpenCode lacking a version string => 403
  *         FreeTierError; a versioned UA below 1.17.0 => 426 UpgradeRequired.
- *     (b) `x-opencode-session` must match /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/.
+ *     (2) `x-opencode-session` must match /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/.
  *         `ses_` + 32 hex (what 9router generates), a raw UUID, a
  *         `claude:...`/`antigravity:...` identity, or an absent header
  *         => 403 FreeTierError.
- *   9router violated BOTH: it sent UA `"opencode"` (no version) and a
- *   non-canonical `ses_<uuid32hex>` session.
+ *     (3) the body's `tools` must declare BOTH of OpenCode's core tool
+ *         families by EXACT lowercase name: a read tool (`read`) AND a
+ *         shell tool (`bash` OR `shell`). Order, tool count, extra tools and
+ *         the parameter-schema shape are all irrelevant. A de-facto minimal
+ *         passing pair is `{read, bash}`; `{read, shell}` also passes.
+ *         Anything else is refused: `{read}` or `{bash}` alone, `{bash, glob}`
+ *         (3 tools incl. glob+grep still fails without `read`!), six
+ *         recognised names without `read`/`bash`, `{read, pwsh}`,
+ *         `{read, exec}`, `{read, sh}`, `{read, bash_exec}`, capitalised
+ *         names, and a tool list of any size that lacks the pair.
+ *     (4) the request must be streamed (`"stream": true`); stream:false
+ *         => 403 on both /chat/completions and /responses.
+ *   9router violated ALL FOUR: UA `"opencode"` (no version), a
+ *   `ses_<uuid32hex>` session, caller tools that lack the read+shell pair, and
+ *   non-streamed requests.
+ *
+ *   The earlier "file-search quartet {bash,glob,grep,read}" reading of axis 3
+ *   was an OVERFIT of the first bisection: the quartet happens to contain the
+ *   mandatory pair, so it passed, and probes like `{bash,glob,grep}` failed
+ *   for want of `read` rather than for want of a fourth name. `glob`/`grep`
+ *   are NOT gate factors - injecting them was harmless noise. The rule above
+ *   was settled by probing name families one at a time; see
+ *   probes/probe-gate-truth.cjs and probes/probe-gate-families.cjs.
+ *
+ *   Established by live bisection on 2026-09-18 (see notes/ for the matrix):
+ *   `x-opencode-client`, `x-opencode-request`, `x-opencode-project`,
+ *   `x-session-affinity` and `X-Session-Id` are NOT gate factors; neither is
+ *   the HTTP version (h2 and HTTP/1.1 behave alike) nor the transport.
+ *   A real Zen key does not bypass the free-tier gate either: the same
+ *   request still 403s, while a PAID model on that key returns
+ *   401 CreditsError - so the gate is keyed on the free models themselves.
  *
  * FIX
  *   Patch the compiled OpenCode executor in the Next.js build output:
@@ -30,7 +60,10 @@
  *     2. Coerce every non-canonical session id into the canonical form,
  *        deterministically (SHA-256), so sticky sessions and upstream prompt
  *        caching keep working.
- *   Both are pure functions of already-computed inputs, so nothing else in
+ *     3. Force `stream = true` upstream and merge any missing member of the
+ *        required tool pair (`read`, `bash`) into `body.tools` as a no-op
+ *        declaration, preserving caller tools.
+ *   All are pure functions of already-computed inputs, so nothing else in
  *   the request pipeline changes.
  *
  * USAGE
@@ -38,6 +71,13 @@
  *   node fix-opencode-freetier.cjs --apply          # patch (idempotent)
  *   node fix-opencode-freetier.cjs --restore        # roll back latest backup
  *   node fix-opencode-freetier.cjs --apply --dir <9router install dir>
+ *
+ * Env overrides (read at patch time, baked into the output):
+ *   NINEROUTER_OPENCODE_UA_VERSION   UA version to impersonate (1.18.31)
+ *   NINEROUTER_OPENCODE_QUARTET      tool names to ensure (read,bash)
+ * At runtime the patched chunk still honours:
+ *   NINEROUTER_OPENCODE_UA                   full UA override
+ *   NINEROUTER_OPENCODE_FREE_TIER_CONTRACT=off  skip stream/tools injection
  *
  * After --apply you MUST restart the 9router server; the Next.js build is
  * loaded into memory at boot.
@@ -56,6 +96,31 @@ const vm = require('vm');
 
 const DEFAULT_VERSION = process.env.NINEROUTER_OPENCODE_UA_VERSION || '1.18.31';
 
+// Zen fingerprints the official agentic client's CORE TOOL PAIR.
+//
+// Ground truth (anomalyco/opencode @ b02acc1e, opencode v1.18.31):
+//   packages/opencode/src/session/llm/request.ts L148/L184
+//       tools = resolveTools(input) -> Record<string, Tool>, sent as the
+//       model's tool list.
+//   packages/opencode/src/tool/read.ts L64
+//       export const ReadTool = Tool.define("read", ...)
+//   packages/opencode/src/tool/shell/id.ts
+//       export const ToolID = "bash"   <-- the shell tool's id on EVERY
+//       platform, INCLUDING Windows; the source comment says outright that the
+//       id stays "bash" for plugin/permission compatibility until opencode 2.0.
+//
+// So the official client always advertises a tool named exactly `read` and one
+// named exactly `bash`, and the gate requires both. That is why a Windows host
+// whose shell tool is named `pwsh` (as DSH's is) is refused: it never declares
+// `bash`. Extra tools are ignored, and glob/grep are NOT gate factors - an
+// earlier "quartet {bash,glob,grep,read}" reading was an overfit of the first
+// bisection (the quartet merely contained the required pair).
+//
+// Override without editing the script, e.g.
+//   NINEROUTER_OPENCODE_QUARTET=read,bash
+const REQUIRED_TOOLS = (process.env.NINEROUTER_OPENCODE_QUARTET || 'read,bash')
+  .split(',').map((s) => s.trim()).filter(Boolean);
+
 // ---------- anchors in the compiled chunk (minified but stable) ----------
 const OLD_UA = '"User-Agent":f.toLowerCase().includes("opencode")?f:"opencode",';
 const NEW_UA =
@@ -73,7 +138,29 @@ const NEW_SES =
   'return "ses_"+x+t})(d["x-opencode-session"]||this._currentSessionId||m()),';
 
 const MARKER = 'NINEROUTER_OPENCODE_UA';
+const MARKER_CONTRACT = 'NINEROUTER_OPENCODE_FREE_TIER_CONTRACT';
 
+// Free-tier request contract (gates 3 + 4), injected at the top of
+// transformRequest. Forces `stream:true` upstream and merges any missing
+// member of Zen's required tool pair (read + bash) into body.tools as a no-op
+// declaration, preserving whatever the caller already sent. `bash` is the
+// official shell tool id on every platform, so injecting it is what makes a
+// Windows host whose own shell tool is called `pwsh` acceptable.
+function contractSnippet() {
+  return `(function(b,d){try{if(process.env.NINEROUTER_OPENCODE_FREE_TIER_CONTRACT==="off")return;` +
+    'b.stream=true;' +
+    'var N=' + JSON.stringify(REQUIRED_TOOLS) + ',T=b.tools;' +
+    'if(!Array.isArray(T))T=[];' +
+    'var have={};' +
+    'for(var i=0;i<T.length;i++){var t=T[i];if(t&&t.function&&t.function.name)have[t.function.name]=1}' +
+    'for(var j=0;j<N.length;j++){if(!have[N[j]])T.push({type:"function",function:{name:N[j],' +
+    'description:"Declared by the OpenCode client.",parameters:{type:"object",properties:{},additionalProperties:true}}})}' +
+    'b.tools=T}catch(_){}})(b,d);';
+}
+
+// The OpenCode executor's transformRequest opens with this exact statement.
+const OLD_TRANSFORM = 'transformRequest(a,b,c,d){let e;return this._currentSessionId=';
+const NEW_TRANSFORM = 'transformRequest(a,b,c,d){let e;' + contractSnippet() + 'return this._currentSessionId=';
 // ---------- locate the 9router install ----------
 function candidateRoots() {
   const raw = [];
@@ -124,12 +211,17 @@ function statusOf(file) {
   const t = fs.readFileSync(file, 'utf8');
   const hasOldUa = t.includes(OLD_UA);
   const hasOldSes = t.includes(OLD_SES);
-  const needsPatch = hasOldUa || hasOldSes;
-  let hasNewUa = false;
-  let hasNewSes = false;
-  try { hasNewUa = t.includes(MARKER); } catch { /* ignore */ }
-  hasNewSes = t.includes('^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$');
-  return { file, t, hasOldUa, hasOldSes, needsPatch, hasNewUa, hasNewSes };
+  const hasOldTransform = t.includes(OLD_TRANSFORM);
+  const missingContract = !t.includes(MARKER_CONTRACT);
+  // A v1 patch (UA + session only) still needs the free-tier contract added.
+  const legacyOnly = t.includes(MARKER) && missingContract;
+  const needsPatch = hasOldUa || hasOldSes || hasOldTransform || legacyOnly;
+  const hasNewUa = t.includes(MARKER);
+  const hasNewSes = t.includes('^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$');
+  return {
+    file, t, hasOldUa, hasOldSes, hasOldTransform, missingContract, legacyOnly,
+    needsPatch, hasNewUa, hasNewSes,
+  };
 }
 
 // ---------- actions ----------
@@ -166,6 +258,17 @@ function patchFile(st) {
     if (n !== 1) throw new Error(`${st.file}: session anchor appears ${n}x (expected 1)`);
     t = t.split(OLD_SES).join(NEW_SES);
     changed++;
+  }
+  if (t.includes(OLD_TRANSFORM)) {
+    if (t.includes(MARKER_CONTRACT)) {
+      throw new Error(`${st.file}: transformRequest anchor still present despite contract marker`);
+    }
+    const n = t.split(OLD_TRANSFORM).length - 1;
+    if (n !== 1) throw new Error(`${st.file}: transformRequest anchor appears ${n}x (expected 1)`);
+    t = t.split(OLD_TRANSFORM).join(NEW_TRANSFORM);
+    changed++;
+  } else if (!t.includes(MARKER_CONTRACT)) {
+    throw new Error(`${st.file}: transformRequest anchor not found - upstream build changed shape`);
   }
   if (!changed) return { changed: 0 };
 
@@ -224,11 +327,14 @@ function main() {
   if (mode === 'check') {
     let broken = 0;
     for (const st of targets) {
-      let state;
-      if (st.hasOldUa || st.hasOldSes) { state = 'VULNERABLE (would 403 FreeTierError)'; broken++; }
-      else state = 'patched';
-      console.log(`${state.padEnd(40)} ${st.file}`);
-      console.log(`    bare-UA anchor=${st.hasOldUa}  uuid-session anchor=${st.hasOldSes}  patchMarker=${st.hasNewUa}`);
+      const complete = st.hasNewUa && st.hasNewSes && !st.missingContract;
+      if (!complete) broken++;
+      console.log(`${(complete ? 'patched' : 'VULNERABLE (would 403 FreeTierError)').padEnd(40)} ${st.file}`);
+      console.log(`    bare-UA anchor=${st.hasOldUa}  uuid-session anchor=${st.hasOldSes}`
+        + `  free-tier-contract=${!st.missingContract}`);
+      if (st.legacyOnly) {
+        console.log('    (v1 patch only: UA + canonical session; missing tool pair + stream)');
+      }
     }
     console.log(broken ? `\n${broken} file(s) need --apply.` : '\nAll patched.');
     process.exit(broken ? 1 : 0);
@@ -261,9 +367,9 @@ function main() {
   }
 
   console.log(`\n${ok} patched, ${noop} already up to date.`);
+  console.log(`fingerprint: UA=opencode/${DEFAULT_VERSION}  tools={${REQUIRED_TOOLS.join(',')}}  stream=true`);
   console.log('\nRestart 9router to load the change, e.g.:');
-  console.log('  taskkill /IM node.exe   # or stop 9router from the tray, then:');
-  console.log('  9router --tray -p 20128');
+  console.log('  Stop-Process -Id (Get-NetTCPConnection -State Listen -LocalPort 20128).OwningProcess -Force');
 }
 
 main();

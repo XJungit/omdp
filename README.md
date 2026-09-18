@@ -244,7 +244,7 @@ omdp/
 ├── notes/               # 开发教训与笔记（三层：notes/<date>/<category>/）
 ├── docs/                # 研究笔记、兼容性矩阵、发布指南
 ├── tools/               # 独立维护脚本（非 DSH 插件）
-│   └── 9router-fix/     # 9router OpenCode Zen 免费层 403 热修
+│   └── 9router-fix/     # 9router OpenCode Zen 免费层 403 热修 + 三层验证脚本
 └── <未来插件>/          # 每个插件一个子目录 + package.json
 ```
 
