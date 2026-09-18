@@ -1,0 +1,41 @@
+docs(9router-fix): measure the risk of the hollow injected tools + why Windows DSH has no bash
+
+Two follow-ups from the "is User-Agent enough?" line of investigation, both
+answered from source and measurement rather than assumption.
+
+1. Do the hollow read/bash declarations the patch injects ever get CALLED?
+   Axis 3 forces us to DECLARE them, but they are fingerprints: empty schemas,
+   no implementation, and the caller never declared those names - so a tool_call
+   for one would hand the caller a tool it does not have. Measured:
+
+     real DSH toolset + hollow bash      0/4   (picks real pwsh/glob instead)
+     real toolset + hollow read AND bash 400   duplicate names rejected upstream
+     hollow read/bash ONLY (no real set) 3/3   <- the counterexample
+
+   So the risk is negligible in the production shape (a 9router caller always
+   brings tools) but "hollow is safe" does NOT generalise to a caller with no
+   tools. The middle row is a real failure mode: duplicate tool NAMES are a 400,
+   not a 403, so dedup must recognise BOTH wire shapes or it appends a second
+   copy of read/bash and fails the whole batch.
+
+2. Why DSH exposes only `pwsh` to the model on Windows - and it is a design
+   choice, not a missing dependency. dsh-base/cordis.patch.yml gates the two
+   tools with mirrored !!js expressions (win32 disables bash, non-win32 disables
+   pwsh), and dsh-shell documents that ctx.shell is an EXACTLY-ONE-provider seam:
+   the win32 layer swaps the POSIX rows, and mounting both fails loud on a
+   duplicate service registration. The host DOES have a working bash (Git Bash
+   5.3.15, on PATH) - C:\Windows\System32\bash.exe is just the WSL stub, which is
+   why "is bash installed?" is the wrong question. Re-enabling bash therefore
+   means trading pwsh away, not adding to it.
+
+- notes/2026-09-18/dsh-internals/windows-shell-tool-pwsh-not-bash.md: new note
+- notes/2026-09-18/debug/9router-opencode-freetier-403-tool-pair.md: fourth trap
+- tools/9router-fix/probes/probe-injected-tool-{vs-real,usage}.cjs: new probes
+- tools/9router-fix/probes/README.md: index the two probes
+- tools/9router-fix/verify-opencode-freetier.cjs: assert dedup for both shapes,
+  and no spurious second copy when the caller already declares read+bash
+- tools/9router-fix/README.md: injection-risk section, dedup/400 caution, and a
+  cross-link to the DSH note from the plugin-author checklist
+
+Verified: layers A+B ALL CHECKS PASSED (incl. the new dedup cases), layer C 6/6
+across both lanes.

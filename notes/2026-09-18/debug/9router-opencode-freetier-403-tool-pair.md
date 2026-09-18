@@ -180,6 +180,43 @@ buildUrl(a){return o(a)?`${b}/zen/v1/responses`:`${b}/zen/v1/chat/completions`}
 - 顺带确认：`/responses` 通道**同样遵守 `read`+`bash` 规则**
   （`with read only` → 403、`with pwsh instead of bash` → 403、`with read+bash` → 200）。
 
+## 第四个坑：我能注入空壳工具，但模型会不会真的调用它？
+
+判据 3 逼着我**必须下发**名为 `read`/`bash` 的工具声明，而我注入的是**空壳**
+（空 `parameters`、无实现）。调用方（DSH）自己并没有声明这两个名字，
+所以一旦模型对空壳发起 tool_call，调用方就会收到一个**自己没声明过的工具调用**。
+这是补丁自身引入的风险，必须实测，不能靠"应该不会吧"。
+
+`probes/probe-injected-tool-vs-real.cjs` 三场景对比：
+
+| 场景 | 模型选中空壳/别名 `bash` |
+|---|---|
+| **A. 真实 DSH 工具集 + 空壳 `bash`**（生产情形） | **0/4** —— 一致改选有真实 schema 的 `pwsh` / `glob` |
+| B. 真实工具集 + 空壳 `read` 与 `bash`（手工造重名） | 0/4 选中，但整批 **400**：**重名被上游拒** |
+| C. 真实工具集 + 把 `pwsh` **别名为** `bash`（真实 schema） | 2/4 选中 `bash` |
+
+**A 行是生产情形**（走 9router 的调用方总是带自己的工具集），
+模型在"有真实 schema 的 `pwsh`"与"空壳 `bash`"之间一致选前者，风险可忽略。
+
+**反例必须一起记**：`probe-injected-tool-usage.cjs` 里**只**给空壳 read/bash 时，
+模型 **3/3** 会调用它们。所以「空壳安全」**只在真实工具集在场时成立**，
+不能推广到「调用方不带任何工具」的路径（那种情况调用方本来也拿不到工具调用）。
+
+**B 行又暴露一个真实失败模式**：**重复工具名 → 上游 400**（不是 403）。
+所以去重必须**同时识别 nested（chat）与 flat（responses）两种形状**，
+否则会给已声明 `read`/`bash` 的调用方追加第二份而整批失败。
+已固化为 `verify-opencode-freetier.cjs` B 层的去重断言。
+
+**可复用要点**：
+- **补丁自己注入的东西，要评估"被真正使用"的后果**，而不只是"能不能通过校验"。
+  注入是**指纹**，但指纹也会进入模型的可选工具集。
+- **对照实验要有"生产情形"那一组**。只给空壳测（3/3 被调用）会得出
+  "风险很高"的错误结论；真实工具集在场（0/4）才是实际风险。
+- **重名是硬错误**：这类"看起来无害的追加"在去重失效时会整批 400。
+
+DSH 为何在 Windows 上只给 `pwsh`、以及本机 bash 的真实可用性，
+另见笔记 [`../dsh-internals/windows-shell-tool-pwsh-not-bash.md`](../dsh-internals/windows-shell-tool-pwsh-not-bash.md)。
+
 ## 验证
 
 三层，全部由 `verify-opencode-freetier.cjs` 一键复跑：

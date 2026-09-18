@@ -119,6 +119,27 @@ C 层覆盖**两条通道**：4 个 chat 模型 + 2 个 `muse-spark-*`（走 `/r
   形状错了不会 403，而是上游 **400 `tools[0]` missing required field `name`** ——
   这是个**静默退化**：补丁看着「生效了」，但 `/responses` 通道整体不可用。
   调用方已有的工具只被**读取检查**，从不改写。
+
+### 注入的 `read`/`bash` 会被模型调用吗？
+
+不会（在真实场景下）。这一点是**实测**的，不是推断——
+`probes/probe-injected-tool-vs-real.cjs`：
+
+| 场景 | 模型选中空壳 `bash` |
+|---|---|
+| **真实 DSH 工具集 + 空壳 `bash`**（生产情形） | **0/4**，一致改选有真实 schema 的 `pwsh`/`glob` |
+| 真实工具集 + 空壳 `read` 与 `bash`（手工造重名） | 0/4 选中，但整批 **400**：**重名被上游拒** |
+| 只给空壳 `read`/`bash`（调用方不带工具） | 3/3 调用空壳 ← **反例** |
+
+结论与边界：
+
+- 注入的声明是**纯指纹**（空 `parameters`、无实现），**不需要本机真有 bash**，
+  在真实工具集在场时也不会被优先选中，风险可忽略（走 9router 调用方总是带工具）。
+- 「空壳安全」**不能推广**到「调用方不带任何工具」的路径：那种情况下模型会调用它们。
+  此时调用方本来也没声明过工具、拿不到工具调用，影响面小。
+- **重名返回 400**，所以去重必须同时识别 nested 与 flat 两种形状——
+  否则会给已声明 `read`/`bash` 的调用方追加第二份而整批失败。
+  已固化为 `verify-opencode-freetier.cjs` 的 B 层断言。
 - 只改 `buildHeaders()` 与 `transformRequest()` 开头的注入块，均为纯函数，
   不触碰路由与其他请求语义。
 - 备份文件与目标同目录，命名 `318.js.bak-<ISO 时间戳>`；
@@ -142,7 +163,12 @@ C 层覆盖**两条通道**：4 个 chat 模型 + 2 个 `muse-spark-*`（走 `/r
 3. 下发的 `tools` 必须同时含名为 `read` 和名为 `bash` 的工具 ——
    **Windows 上尤其注意**：DSH 本机 shell 工具叫 `pwsh`，
    若原样透传工具集就会 403，必须补一个 `bash` 声明；
+   补的声明是**纯指纹**（空 schema、无实现），实测在真实工具集在场时不会被模型选中；
+   同时**去重**要识别 nested/flat 两种形状，**重名会被上游 400 拒绝**；
 4. 必须 `stream: true`。
+
+> 相关：DSH 为何在 Windows 上只给 `pwsh`（且不是"缺 bash"）见
+> [`../../notes/2026-09-18/dsh-internals/windows-shell-tool-pwsh-not-bash.md`](../../notes/2026-09-18/dsh-internals/windows-shell-tool-pwsh-not-bash.md)
 
 排查细节、完整判据矩阵与实测数据见
 [`../../notes/2026-09-18/debug/9router-opencode-freetier-403-tool-pair.md`](../../notes/2026-09-18/debug/9router-opencode-freetier-403-tool-pair.md)

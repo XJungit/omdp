@@ -28,6 +28,8 @@ node verify-opencode-freetier.cjs # A 上游 / B 静态 / C 端到端 三层验�
 | `probe-http2.cjs` | undici(HTTP/1.1) vs node:http2 | 传输层无关 |
 | `probe-with-real-key.cjs` | 用 9router 存的真 Zen key 打免费模型 | 真 key 也 403 |
 | `probe-paid-vs-free.cjs` | 真 key 下付费 vs 免费模型 | 付费 401 CreditsError、免费 403 → 门禁认模型不认凭据 |
+| `probe-injected-tool-vs-real.cjs` | **空壳注入工具的风险**：真实 DSH 工具集在场时，模型会不会去调注入的 `bash` | **0/4**，一致选有真实 schema 的 `pwsh`/`glob`；并暴露「重名 → 400」失败模式 |
+| `probe-injected-tool-usage.cjs` | **反例**：只给空壳 `read`/`bash`（调用方不带工具） | 3/3 调用空壳 → 「空壳安全」只在真实工具集在场时成立 |
 
 辅助（读本地 9router 状态，均只读、密钥脱敏）：
 

@@ -238,11 +238,35 @@ function layerB(explicitDir) {
     else bad(`${label} -> stream=${body.stream} missing={${missing.join(',')}} tools=[${names.join(',')}]`);
   }
 
-  // The /responses lane needs the FLAT tool shape. Injecting chat's nested form
-  // there makes Zen reject the request with
-  //   400 `tools[0]` missing required field `name`
-  // so assert the shape per lane, using the same model predicate the executor
-  // uses to choose the endpoint (muse-spark-* -> /responses).
+  // Duplicate tool NAMES are rejected upstream with 400 (not 403), so the dedup
+  // path matters as much as the injection path: a caller that already declares
+  // `read` and `bash` must come out unchanged, with no second copy. Both wire
+  // shapes must be recognised, or a flat-declaring caller on the responses lane
+  // gets a duplicate appended.
+  const dedupCases = [
+    ['caller already has read+bash (nested chat shape)', 'mimo-v2.5-free', false],
+    ['caller already has read+bash (flat responses shape)', 'muse-spark-1.3-contributor-free', true],
+  ];
+  for (const [label, model, flat] of dedupCases) {
+    const e = new Exec();
+    e._currentSessionId = 'ses_' + crypto.randomUUID().replace(/-/g, '');
+    const mk = flat
+      ? (n) => ({ type: 'function', name: n, description: 'caller', parameters: { type: 'object', properties: {} } })
+      : (n) => mkTool(n);
+    const body = { stream: true, tools: [mk('read'), mk('bash')] };
+    try {
+      e.transformRequest(model, body, true, { rawHeaders: {}, connectionId: 'verify' });
+    } catch (err) {
+      bad(`${label} -> transformRequest threw: ${err.message}`);
+      continue;
+    }
+    const names = body.tools.map((t) => t?.function?.name ?? t?.name);
+    const seen = new Set();
+    const dupes = names.filter((n) => (seen.has(n) ? true : (seen.add(n), false)));
+    const added = names.length - 2;
+    if (!dupes.length && added === 0) ok(`${label} -> unchanged, no duplicates`);
+    else bad(`${label} -> added=${added} duplicates=[${dupes.join(',')}] (upstream returns 400 on duplicate names)`);
+  }
   const laneCases = [
     ['chat lane (mimo-v2.5-free)', 'mimo-v2.5-free', 'function'],
     ['responses lane (muse-spark-1.3-contributor-free)', 'muse-spark-1.3-contributor-free', 'flat'],
