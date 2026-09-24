@@ -1,5 +1,20 @@
 # 9router OpenCode 免费层热修
 
+> ## ⚠️ 状态：已被上游吸收（2026-09-24）
+>
+> **9router ≥ v0.5.86 自己就满足这个门禁了，不需要再打补丁。**
+> 实测 `0.5.86` 未打补丁：A 层四条判据逐条破坏仍 403/426（Zen 门禁没变），
+> C 层 6/6 免费模型 200（含两条通道）→ **是 9router 修好了，不是 Zen 放宽了**。
+>
+> 上游实现（官方 descending 时间算法 + 工具集注入 + 按通道形状）见
+> [`../../notes/2026-09-24/debug/9router-0.5.86-absorbed-hotpatch.md`](../../notes/2026-09-24/debug/9router-0.5.86-absorbed-hotpatch.md)。
+>
+> **本目录现在的主要价值**：
+> 1. `verify-opencode-freetier.cjs` —— 三层验证（升级后仍应跑一次）；
+> 2. 下面这份**门禁判据文档** —— 上游若再次轮换条件，这是对照基准；
+> 3. `fix-opencode-freetier.cjs` —— 已改造为**自动判定**：检测到上游自修复即报
+>    「nothing to patch」并 exit 0；仅对 ≤ v0.5.75 的老版本才真的打补丁。
+
 修复 9router 走 OpenCode Zen 免费层（`oc/<model>`、`Authorization: Bearer public`）时报
 `403 FreeTierError` 的问题。
 
@@ -54,10 +69,21 @@ session 发 `ses_`+32 位 hex、调用方工具集常常缺 `read`/`bash`、且�
 ## 用法
 
 ```bash
-node fix-opencode-freetier.cjs --check     # 只体检，退出码 1 表示存在漏洞
+node fix-opencode-freetier.cjs --check     # 只体检
 node fix-opencode-freetier.cjs --apply     # 打补丁（幂等；自动带时间戳备份）
 node fix-opencode-freetier.cjs --restore   # 回滚到最近的备份
 ```
+
+`--check` 的**退出码语义**（升级后先跑这个）：
+
+| 退出码 | 含义 | 动作 |
+|---|---|---|
+| `0` + `All patched.` | 老版本且补丁已就位 | 无需动作 |
+| `0` + `already satisfies ... nothing to patch` | **≥ v0.5.86 上游自带修复** | **无需动作**（不要重打） |
+| `1` | ≤ v0.5.75 且仍是脆弱状态 | 跑 `--apply` 并重启 9router |
+| `1` + `no upstream gate fix either` | 找不到 9router 或构建布局未知 | 用 `--dir` 指定安装目录 |
+
+`--apply` 在检测到上游自修复时会**直接跳过**（exit 0），不会误改构建产物。
 
 自定义安装位置（默认自动探测 Windows `%APPDATA%\npm` 与 Unix 全局 npm 路径）：
 
@@ -147,11 +173,16 @@ C 层覆盖**两条通道**：4 个 chat 模型 + 2 个 `muse-spark-*`（走 `/r
 
 ## 注意
 
-这是对**已发布构建产物**的本地热补丁。上游 master 尚未修复，
-任何 `npm i -g 9router` 都会覆盖它——升级后重跑 `--apply` 即可。
+这是对**已发布构建产物**的本地热补丁，**对 ≥ v0.5.86 已不再需要**
+（上游自己实现了同样的修复，见顶部状态说明）。任何 `npm i -g 9router`
+都会覆盖构建产物——升级后跑 `--check` 即可，脚本会告诉你到底要不要补。
 
 上游若**再次轮换**可接受的条件，会以同样方式复发；
 `NINEROUTER_OPENCODE_QUARTET` 是「必需工具名」的单点改动位置。
+
+> **判据文档仍然有效**：A 层（直连上游的四维校验）与 9router 版本无关，
+> 用来判断「是 Zen 变了还是 9router 变了」——这次正是靠它把
+> 「上游修复」（A 层不变、C 层转变）与「门禁放宽」（A 层会变）区分开。
 
 ## 给 DSH 插件作者（如 opencode2dsh / 自研 provider）
 

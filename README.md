@@ -48,7 +48,8 @@ omdp/
 ├── notes/               # development lessons & notes (三层：notes/<date>/<category>/)
 ├── docs/                # research notes, compatibility matrix, publish guide
 ├── tools/               # standalone maintenance scripts (not DSH plugins)
-│   └── 9router-fix/     # hot-patch for 9router's OpenCode Zen free-tier 403
+│   └── 9router-fix/     # 9router OpenCode Zen free-tier 403: gate doc + verifier
+│                        # (hot-patch本身已被 9router v0.5.86 上游吸收，脚本会自动判定)
 └── <future plugins>/    # each its own subdirectory + package.json
 ```
 
@@ -249,7 +250,8 @@ omdp/
 ├── notes/               # 开发教训与笔记（三层：notes/<date>/<category>/）
 ├── docs/                # 研究笔记、兼容性矩阵、发布指南
 ├── tools/               # 独立维护脚本（非 DSH 插件）
-│   └── 9router-fix/     # 9router OpenCode Zen 免费层 403 热修 + 三层验证脚本
+│   └── 9router-fix/     # 9router OpenCode Zen 免费层 403：判据文档 + 三层验证脚本
+│                        #（热补丁本身已被 9router v0.5.86 上游吸收，脚本会自行判定）
 └── <未来插件>/          # 每个插件一个子目录 + package.json
 ```
 

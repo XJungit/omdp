@@ -140,6 +140,35 @@ const NEW_SES =
 const MARKER = 'NINEROUTER_OPENCODE_UA';
 const MARKER_CONTRACT = 'NINEROUTER_OPENCODE_FREE_TIER_CONTRACT';
 
+// ---------- v0.5.86+ already fixes this, and this script must say so ----------
+// Upstream 9router started injecting the required tool set itself and now
+// generates canonical session ids with the official descending-time algorithm,
+// so the hot-patch is OBSOLETE on those builds. Re-applying is not just
+// unnecessary: the anchors no longer exist, and a bare "no executor found"
+// (exit 1) would read as "something is broken" when the truth is "nothing to
+// do here". Detect the upstream fix by the injected literal set.
+const UPSTREAM_TOOL_SET_LITERAL = '["bash","glob","grep","read"]';
+const UPSTREAM_UA_FALLBACK = '"opencode/1.18.31"';
+const UPSTREAM_SESSION_RE = '^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$';
+
+// Which of the upstream fix's three visible pieces are present in this install.
+function detectUpstreamFix(roots) {
+  const found = { tools: null, ua: null, session: null };
+  for (const root of roots) {
+    if (!fs.existsSync(root)) continue;
+    for (const chunks of findBuildDirs(root)) {
+      for (const f of walkJs(chunks)) {
+        const t = fs.readFileSync(f, 'utf8');
+        if (!found.tools && t.includes(UPSTREAM_TOOL_SET_LITERAL)) found.tools = f;
+        if (!found.session && t.includes(UPSTREAM_SESSION_RE) && !t.includes(MARKER)) found.session = f;
+        if (!found.ua && t.includes(UPSTREAM_UA_FALLBACK) && !t.includes(MARKER)) found.ua = f;
+      }
+    }
+  }
+  found.ok = !!(found.tools && found.ua && found.session);
+  return found;
+}
+
 // Free-tier request contract (gates 3 + 4), injected at the top of
 // transformRequest. Forces `stream:true` upstream and merges any missing member
 // of Zen's required tool pair (read + bash) into body.tools as a no-op
@@ -331,12 +360,29 @@ function main() {
   }
 
   const roots = explicitDir ? [explicitDir] : candidateRoots();
+  const upstream = detectUpstreamFix(roots);
   const targets = scan(roots);
 
   if (!targets.length) {
-    console.log('No 9router OpenCode executor found. Searched:');
+    if (upstream.ok) {
+      console.log('Upstream 9router already satisfies the Zen free-tier gate - nothing to patch.\n');
+      console.log('  injected tool set  ' + upstream.tools);
+      console.log('  canonical session  ' + upstream.session);
+      console.log('  UA fallback        ' + upstream.ua);
+      console.log('\nThis hot-patch is obsolete on this build (upstream absorbed it). Do not');
+      console.log('re-apply. Confirm the gate is satisfied end to end instead:');
+      console.log('  node verify-opencode-freetier.cjs');
+      process.exit(0);
+    }
+    console.log('No 9router OpenCode executor found, and no upstream gate fix either. Searched:');
     for (const r of roots) console.log('  ' + r + (fs.existsSync(r) ? '' : '  (not present)'));
     process.exit(1);
+  }
+
+  if (mode === 'apply' && upstream.ok) {
+    console.log('Upstream already satisfies the gate on this build; skipping --apply.');
+    console.log('(The patch anchors no longer exist upstream - nothing was changed.)');
+    process.exit(0);
   }
 
   console.log(`9router OpenCode executor: ${targets.length} file(s)\n`);

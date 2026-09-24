@@ -188,6 +188,27 @@ function layerB(explicitDir) {
   if (!chunk) { bad('9router build chunk not found'); return; }
   ok('chunk: ' + chunk);
 
+  // Two worlds, because 9router v0.5.86+ absorbed this hot-patch:
+  //   upstream - no markers; the build fixes the gate itself, so assert THAT
+  //              (the fix is spread over several chunks, hence the whole-dir read)
+  //   patched  - our markers are present; unit-test our own injection
+  if (!fs.readFileSync(chunk, 'utf8').includes('NINEROUTER_OPENCODE_FREE_TIER_CONTRACT')) {
+    const dir = path.dirname(chunk);
+    const all = fs.readdirSync(dir)
+      .filter((f) => f.endsWith('.js'))
+      .map((f) => fs.readFileSync(path.join(dir, f), 'utf8'))
+      .join('\n');
+    const checks = [
+      ['upstream injects the required tool set', all.includes('["bash","glob","grep","read"]')],
+      ['upstream generates canonical session ids', all.includes('^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$')],
+      ['upstream falls back to a versioned UA', all.includes('"opencode/1.18.31"')],
+      ['upstream forces stream:true', all.includes('stream=!0')],
+    ];
+    for (const [label, pass] of checks) (pass ? ok : bad)(label);
+    console.log('  (no hot-patch markers: this build fixes the gate itself - layer C is the proof)');
+    return;
+  }
+
   let Exec;
   try { Exec = loadExecutor(chunk); } catch (e) { bad('could not load executor: ' + e.message); return; }
 

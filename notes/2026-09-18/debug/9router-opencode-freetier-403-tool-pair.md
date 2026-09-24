@@ -248,8 +248,22 @@ DSH 为何在 Windows 上只给 `pwsh`、以及本机 bash 的真实可用性，
 - 相关文件：
   - 补丁目标 `%APPDATA%\npm\node_modules\9router\app\.next-cli-build\server\chunks\318.js`
     （模块 4493 = OpenCode executor；`transformRequest` / `buildHeaders`）
+    —— **注意：该路径仅适用于 ≤ v0.5.75**；v0.5.86 起实现被拆到
+    `5330.js` / `6249.js` / `8499.js`，见下方「后续」。
   - 运行数据 `%APPDATA%\9router\db\data.sqlite`（表 `requestDetails`，
     `data.request.providerRequest` 可看到 9router 实际发上游的请求体）
 - 参考：官方源码 `anomalyco/opencode` @ `b02acc1e`（v1.18.31）；
   社区 `jasonxu114514/opencode2api@8185202`（UA+session，第一波）；
   `FishBottle7/opencode2dsh` PR #8/#11 与 issue #9。
+
+## 后续：本补丁已被上游吸收，已退役（2026-09-24）
+
+**结论先给**：升级到 **9router ≥ v0.5.86 后不需要再打这个补丁**——
+上游自己实现了同样的修复（连 session 都用的是官方 descending 时间算法）。
+
+这条链的收束与证据（含「怎么区分是上游修好了还是 Zen 放宽了」）见
+[`../../2026-09-24/debug/9router-0.5.86-absorbed-hotpatch.md`](../../2026-09-24/debug/9router-0.5.86-absorbed-hotpatch.md)。
+
+因此本文上面的判据矩阵虽然仍然正确，但定位已从「修什么」转为
+**「上游若再次轮换条件时的对照基准 + 升级后的回归验证」**。
+
