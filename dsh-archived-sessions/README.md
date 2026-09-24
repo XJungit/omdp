@@ -48,8 +48,8 @@ pnpm add @omdp/dsh-archived-sessions -w
 
 ### 要求 / Requirements
 
-- DeepSeek Harness **0.1.5-rc.1**、**0.1.5-rc.2**、**0.1.6-alpha.1**（实测版本；0.3.4 起三者全兼容，0.3.3 及更早与 0.1.6-alpha.1 **冲突**、与 0.1.5 系列兼容，见变更记录）
-- `@deepseek-ai/cordis` ^4.0.1（peer）
+- DeepSeek Harness **0.1.5-rc.1**、**0.1.5-rc.2**、**0.1.6-alpha.1**、**0.1.7-rc.1**（实测版本；0.3.5 起四者全兼容，0.3.3 及更早与 0.1.6-alpha.1 **冲突**、与 0.1.5 系列兼容，见变更记录）
+- `@deepseek-ai/cordis` `4.0.1` / `4.0.2` / `4.0.4`（peer，逐版本枚举）
 - `@deepseek-ai/dsh-session-persistence-jsonl`（可选，随 DSH 自带；缺失时回退到内置路径编码）
 
 ### API
@@ -65,6 +65,14 @@ pnpm add @omdp/dsh-archived-sessions -w
 
 ### 变更记录
 
+- **0.3.5**（2026-09-24）：**适配 DSH 0.1.7-rc.1 —— 修复"删除失败"**。0.1.7 的 `ctx.shell` 是「
+  `resolve(request) → spec` / `execute(spec) → ShellExecution` / `execution.result()`」三件套，
+  **没有 `run()`**（0.1.5/0.1.6 的 `run(spec)` 已移除）。旧代码 `removeDir()` 用
+  `typeof shell.run !== "function"` 做前置检查，在 0.1.7 上必然抛出
+  `shell executor unavailable; cannot delete from disk` —— 每个会话目录都在真正碰磁盘之前就被拒，
+  UI 表现为红色「删除失败 N 个会话: session-…」。修复：改用 `resolve` + `execute` + `result()`；
+  任一执行异常都包成明确的「删除失败」错误。同时把 peer 的 `@deepseek-ai/cordis: ^4.0.1`
+  范围改为逐版本枚举 `4.0.1 || 4.0.2 || 4.0.4`（本仓库规范 3：只声明实测过的版本，不用开放范围）。
 - **0.3.4**（2026-09-15）：**适配 DSH 0.1.6-alpha.1**——DSH 0.1.6 起在 web-app 内置了原生「已归档会话」设置页（`@deepseek-ai/dsh-client-ui-settings-unarchive-sessions`），它在 `settings.section` 槽位注册的 id 恰为 `archived-sessions`，与本插件旧 id 相同 → slot 冲突，**整个 Web UI 启动报「Failed to load plugins」被拦截**（运行时二分实测：去掉本插件即恢复）。修复：本插件 slot id 改为唯一的 `omdp-archived-sessions`、导航标签改为「归档会话管理」，与原生项共存（原生只有查看+恢复，删除/按树删除/孤儿清理仍是本插件能力）。其余 API 面（`sessionPersistence.list`/`workspaceRegistry`/`sessionQuery`/`shell.run`/`fs`/jsonl 路径编码）对 0.1.6-alpha.1 源码核查零差异。
 - **0.3.3**（2026-09-10）：**修复 0.3.2 的删除回归**——0.3.2 把会话根目录改为 `DSH_HOME` 推导时拼出了**混合分隔符**路径（`C:\Users\xj\.dsh/sessions/...`），而删除前校验 `assertSessionDirName` 的 basename 提取对混合分隔符失效（先按 `/` 切再按 `\` 切，把名字切成残缺片段），导致所有删除被"拒绝删除非会话目录"拦截。修复：① basename 提取改为按分隔符整体切分；② 根目录统一为 `/`。删除/孤儿清理恢复正常。
 - **0.3.2**（2026-09-10）：修两处 fork 遗留——① client 半区的模块 id 仍是 `@muwinds/dsh-archived-sessions`（未随包名改），浏览器端按 `@omdp/...` 找不到模块、设置页不显示；② 会话根目录改为从 `DSH_HOME` 环境变量推导（`<DSH_HOME>/sessions`，缺省 `~/.dsh/sessions`），不再硬编码本机路径。
@@ -113,8 +121,8 @@ pnpm add @omdp/dsh-archived-sessions -w
 
 ### Requirements
 
-- DeepSeek Harness **0.1.5-rc.1**, **0.1.5-rc.2**, **0.1.6-alpha.1** (tested; 0.3.4+ works on all three — 0.3.3 and earlier *collide* with 0.1.6-alpha.1 but are fine on 0.1.5, see changelog)
-- `@deepseek-ai/cordis` ^4.0.1 (peer)
+- DeepSeek Harness **0.1.5-rc.1**, **0.1.5-rc.2**, **0.1.6-alpha.1**, **0.1.7-rc.1** (tested; 0.3.5+ works on all four — 0.3.3 and earlier *collide* with 0.1.6-alpha.1 but are fine on 0.1.5, see changelog)
+- `@deepseek-ai/cordis` `4.0.1` / `4.0.2` / `4.0.4` (peer, enumerated per version)
 - `@deepseek-ai/dsh-session-persistence-jsonl` (optional, ships with DSH; falls back to the built-in path encoding when absent)
 
 ### API
@@ -130,6 +138,7 @@ pnpm add @omdp/dsh-archived-sessions -w
 
 ### Changelog
 
+- **0.3.5** (2026-09-24): **DSH 0.1.7-rc.1 support — fixes the "删除失败" (delete failed) banner**. 0.1.7's `ctx.shell` is the trio `resolve(request) → spec` / `execute(spec) → ShellExecution` / `execution.result()`; there is **no `run()`** any more (0.1.5/0.1.6 had `run(spec)`). The old `removeDir()` guarded on `typeof shell.run !== "function"` and therefore always threw `shell executor unavailable; cannot delete from disk` on 0.1.7 — every session directory was rejected before touching the disk, surfacing in the UI as the red banner "删除失败 N 个会话: session-…". Fix: use `resolve` + `execute` + `result()`; any execution error is wrapped into an explicit delete-failure error. Also changed the peer from the range `@deepseek-ai/cordis: ^4.0.1` to per-version enumeration `4.0.1 || 4.0.2 || 4.0.4` (repo rule 3: only declare actually-tested versions, never open ranges).
 - **0.3.4** (2026-09-15): **adapted to DSH 0.1.6-alpha.1** — since DSH 0.1.6 the web-app ships a native archived-sessions settings page (`@deepseek-ai/dsh-client-ui-settings-unarchive-sessions`) that registers the `settings.section` slot with id `archived-sessions` — exactly the id this plugin used → slot collision, and the whole Web UI boot failed with a "Failed to load plugins" screen (verified at runtime by bisecting plugin subsets: removing this plugin restores boot). Fix: this plugin's slot id is now the unique `omdp-archived-sessions` and its nav label is "归档会话管理", coexisting with the native entry (the native page only lists/restores; delete, tree-delete and orphan sweep remain this plugin's features). All other DSH surfaces used by the plugin (`sessionPersistence.list`/`workspaceRegistry`/`sessionQuery`/`shell.run`/`fs`/jsonl path encoding) verified byte- or removal-free against 0.1.6-alpha.1.
 - **0.3.3** (2026-09-10): **fixes a 0.3.2 delete regression** — 0.3.2 derived the session root from `DSH_HOME` with a **mixed-separator** path (`C:\Users\xj\.dsh/sessions/...`), and the pre-delete guard `assertSessionDirName`'s basename extraction broke on mixed separators (it sliced by `/` then by `\`, producing a truncated fragment), so every delete was rejected with "拒绝删除非会话目录". Fixed: ① basename extraction now splits on either separator; ② roots are normalized to `/`. Delete and orphan sweep work again.
 - **0.3.2** (2026-09-10): fixes two fork leftovers — ① the client half's module id was still `@muwinds/dsh-archived-sessions` (not renamed with the package), so the browser could not find the module and the settings page never rendered; ② the session root is now derived from the `DSH_HOME` environment variable (`<DSH_HOME>/sessions`, falling back to `~/.dsh/sessions`) instead of a hard-coded local path.

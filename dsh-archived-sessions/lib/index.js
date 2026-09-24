@@ -124,11 +124,17 @@ function assertSessionDirName(dirPath) {
   if (!ok) throw new Error("拒绝删除非会话目录: " + dirPath);
 }
 
-/** Delete a directory recursively through the shell executor (pwsh / rm). */
+/** Delete a directory recursively through the shell executor (pwsh / rm).
+ *
+ * DSH 0.1.7's shell service has no `run()`: a caller resolves a request into a
+ * spec, executes the spec to get a handle, then awaits the handle's `result()`.
+ * Requiring `run()` here made every delete throw "shell executor unavailable"
+ * before it ever touched the disk — the 0.3.x delete banner bug.
+ */
 async function removeDir(ctx, dirPath) {
   assertSessionDirName(dirPath);
   const shell = ctx.get("shell");
-  if (!shell || typeof shell.resolve !== "function" || typeof shell.run !== "function") {
+  if (!shell || typeof shell.resolve !== "function" || typeof shell.execute !== "function") {
     throw new Error("shell executor unavailable; cannot delete from disk");
   }
   const isWindows = /^[A-Za-z]:[\\/]/.test(dirPath);
@@ -144,7 +150,13 @@ async function removeDir(ctx, dirPath) {
   } catch (e) {
     throw new Error("shell resolve failed: " + String((e && e.message) || e));
   }
-  const result = await shell.run(spec);
+  let result;
+  try {
+    const execution = await shell.execute(spec);
+    result = await execution.result();
+  } catch (e) {
+    throw new Error("删除失败: " + String((e && e.message) || e));
+  }
   if (result && result.exitCode === 0) return;
   let detail = "";
   try {
