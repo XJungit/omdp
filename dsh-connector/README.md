@@ -1,6 +1,6 @@
 # @omdp/dsh-connector
 
-**MCP 服务器 + 用户 Skills + 魔搭市场浏览三合一设置页**（`v0.3.3`）。适合需要在 DSH 里频繁增删改 MCP server / skills、又不想手改 `cordis.patch.yml` 的用户。
+**MCP 服务器 + 用户 Skills + 魔搭市场浏览三合一设置页**（`v0.3.4`）。适合需要在 DSH 里频繁增删改 MCP server / skills、又不想手改 `cordis.patch.yml` 的用户。
 
 ## Requirements
 
@@ -8,6 +8,29 @@
 - Node.js `^22.19` 或 `>=24`
 - `@deepseek-ai/schemastery` `3.18.1` / `3.18.2` / `3.18.4`（peer 枚举，供工具过滤的 Config 声明用；无则过滤静默全放行）
 - 已实测 DSH **0.1.5-rc.1**（源码级核查，2026-09-10）、**0.1.5-rc.2** 与 **0.1.6-alpha.1**（源码级 + 运行时冒烟：`/connector/api/*` 正常服务、设置页渲染，2026-09-15，见 `docs/plugin-compatibility.md`）、**0.1.7-rc.1**（0.3.3 适配：修掉 import 期崩溃 + 迁移到 settings 托管配置，2026-09-24）
+- **`@deepseek-ai/dsh` peer 声明 `0.1.7-rc.1`**（0.3.4 起，逐版本枚举；规范见 `AGENTS.md` 规范 3）
+
+## 兼容性门禁（0.3.4 起声明）
+
+0.3.4 起本插件在 `peerDependencies` 里**显式声明支持的 DSH 版本**：
+
+```json
+"peerDependencies": {
+  "@deepseek-ai/dsh": "0.1.7-rc.1"
+}
+```
+
+这条声明由 DSH 自己的 **`evaluatePluginCompatibility()`**（`dsh-app-boot` 的公开导出，是一个 Inspector 可查的正式机制、不是本插件自造的约定）在**安装时**与**每次启动时**校验，语义是「声明版本 = 我实测过的版本」：
+
+| 运行中的 DSH | 行为 |
+|---|---|
+| **`0.1.7-rc.1`**（本次实测） | ✅ `evaluatePluginCompatibility()` 返回 `undefined` ⇒ 正常加载，与 0.3.3 行为一致 |
+| **`0.1.7` 及更新的、未实测版本** | ⛔ 门禁拦下：启动时**整个 bundle 被跳过**（stderr 打 `skipping profile bundle "@omdp/dsh-connector"`），安装时该行被置灰 |
+| **`≤0.1.6` 及 `0.1.7-alpha.x`** | ➖ **不受影响**：那些版本里**根本没有这个门禁**（经解包 npm tarball 逐版核对，`0.1.5-rc.2`/`0.1.5-rc.3`/`0.1.6-alpha.1`/`0.1.6-alpha.2`/`0.1.7-alpha.1`/`0.1.7-alpha.2` 的 `dsh-app-boot` 里 `evaluatePluginCompatibility` 出现 **0 次**，只有 `0.1.7-rc.1` 出现 4 次），旧运行时读到这条 peer 只是「不认识的声明」，照常加载 |
+
+**为什么故意只写 `0.1.7-rc.1`（而不是写老版本）**：老版本运行时压根不执行这个检查，写进去纯属装饰、无法被验证；而**未实测的新版本必须被拦住**——这正是 `AGENTS.md` 规范 3 的要求（`peerDependencies` 只精确枚举实测过的版本，禁止开放范围，未核查的版本宁可报 unmet peer 也不得预先放行）。门禁被触发时是**优雅跳过**（插件不加载、DSH 照常启动），符合本插件「硬保证 = DSH 不会因插件崩溃」的抗崩溃设计。
+
+> 升级 DSH 后若设置页突然看不到 Connector 标签，先看启动日志有没有 `skipping profile bundle`——那就是门禁在提醒你「该插件尚未针对这个 DSH 版本做兼容核查」，核查通过后把该版本追加进上面的枚举并同步更新 `docs/plugin-compatibility.md`。
 
 ## Overview
 
@@ -82,7 +105,7 @@ pnpm install --lockfile-only --offline   # 按 link 依赖重写 lockfile
 
 ```jsonc
 "dependencies": {
-  "@omdp/dsh-connector": "^0.3.0"
+  "@omdp/dsh-connector": "^0.3.4"
 }
 ```
 
@@ -183,6 +206,8 @@ pnpm remove @omdp/dsh-connector
 |---|---|
 | 设置页看不到 Connector 标签 | bundle 未挂载：确认 `dsh.profile.bundles` 含 `@omdp/dsh-connector`，重启 dsh；仍无则检查 client.js 尾部 `exports.inject = ['slots']` 是否在（缺了会静默丢注册） |
 | 工具过滤不生效（模型仍能看到/调用） | 过滤规则只对**新会话**生效（当前会话的 schema 已下发）；确认规则落盘位置正确——0.1.7+ 看 profile 条目 `connector` 的 `config.toolFilters`，rc.x 看 `~/.dsh/settings.yaml` 的 `connector.toolFilters`；再确认 serverName 拼写与 patch 一致 |
+| 升级 0.1.7 后勾好的工具过滤变回全量放行 | 0.1.7 的配置迁移会静默漏掉未声明 volatile `Config` 的段，规则被留在 `~/.dsh/settings.yaml.imported` 里；0.3.4 的 `ensureLegacyFiltersMigration()` 会在首次请求时自动搬回（日志 `migrated toolFilters from settings.yaml.imported`）。**不要删 `settings.yaml.imported`**——它是遗留配置的唯一副本。若仍未恢复，用 `PUT /connector/api/mcp/filters` 手写一次即可 |
+| 升级 DSH 后设置页整页丢失 Connector 标签、`/connector/api/*` 全 404 | 先查启动日志有无 `skipping profile bundle "@omdp/dsh-connector"`——这是 0.1.7 起的**兼容性门禁**拦下了尚未核查的 DSH 版本（见「## 兼容性门禁」）。核查通过后把该版本追加进 `peerDependencies["@deepseek-ai/dsh"]` 枚举 |
 | 保存 MCP 被拒（HTTP 400） | 配置不合法（transport/serverName/command/url 校验失败），按提示修正——插件不会写入坏配置 |
 | MCP server 保存后不生效 | 需**重启 dsh**（`dsh-mcp-client` 静态加载） |
 | `/connector/api/*` 404 | client/host 边界异常：确认插件 host 半边已加载（重启），浏览器强刷缓存 |
@@ -231,7 +256,7 @@ MIT License。安全问题请通过 GitHub Issues 私密报告（https://github.
 |---|---|---|
 | `profiles/web/cordis.patch.yml` | **读写** | MCP 块的结构化编辑（保留 `!!js`/env 原样）；0.1.7+ 工具过滤规则也由 DSH settings 服务写回本行 `config.toolFilters` |
 | `~/.dsh/skills/**/SKILL.md` | **读写** | 用户技能文件的查看/编辑/删除/新建；「记录来源」会写 `source`/`sourceUpdated` frontmatter |
-| `~/.dsh/settings.yaml` 等 | rc.x 经 settings 服务读 | 0.1.7+ 不再直接读写该文件（DSH 已改为 profile 条目托管） |
+| `~/.dsh/settings.yaml` 等 | rc.x 经 settings 服务读；0.1.7+ **只读** `settings.yaml.imported` 做一次性救援 | 0.1.7+ 不再直接读写活动配置（DSH 已改为 profile 条目托管）；`.imported` 是遗留配置唯一副本，**永不删除** |
 | HTTP `/connector/api/*` | 本机监听 | 与 DSH GUI 同源，无额外鉴权 |
 | 魔搭 `modelscope.cn/openapi/v1` | **只读外部** | 市场浏览代理（匿名）；结果仅存进程内存（30 分钟 TTL），**不写文件、不落盘** |
 | 环境变量 | 只读引用 | 只读 `process.env.*`，不持久化 |
@@ -288,11 +313,32 @@ TypeError: createRequire.resolve.paths is not a function or its return value is 
 | 魔搭市场不可达 | ✅ 市场接口报 502，本地 MCP/skill 管理不受影响 |
 
 **最后验证**：DSH `0.1.7-rc.1`（2026-09-24，本轮修复：模块 import 期零抛错，`node --check` + 实际
-`import()` 冒烟通过；工具过滤读写改用 0.1.7 的 `Config`+`.volatile()`+`settings.replace()`）。历史：
+`import()` 冒烟通过；工具过滤读写改用 0.1.7 的 `Config`+`.volatile()`+`settings.replace()`；
+0.3.4 追加 `@deepseek-ai/dsh` peer 声明并用 DSH 真实 `evaluatePluginCompatibility()` 验证门禁行为、
+追加遗留 `toolFilters` 一次性救援）。历史：
 DSH `0.1.0-rc.8`（2026-08-20）；0.2.0 市场功能以 `node --check` + 真实 HTTP 集成测试通过（11 项：
 skills/mcp 列表与详情、证书/Hosted 标识、安装命令、记录来源回写、更新判定），未改动 DSH 实例。
 
 ## 变更记录
+
+- **0.3.4**（2026-09-24）：**声明 DSH 版本支持 + 修复工具过滤被静默清空**。
+  1. **`@deepseek-ai/dsh` peer 声明 `0.1.7-rc.1`**（逐版本枚举，语义见上方「## 兼容性门禁」）。
+     用 DSH 真实的 `evaluatePluginCompatibility()` 逐一验证：`0.1.7-rc.1` → 正常加载；
+     `0.1.7-alpha.2` / `0.1.6-alpha.1` / `0.1.5-rc.3` / `0.1.8-rc.1` → 被门禁拦下（前者是老运行时
+     无门禁、后者是未实测的新版本，均符合规范 3）。
+  2. **修复工具过滤丢失（根因：DSH 0.1.7 的配置迁移是「全有或全无」）** —— 0.1.7 首次启动会把
+     `<DSH_HOME>/settings.yaml` 改名为 `settings.yaml.imported` 并逐段导入 profile 条目；该导入
+     对**没有 volatile `Config` 声明的段**会**静默跳过**（只往 stderr 打一行 `settings: section …
+     was not imported`）。本插件 0.3.3 才刚引入 `Config`，所以用户机器上 `connector.toolFilters`
+     被落在 `settings.yaml.imported` 里没搬过来 ⇒ 过滤规则读成空 ⇒ **全量放行**（表现为
+     「设置页里勾的过滤没了」）。
+     修复：新增 `ensureLegacyFiltersMigration()`，在**路由处理前**（`apply()` 期间 `settings.replace()`
+     不可用，因为该条目 fiber 尚未进入 ACTIVE 状态）检查一次——若活的 `config.toolFilters` 为空、
+     而 `settings.yaml.imported` 里还留着 `connector.toolFilters`，就把它写回本插件的 profile 条目
+     并打一行 `migrated toolFilters from settings.yaml.imported`。失败时复位重试标记，下一次请求再试。
+     一次性且幂等：已有非空过滤规则时**不覆盖用户当前设置**。
+  3. `settings.yaml.imported` **只读、绝不删除**——它是遗留配置的唯一副本（0.1.7 迁移后就地改名，
+     原始 `settings.yaml` 已不存在；DSH 内置导入器见到 `.imported` 不会再跑）。
 
 - **0.3.3**（2026-09-24）：**适配 DSH 0.1.7-rc.1**。
   1. **修复 import 期崩溃**：`jsdom` 由顶层静态 import 改为按需 `await import()`（原因见上方

@@ -93,6 +93,8 @@ export const Config = (typeof _toolFiltersField.volatile === 'function')
 let _filterRef = null     // 0.1.7+: config.toolFilters 这个活 Ref
 let _legacyScope = null   // rc.x: settings.register(...) 返回的 scope
 let _legacySvc = null     // rc.x: settings 服务（读用 get，写用 update）
+let _settingsSvc = null   // 0.1.7+: ctx.settings（迁移写回用，见 ensureLegacyFiltersMigration）
+let _migrationAttempted = false
 function readToolFilters() {
   try {
     // 优先 0.1.7+ 的活 Ref（.get() 每次返回最新值）
@@ -116,6 +118,54 @@ function normalizeToolFilters(filters) {
     out[server] = { allow }
   }
   return out
+}
+
+/* ── 0.1.7 迁移遗留救援 ──────────────────────────────────────────────────────
+ * DSH 0.1.7 启动时把 <home>/settings.yaml 改名为 settings.yaml.imported，再把每个
+ * section 当作对应 entry 的 config override 调 settings.update(ns, values) 写回。
+ * 而 update() 走 write()，要求该 entry 的 Config 含 volatile 字段，否则抛
+ * 「Config field ... is not volatile」，只打一条 warn 就跳过——配置静默留在
+ * .imported 里，插件再也看不到它（UI 显示「未配置 = 全量放行」，用户以为改动被吞）。
+ *
+ * 本插件 0.3.2 及更早没有 volatile 的 toolFilters，升级 0.1.7 时用户的过滤规则
+ * 就是这样丢的。0.3.3 补上了 volatile Config（写入通道已通），但已经丢过一次的
+ * 数据不会自己回来，所以这里做一次性救援：把滞留在 .imported 的 connector 节
+ * 搬进 profile entry 的 config（即 cordis.patch.yml 的 connector 行）。
+ *
+ * 时序：settings.replace() 要求该 entry 的 fiber 处于 ACTIVE(2)——apply() 期间
+ * 还没到，所以这里只在惰性调用（首次读 filters 的路由）里跑，绝不放进 apply()。
+ * 语义：只搬一次；本插件已有配置时不动（避免覆盖用户后来的修改）；失败不抛错
+ * （GET 必须可用），留给下一次请求重试。
+ */
+async function ensureLegacyFiltersMigration() {
+  if (_migrationAttempted) return
+  _migrationAttempted = true
+  try {
+    if (!_filterRef || !_settingsSvc || typeof _settingsSvc.replace !== 'function') return
+    // 已有配置 → 用户在新后端上配过了，不要覆盖。
+    const existing = normalizeToolFilters(_filterRef.get())
+    if (Object.keys(existing).length > 0) return
+    // 读遗留文档：不存在 = 全新安装或已被内置导入器处理过，无事可做。
+    let text
+    try {
+      text = await readFile(join(resolveHome(), 'settings.yaml.imported'), 'utf8')
+    } catch {
+      return
+    }
+    let doc
+    try { doc = parseYaml(text) } catch { return }
+    if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return
+    const block = doc[CONNECTOR_SETTINGS_NS]
+    const migrated = normalizeToolFilters(block && block.toolFilters)
+    if (Object.keys(migrated).length === 0) return
+    await _settingsSvc.replace(CONNECTOR_ENTRY_ID, { toolFilters: migrated })
+    console.info('[dsh-connector] migrated toolFilters from settings.yaml.imported:', Object.keys(migrated).join(', '))
+  } catch (error) {
+    // 写失败（entry 尚未 ACTIVE、revision 冲突等）：清标记让下一次请求重试，
+    // 否则一次过早的调用会永久放弃救援。
+    _migrationAttempted = false
+    console.warn('[dsh-connector] toolFilters migration skipped:', error?.message ?? error)
+  }
 }
 // 公开名 `mcp__<server>__<raw>` 反解回 (server, raw)：注意 serverName 本身可含
 // 下划线，所以按 `mcp__` 前缀 + __ 分段取“第一段”为 server，余下 join 回 raw。
@@ -987,7 +1037,8 @@ export function apply(ctx, config) {
     const field = config && config.toolFilters
     if (field && typeof field.get === 'function') {
       _filterRef = field
-      ctx.effect(() => () => { _filterRef = null }, 'connector: release tool filter ref')
+      _settingsSvc = ctx.get('settings') || null
+      ctx.effect(() => () => { _filterRef = null; _settingsSvc = null }, 'connector: release tool filter ref')
     } else {
       // ── rc.x 老后端：注册 settings namespace（本插件自己的两段式配置）──
       const settings = ctx.get('settings')
@@ -1038,6 +1089,11 @@ export function apply(ctx, config) {
     const path = url.pathname
     try {
       if (!path.startsWith(API_PREFIX)) { res.writeHead(404); res.end(); return }
+
+      // 首次请求时救援 0.1.7 迁移遗留的 toolFilters（见 ensureLegacyFiltersMigration）。
+      // 放在这里而不是 apply()：settings.replace() 要求本 entry 已 ACTIVE。
+      // 成功后 _migrationAttempted 短路，后续请求零开销。
+      await ensureLegacyFiltersMigration()
 
       // GET /api/mcp — list server entries (with preserve buckets)
       if (req.method === 'GET' && path === API_PREFIX + '/mcp') {
