@@ -4,13 +4,31 @@
 
 **为 [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) 提供多 key 池 + 自动轮换**——插件位于 LLM 适配器与凭证存储之间：每次请求前从按 provider 分组的 key 池里选一把，预写入该 provider 的凭证引用；遇到配置的触发错误时，把失败 key 标记为冷却（固定 `cooldownMs`，无指数退避）并前进到下一把。**重发完全交给 DSH 自带的 `dsh-llm-retry`**——本插件从不自行重发，只负责换 key，重试策略由 retry policy 决定。
 
-当前版本：**v3.2.0**（v7 UI 代）。
+当前版本：**v3.2.1**（v7 UI 代）。
 
 ## 环境要求
 
 - DeepSeek Harness 带 `web` profile GUI（`npx @deepseek-ai/dsh web`）
 - Node.js `^22.19` 或 `>=24`
 - peer 范围**只枚举已实际进行过兼容测试的版本**——`@deepseek-ai/dsh-credentials` `0.1.0-rc.6 || 0.1.1-rc.2 || 0.1.2-alpha.1 || 0.1.2-alpha.2 || 0.1.2-alpha.3 || 0.1.2-alpha.4 || 0.1.2-alpha.5 || 0.1.2-rc.1 || 0.1.5-rc.1 || 0.1.5-rc.2 || 0.1.5-rc.3 || 0.1.6-alpha.1 || 0.1.7-rc.1`、`@deepseek-ai/dsh-llm` / `@deepseek-ai/dsh-settings` `0.1.1-rc.2 || 0.1.2-alpha.1 || 0.1.2-alpha.2 || 0.1.2-alpha.3 || 0.1.2-alpha.4 || 0.1.2-alpha.5 || 0.1.2-rc.1 || 0.1.5-rc.1 || 0.1.5-rc.2 || 0.1.5-rc.3 || 0.1.6-alpha.1 || 0.1.7-rc.1`、`@deepseek-ai/cordis` `4.0.1 || 4.0.2 || 4.0.4`、`@deepseek-ai/schemastery` `3.18.1 || 3.18.2 || 3.18.4`。不使用 `<0.2.0`、caret 之类的开放范围：未测试版本在核查通过前刻意排除。插件只使用 credential-reference 半边（`resolve`/`describe`/`set`/`unset`/`credentialRef`，自 `0.1.0-rc.6` 起稳定）与 `agent/request` + `agent/request-error` waterfall（载荷跨上述枚举版本未变）；`isCredentialRefName`（rc.8 新增）本地实现兜底。`0.1.2-alpha.2 → alpha.5 → 0.1.2-rc.1` 配套包逐字节一致（2026-09-03 复核），故 DSH `0.1.2-rc.1`（`next`）无需改动插件。
+
+## v3.2.1 新增
+
+- **救回滞留在 `settings.yaml.imported` 里的池**（2026-09-24）。`0.1.7` 的一次性导入器会在写入任何东西**之前**
+  先把 `settings.yaml` 改名为 `settings.yaml.imported`——所以某段导入失败时（典型：目标条目没声明 volatile 字段）
+  它永远不会重试，池子会永久留在 `.imported` 里。表现恰是：徽标显示 **「尚未启用」**、页面显示
+  **「还没有任何池，点上方「启用新 provider 池」开始。」**，尽管池子就在磁盘上。
+  注意**文件回退在 v3.2.0 里本来就写了**（`readSettingsFromFile()` 会在 `settings.yaml` 缺失时退读
+  `settings.yaml.imported`）——但在 `0.1.7` 上它**永远轮不到**：只要 `_liveRef` 非空，
+  `readSettings()` 第一行就从 live-ref 分支返回，而 ref 里是 `{}`。**真正缺的不是又一个读回退，
+  而是两个后端之间的一座桥。**
+  `v3.2.1` 在**首个 HTTP 请求**时做一次性显式搬运（不在 `apply()` 里——原因见下）：
+  当 live 配置里 provider 数为 0 *且* 旧文件里有池时，经 `settings.replace()` 写进 profile 条目。
+  标记文件（`<DSH_HOME>/.key-fallback-migrated`）保证「真正只做一次」，因此有意删光所有池后不会在下次启动被复活。
+  - **为什么不能放在 `apply()`：** `settings.replace()` 走 `configEditor.edit()`，要求本 entry 的 fiber 已
+    **ACTIVE**——`describe()` 会跳过 `fiber.state !== 2` 的条目，而 `apply()` 执行时 fiber 还在创建中，
+    调用必抛 `No configurable plugin entry`。首个 UI 请求（`/pools`）才是最早的安全时机。
+  - 标记**只在落盘成功之后**才写，因此写失败会在下次启动重试。
 
 ## v3.2.0 新增
 

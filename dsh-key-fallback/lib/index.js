@@ -42,6 +42,8 @@ const SETTINGS_FILE = join(DSH_HOME, 'settings.yaml')
 const SETTINGS_FILE_IMPORTED = SETTINGS_FILE + '.imported'
 const CRED_FILE = join(DSH_HOME, '.credentials.yaml')
 const BACKUP_DIR = join(DSH_HOME, 'backups')
+// 一次性 legacy→profile 迁移的标记（见 apply() 里的迁移块）。
+const MIGRATED_MARKER = join(DSH_HOME, '.key-fallback-migrated')
 if (!existsSync(BACKUP_DIR)) try { mkdirSync(BACKUP_DIR, { recursive: true }) } catch (e) {}
 let _backupCounter = 0
 function tsName(prefix) {
@@ -254,6 +256,39 @@ export function apply(ctx, config) {
       diag('settings', 'backend = settings.yaml file (rc.x)')
     }
   } catch (e) { diag('settings', 'probe failed: ' + ((e && e.message) || e)) }
+
+  // ── 一次性迁移：老 settings.yaml(.imported) 里的池 → settings 托管的 entry config ──
+  // 0.1.7 的 importLegacyDocument() 在首次写入前就把 settings.yaml 改名成
+  // settings.yaml.imported，而本机的池恰好躺在 .imported 里 —— 迁移入口已永久失活，
+  // 池不会自己回到 UI（表现为徽标「尚未启用」+「还没有任何池」）。
+  //
+  // 必须在首个 HTTP 请求时做，不能在这里（apply 期间）做：settings.replace() 走
+  // configEditor.edit()，要求本 entry 的 fiber 已 ACTIVE（describe() 会跳过
+  // state !== 2 的 entry），apply() 执行时 fiber 尚在创建中，必然抛
+  // "No configurable plugin entry"。UI 打开设置页就会请求 /pools，时机正好。
+  // 标记文件保证「真正只做一次」：否则用户有意清空所有池后，下次启动又会灌回来。
+  let _migrationAttempted = false
+  async function ensureLegacyMigration() {
+    if (_migrationAttempted) return
+    _migrationAttempted = true
+    try {
+      if (!_liveRef || existsSync(MIGRATED_MARKER)) return
+      if (Object.keys((_cache && _cache.providers) || {}).length > 0) return
+      const migrated = (readSettingsFromFile() || {}).providers || {}
+      const names = Object.keys(migrated)
+      if (names.length === 0) {
+        // 无可搬运内容：也落标记（空文件算「已处理过」），避免每次启动重复探测。
+        try { writeFileSync(MIGRATED_MARKER, new Date().toISOString() + '\n', 'utf8') } catch (e) {}
+        return
+      }
+      // 直接 await 真正的 replace：只有落盘成功才写标记，否则下次启动还能重试。
+      if (!_settingsSvc || typeof _settingsSvc.replace !== 'function') return
+      _cache = { providers: cloneJson(migrated) }
+      await _settingsSvc.replace(ENTRY_ID, { providers: cloneJson(migrated) })
+      try { writeFileSync(MIGRATED_MARKER, new Date().toISOString() + '\n', 'utf8') } catch (e) {}
+      diag('migrate', 'imported ' + names.length + ' provider(s) from settings.yaml(.imported): ' + names.join(','))
+    } catch (e) { diag('migrate', 'failed: ' + ((e && e.message) || e)) }
+  }
   // ── 包装 credentials.resolve：ref 命中池 env 时返回池当前 key（llm-pi-ai 唯一读取入口）──
   const poolsByEnv = new Map()
   const credSvc = ctx.credentials
@@ -541,6 +576,11 @@ export function apply(ctx, config) {
   if (webServer) {
     const route = async (req, res) => {
       try {
+        // 首次请求时补做 legacy 池迁移（此时 fiber 已 ACTIVE，settings.replace 可用）。
+        // 放在所有分支之前，保证无论 UI 先请求哪个端点，池都已被搬进 live 配置。
+        // 首次请求时补做 legacy 池迁移（此时 fiber 已 ACTIVE，settings.replace 可用）。
+        // 放在所有分支之前，保证无论 UI 先请求哪个端点，池都已被搬进 live 配置。
+        await ensureLegacyMigration()
         const url = new URL(req.url, 'http://127.0.0.1')
         const path = url.pathname.replace(new RegExp('^' + API_BASE + '/?'), '').replace(/\/$/, '')
         const readBody = () => new Promise((resolve, reject) => {

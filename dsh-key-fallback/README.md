@@ -4,7 +4,28 @@
 
 **Multi-key API key pool with automatic rotation for [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness)** — sits between the LLM adapter and the credential store. Before each request the plugin picks a key from the per-provider pool and pre-writes it into the provider's credential reference; when a configured trigger error occurs it marks the failed key cooling (fixed `cooldownMs`, no exponential backoff) and advances to the next key. **Re-sending is left entirely to DSH's own `dsh-llm-retry`** — this plugin never re-sends on its own; it only switches the key and lets the retry policy decide.
 
-Current version: **v3.2.0** (`v7` UI generation).
+Current version: **v3.2.1** (`v7` UI generation).
+
+## What v3.2.1 offers
+
+- **Rescues pools stranded in `settings.yaml.imported`** (2026-09-24). `0.1.7`'s one-shot importer
+  **renames `settings.yaml` to `settings.yaml.imported` before it writes anything**, so if a section fails to
+  import (e.g. the target entry declares no volatile field) it never retries and the pools sit in
+  `.imported` forever. The symptom is exactly: badge shows **"尚未启用"** and the page shows
+  **"还没有任何池，点上方「启用新 provider 池」开始。"** even though the pools are on disk.
+  Note the file fallback was *already* there in v3.2.0 (`readSettingsFromFile()` falls back to
+  `settings.yaml.imported`) — but on `0.1.7` it is **never reached**, because `readSettings()` returns from the
+  live-ref branch first whenever `_liveRef` is set, and the ref holds `{}`. What was missing was a **bridge
+  between the two backends**, not another read fallback.
+  `v3.2.1` performs a **one-time explicit migration** on the first HTTP request (not in `apply()` — see below):
+  when the live config has zero providers *and* the legacy file has some, it writes them into the profile entry via
+  `settings.replace()`. A marker file (`<DSH_HOME>/.key-fallback-migrated`) makes it genuinely once-only, so
+  deliberately deleting every pool does not resurrect them on the next boot.
+  - **Why not in `apply()`:** `settings.replace()` goes through `configEditor.edit()` and requires the entry's fiber
+    to be **ACTIVE** — `describe()` skips entries whose `fiber.state !== 2`, and during `apply()` the fiber is still
+    being created, so the call throws `No configurable plugin entry`. The first UI request (`/pools`) is the
+    earliest safe moment.
+  - The marker is written **only after** the persist succeeds, so a failed write is retried on the next boot.
 
 ## Requirements
 
