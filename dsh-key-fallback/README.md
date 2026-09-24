@@ -4,7 +4,17 @@
 
 **Multi-key API key pool with automatic rotation for [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness)** — sits between the LLM adapter and the credential store. Before each request the plugin picks a key from the per-provider pool and pre-writes it into the provider's credential reference; when a configured trigger error occurs it marks the failed key cooling (fixed `cooldownMs`, no exponential backoff) and advances to the next key. **Re-sending is left entirely to DSH's own `dsh-llm-retry`** — this plugin never re-sends on its own; it only switches the key and lets the retry policy decide.
 
-Current version: **v3.2.1** (`v7` UI generation).
+Current version: **v3.2.2** (`v7` UI generation).
+
+## What v3.2.2 offers
+
+- **Declares its DSH version support** (2026-09-24): a new `@deepseek-ai/dsh` peer entry
+  (`0.1.7-rc.1`, enumerated per version) so the supported runtime is explicit. DSH's own
+  `evaluatePluginCompatibility()` (`dsh-app-boot`) enforces it at install time and on boot — an untested
+  newer runtime has the bundle **gracefully skipped** (`skipping profile bundle` on stderr, DSH still
+  boots) instead of failing in some undefined way. The gate only exists from DSH `0.1.7`, so runtimes
+  `≤0.1.6` merely see an unrecognized peer and are unaffected (this plugin already worked there through
+  the file backend). Only tested versions are named — no open ranges (repo rule 3).
 
 ## What v3.2.1 offers
 
@@ -31,7 +41,7 @@ Current version: **v3.2.1** (`v7` UI generation).
 
 - DeepSeek Harness with a `web`-profile GUI (`npx @deepseek-ai/dsh web`)
 - Node.js `^22.19` or `>=24`
-- Peer ranges strictly enumerate **only compatibility-tested versions** — `@deepseek-ai/dsh-credentials` `0.1.0-rc.6 || 0.1.1-rc.2 || 0.1.2-alpha.1 || 0.1.2-alpha.2 || 0.1.2-alpha.3 || 0.1.2-alpha.4 || 0.1.2-alpha.5 || 0.1.2-rc.1 || 0.1.5-rc.1 || 0.1.5-rc.2 || 0.1.5-rc.3 || 0.1.6-alpha.1 || 0.1.7-rc.1`, `@deepseek-ai/dsh-llm` / `@deepseek-ai/dsh-settings` `0.1.1-rc.2 || 0.1.2-alpha.1 || 0.1.2-alpha.2 || 0.1.2-alpha.3 || 0.1.2-alpha.4 || 0.1.2-alpha.5 || 0.1.2-rc.1 || 0.1.5-rc.1 || 0.1.5-rc.2 || 0.1.5-rc.3 || 0.1.6-alpha.1 || 0.1.7-rc.1`, `@deepseek-ai/cordis` `4.0.1 || 4.0.2 || 4.0.4`, `@deepseek-ai/schemastery` `3.18.1 || 3.18.2 || 3.18.4`. No open-ended ranges (`<0.2.0`, caret): untested versions are deliberately excluded until verified. The plugin only uses the credential-reference half (`resolve`/`describe`/`set`/`unset`/`credentialRef` — stable since `0.1.0-rc.6`) and the `agent/request` + `agent/request-error` waterfall (payload unchanged across the enumerated versions); `isCredentialRefName` (added `rc.8`) is implemented locally for compatibility. The `0.1.2-alpha.2 → alpha.5 → 0.1.2-rc.1` companion packages are byte-identical (2026-09-03 verified), so DSH `0.1.2-rc.1` (`next`) needs no plugin change.
+- Peer ranges strictly enumerate **only compatibility-tested versions** — `@deepseek-ai/dsh` `0.1.7-rc.1` (the plugin's claimed DSH runtime; the gate that enforces it only exists from 0.1.7, so older runtimes just see an unrecognized peer), `@deepseek-ai/dsh-credentials` `0.1.0-rc.6 || 0.1.1-rc.2 || 0.1.2-alpha.1 || 0.1.2-alpha.2 || 0.1.2-alpha.3 || 0.1.2-alpha.4 || 0.1.2-alpha.5 || 0.1.2-rc.1 || 0.1.5-rc.1 || 0.1.5-rc.2 || 0.1.5-rc.3 || 0.1.6-alpha.1 || 0.1.7-rc.1`, `@deepseek-ai/dsh-llm` / `@deepseek-ai/dsh-settings` `0.1.1-rc.2 || 0.1.2-alpha.1 || 0.1.2-alpha.2 || 0.1.2-alpha.3 || 0.1.2-alpha.4 || 0.1.2-alpha.5 || 0.1.2-rc.1 || 0.1.5-rc.1 || 0.1.5-rc.2 || 0.1.5-rc.3 || 0.1.6-alpha.1 || 0.1.7-rc.1`, `@deepseek-ai/cordis` `4.0.1 || 4.0.2 || 4.0.4`, `@deepseek-ai/schemastery` `3.18.1 || 3.18.2 || 3.18.4`. No open-ended ranges (`<0.2.0`, caret): untested versions are deliberately excluded until verified. The plugin only uses the credential-reference half (`resolve`/`describe`/`set`/`unset`/`credentialRef` — stable since `0.1.0-rc.6`) and the `agent/request` + `agent/request-error` waterfall (payload unchanged across the enumerated versions); `isCredentialRefName` (added `rc.8`) is implemented locally for compatibility. The `0.1.2-alpha.2 → alpha.5 → 0.1.2-rc.1` companion packages are byte-identical (2026-09-03 verified), so DSH `0.1.2-rc.1` (`next`) needs no plugin change.
 
 ## What v3.2.0 offers
 
@@ -124,7 +134,12 @@ dsh plugin --profile web add link:D:/WorkSpace/omdp/dsh-key-fallback
 # restart DSH, then open Settings → API Key 回退
 ```
 
-> Note: the profile currently installs the package from npm (`^3.x`) into `~/.dsh/profiles/web/node_modules/@omdp/dsh-key-fallback`; copying updated `lib/index.js` + `lib/client.js` there and restarting DSH picks up a newer version. The package declares a `dsh.bundle.patch`, so it activates automatically — no manual `cordis.patch.yml` editing.
+> **To upgrade, move the profile pin — do not copy files into `node_modules`.** A hand-copied
+> `lib/index.js` looks like it works until something re-runs `pnpm install` (DSH does this on boot), at
+> which point pnpm restores the version recorded in `pnpm-lock.yaml` and the "fix" silently disappears.
+> Edit the version in `~/.dsh/profiles/web/package.json`, then run `pnpm install` in that directory and
+> restart DSH. The package declares a `dsh.bundle.patch`, so it activates automatically — no manual
+> `cordis.patch.yml` editing.
 
 ## HTTP API (host)
 
