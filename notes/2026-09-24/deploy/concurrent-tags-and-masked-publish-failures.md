@@ -108,6 +108,52 @@ tag 命名沿用 `<version>-<plugin>`。
 - **本机 npm 未登录（`ENEEDAUTH`）不影响 CI 发布**：发布走 GitHub Actions + `NPM_TOKEN`
   secret，本机不需要 `npm login`；本机只读探测要加 `--registry`。
 
+## 结果 / 验证（2026-09-24 实测）
+
+修好 workflow 后，**单独**重推 `v3.2.2-key-fallback` 触发一次干净 run：
+
+- 第一次（08:54）**明确报错**——正是我们要的行为：
+  ```
+  skip: @omdp/dsh-connector@0.3.4 is already published
+  skip: @omdp/dsh-vision-bridge@0.1.12 is already published
+  npm error 409 Conflict - PUT https://registry.npmjs.org/@omdp%2fdsh-key-fallback
+            - Cannot publish over previously staged version "3.2.2".
+  ##[error]Process completed with exit code 1.
+  ```
+  ⇒ **失败不再被伪装**（对比旧写法这里是绿色的）。这里的 409 不是失败，而是
+  「上一轮那三个并发 run 里，已经有人把 3.2.2 送进暂存队列了」——npm 不允许重复提交。
+- 等暂存处理完成（约几分钟），3.2.2 自己出现在 registry 上。
+- 再次重推同一个 tag（08:57）：**四个包全部 skip → conclusion=success**，
+  证明新 workflow 幂等且不再哄骗：
+
+  ```
+  skip: @omdp/dsh-connector@0.3.4 is already published
+  skip: @omdp/dsh-vision-bridge@0.1.12 is already published
+  skip: @omdp/dsh-key-fallback@3.2.2 is already published
+  skip: @omdp/dsh-archived-sessions@0.3.6 is already published
+  ```
+
+### registry 最终状态（直接查 registry.npmjs.org）
+
+| 包 | latest | packument 收录该版本 | tarball |
+|---|---|---|---|
+| `@omdp/dsh-connector` | `0.3.4` | ✅ | HTTP 200 |
+| `@omdp/dsh-key-fallback` | `3.2.2` | ✅ | HTTP 200 |
+| `@omdp/dsh-archived-sessions` | `0.3.6` | ✅ | HTTP 200 |
+
+下载 tarball 核对（内容与本地一致）：
+
+- **peer 声明**都含 `@deepseek-ai/dsh: 0.1.7-rc.1`（规范 3 要求）。
+- connector `index.js`：`ensureLegacyFiltersMigration` ×4、`settings.yaml.imported` ×3、`_settingsSvc` ×6；
+- archived-sessions `lib/index.js`：`useExecute` ×4、`useRun` ×2、`execution.result()` ×1；
+- key-fallback `lib/index.js`：`key-fallback-migrated` 标记存在。
+
+腾讯镜像（本机 pnpm 默认 `mirrors.tencent.com/npm/`）也已在数分钟内同步到三个新版本，
+`npm view <pkg>@<ver> version` 直接返回版本号。
+
+> **时间线小结**：08:44 三 tag 并发（假成功）→ 08:47 直查 registry 发现 key-fallback 缺失
+> → 08:54 修复后单 tag 重推，报出真实的 409（正是暂存冲突）→ 08:57 幂等重推全 skip 成功。
+
 ## 相关文件
 
 - `.github/workflows/publish.yml`：改为「探测 registry → 跳过已发布 → 其余失败即失败」的单步循环
