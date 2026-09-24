@@ -39,13 +39,16 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-GitHub Actions 自动执行 `publish.yml`：
-- `dsh-connector/` → `npm publish` → `@omdp/dsh-connector@0.1.0`
-- `dsh-vision-bridge/` → `npm publish` → `@omdp/dsh-vision-bridge@0.1.0`
+GitHub Actions 自动执行 `publish.yml`，遍历四个包目录依次发布（已存在的版本跳过）：
+- `dsh-connector/` → `@omdp/dsh-connector`
+- `dsh-vision-bridge/` → `@omdp/dsh-vision-bridge`
+- `dsh-key-fallback/` → `@omdp/dsh-key-fallback`
+- `dsh-archived-sessions/` → `@omdp/dsh-archived-sessions`
 
 > `dsh-gitbash-win/` 与 `dsh-resume-stream/` 的发布步骤已随归档移除，不再由本仓库发布。
 
 到 https://github.com/XJungit/omdp/actions 看运行结果，绿色 = 发布成功。
+⚠️ **但绿色不等于真的发出去了**——务必再用 registry 复核（见下方「注意事项」）。
 
 ---
 
@@ -141,33 +144,51 @@ pnpm install
 ### 更新流程（之后每次）
 
 1. 改代码 → 提交推送到 GitHub
-2. 升版本 + 打 tag：
+2. 升版本（**只升你动过的包**）+ 打 tag，**tag 格式 `<version>-<plugin>`**，且
+   **一次只推一个 tag**：
    ```sh
-   # 改各子目录 package.json 的 version（三个包一起升）
-   git add -A && git commit -m "release v0.1.1"
-   git tag v0.1.1
-   git push origin master && git push origin v0.1.1
+   # 改对应子目录 package.json 的 version
+   git add -A && git commit -m "release ..."
+   git tag v0.3.4-dsh-connector
+   git push origin master && git push origin v0.3.4-dsh-connector
    ```
-3. Actions 自动发新版本
+3. Actions 自动发新版本（workflow 会遍历所有包，已存在的版本跳过、其余照发）
 4. 本机更新：
    ```sh
    cd ~/.dsh/profiles/web
-   pnpm update @omdp/dsh-connector @omdp/dsh-vision-bridge
+   pnpm update @omdp/dsh-connector
    ```
+
+> ⚠️ **一次只推一个 tag**。`on: push: tags` 是**每个 tag 一个 run**，而每个 run 都会
+> 遍历全部包去 publish。同时推 3 个 tag ⇒ 3 个 run 并发争抢同一批版本 ⇒ npm 拒绝重复
+> 提交（`E409 Cannot publish over previously staged version` / `E403 ... cannot publish
+> over the previously published versions`），而每个 run 里**都有某个包侥幸成功**，
+> 于是「看起来都成功、实际各漏一部分」。本轮实测就踩了这个坑。
 
 ---
 
 ## 注意事项
 
-- **版本号**：三个子目录的 `package.json` 的 `version` 决定 npm 版本。tag 名
-  （`v0.1.0`）只是触发条件，不影响包版本。三个包通常一起升（workflow 每次
-  都发全部三个，已存在的版本会被容错跳过）。
-- **tag 名**：必须匹配 `v*`（workflow 触发条件）。
-- **重复发布**：npm 不允许同版本号重复发布。workflow 已加
-  `|| echo "skip: version already published"` 容错，但**正式发布时仍建议三个
-  包版本同步升**，避免某个包漏发。
+- **版本号**：各子目录的 `package.json` 的 `version` 决定 npm 版本。tag 名只是触发
+  条件，不影响包版本。workflow 每次遍历全部包，**已存在的版本会被跳过**，未发布的照发。
+- **tag 名**：必须匹配 `v*`（workflow 触发条件）；本仓库约定 `<version>-<plugin>`
+  （如 `v0.3.4-dsh-connector`、`v3.2.2-key-fallback`），便于回溯是哪个包哪一版。
+- **重复发布与真实失败必须区分开**：workflow 现在先 `npm view "$name@$ver"` 探测，
+  只有「确实已发布」才跳过；**任何其他失败都会让 job 明确失败**。
+  > 历史教训：旧写法是 `npm publish ... || echo "skip: version already published"`，
+  > 它把**真实失败**（401/403/409）也伪装成 success——2026-09-24 三个 tag 并发导致
+  > `@omdp/dsh-key-fallback@3.2.2` 实际没发出去，而 workflow 全部报
+  > `conclusion=success`，只能靠直接查 registry 才发现。
+  > **判定「发出去了没有」永远以 registry 为准**（`npm view <pkg>@<ver> version` 或
+  > `curl https://registry.npmjs.org/<urlencoded-name>/<ver>`），不要相信 job 的绿色勾。
 - **provenance**：workflow 用了 `--provenance`（npm 来源证明），需要 GitHub 的
   `id-token: write` 权限（已配置）。若你的 npm 账号不支持 provenance，可去掉
   `--provenance` 参数。
 - **根 package.json**：仓库根的 `package.json` 是裸镜像（名字是
-  `@omdp/dsh-connector`），**不要发布它**——workflow 只在三个子目录里 publish。
+  `@omdp/dsh-connector`），**不要发布它**——workflow 只在四个子目录里 publish。
+- **npm 新版是「暂存发布」（staged publishing）**：`npm publish` 可能先把 tarball 放进
+  暂存队列并提示 `Your package is being processed and may take a few minutes to become
+  available`，**版本号会被立即占用**（此时重复发布同一版本会报
+  `E409 Cannot publish over previously staged version`），但在审核/处理完成前
+  `npm view <pkg>@<ver>` 仍可能 404。所以**上传成功 ≠ 立刻可安装**，查不到时先等几分钟
+  再重查，别急着重复发（重复发反而会被 409 拦下）。
