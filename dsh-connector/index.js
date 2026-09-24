@@ -26,8 +26,16 @@ import { spawnSync } from 'node:child_process'
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
-import { JSDOM, VirtualConsole } from 'jsdom'
 import z from '@deepseek-ai/schemastery'
+// NOTE: `jsdom` is deliberately NOT imported at module scope. A static import
+// pulls in jsdom -> whatwg-url -> tr46, and tr46/index.js:3 does
+// `require("punycode/")`. Under DSH 0.1.7's ResolutionRouter that subpath form
+// resolves `createRequire(...).resolve.paths("punycode")` to null, which the
+// router iterates without a guard (dsh-app-boot/lib/index.js:1414) and throws
+// `TypeError: createRequire.resolve.paths is not a function or its return value
+// is not iterable` — killing this whole plugin's import (fiber never created,
+// UI shows "已安装，重启后生效"). Only the ModelScope WAF challenge needs jsdom,
+// so it is loaded lazily there and the failure is local to that feature.
 
 const API_PREFIX = '/connector/api'
 const SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
@@ -41,12 +49,14 @@ const TRANSPORTS = new Set(['stdio', 'streamable-http'])
 // patch file itself (NUL, control chars). Tab/newline are already rejected by
 // the single-token rules; this catches the rest defensively.
 const CONTROL_CHARS = /[\x00-\x1f\x7f]/
+// 0.1.7 移除了 settings.register/get/update；`settings` 服务本身仍需存在（本插件的
+// Config 条目才会进入组合树并被托管），且老版本（0.1.5/0.1.6 rc.x）仍走它的
+// register/get/update 老 API，所以 inject 保留。
 export const inject = ['webServer', 'settings']
 
 // ── MCP 工具过滤（tool-filter, 0.3.0 新增）────────────────────────────
 // dsh-mcp-client 的 Config schema 是封闭的：未知键会拒收并导致下次启动失败，
-// 所以过滤规则不能写进 mcp-* 行的 config，只能放在 connector 自己的 settings
-// namespace（settings.yaml `connector:` 节）里：
+// 所以过滤规则不能写进 mcp-* 行的 config，只能放在 connector 自己的配置里：
 //   connector:
 //     toolFilters:
 //       <serverName>:
@@ -56,24 +66,56 @@ export const inject = ['webServer', 'settings']
 //   1. systemPrompt.tools(provider) —— 提示词里的 schema 列表先过滤，模型看不到被滤掉的工具；
 //   2. ctx.tools.guard —— 执行期硬拦截（guard 返回 reason 即拒收），补 provider 漏网；
 //   3. UI 多选框 —— 见 client.js ServerForm 的工具过滤区 + GET /api/mcp/tools/:serverName。
-// 无配置 = 全量放行（零回归）；guard 是同步函数，读的是 apply 时缓存 + watch 刷新的快照。
+// 无配置 = 全量放行（零回归）；guard 是同步函数，每次调用现读最新值。
+//
+// 配置后端是双版本的（同 dsh-key-fallback 的做法）：
+//   · 0.1.7+：DSH 用 settings 服务托管插件配置 —— 本插件导出带 `.volatile()` 的
+//     `Config`，apply(ctx, config) 拿到的 config.toolFilters 是一个活 Ref，读写走
+//     `settings.replace(entryId, ...)`；
+//   · 0.1.5/0.1.6（rc.x）：无 `.volatile()`，`Config` 退化为 undefined，改用老的
+//     `settings.register(ns, schema)` + `settings.get(ns)` + `settings.update(ns, ...)`。
+// 两条路都在 apply 时判别一次，之后读写自动分流；都没有时静默全放行。
+// Profile entry id of this plugin (the `id:` in the bundle's cordis.patch.yml,
+// which the user's own profile patch keeps unless they override the row). The
+// settings service addresses config by entry id, not by settings namespace.
 const CONNECTOR_SETTINGS_NS = 'connector'
+const CONNECTOR_ENTRY_ID = 'connector'
 const ToolFilterSchema = z.object({
   toolFilters: z.dict(z.object({ allow: z.array(String).default([]) })).default({}),
 })
-function readToolFilters(ctx) {
+// DSH 0.1.7+ hands a `.volatile()` field to apply() as a live Ref; 0.1.6 and older
+// lack `volatile`, so Config degrades to undefined and the legacy path is used.
+const _toolFiltersField = z.dict(z.object({ allow: z.array(String).default([]) })).default({})
+export const Config = (typeof _toolFiltersField.volatile === 'function')
+  ? z.object({ toolFilters: _toolFiltersField.volatile() })
+  : undefined
+// 后端状态：二选一（0.1.7+ 用 _filterRef；rc.x 用 _legacyScope/_legacySvc），都用空表示全放行。
+let _filterRef = null     // 0.1.7+: config.toolFilters 这个活 Ref
+let _legacyScope = null   // rc.x: settings.register(...) 返回的 scope
+let _legacySvc = null     // rc.x: settings 服务（读用 get，写用 update）
+function readToolFilters() {
   try {
-    const settings = ctx.get('settings')
-    const value = settings ? settings.get(CONNECTOR_SETTINGS_NS) : undefined
-    const filters = value && typeof value === 'object' ? value.toolFilters : undefined
-    if (!filters || typeof filters !== 'object' || Array.isArray(filters)) return {}
-    const out = {}
-    for (const [server, rule] of Object.entries(filters)) {
-      const allow = rule && Array.isArray(rule.allow) ? rule.allow.filter((t) => typeof t === 'string' && t.length > 0) : []
-      out[server] = { allow }
+    // 优先 0.1.7+ 的活 Ref（.get() 每次返回最新值）
+    if (_filterRef) {
+      const value = _filterRef.get()
+      return normalizeToolFilters(value)
     }
-    return out
+    // rc.x：老的 settings.get(ns) —— 每次现读，外部编辑同样立即生效
+    if (_legacySvc && typeof _legacySvc.get === 'function') {
+      const value = _legacySvc.get(CONNECTOR_SETTINGS_NS)
+      return normalizeToolFilters(value && value.toolFilters)
+    }
+    return {}
   } catch { return {} }
+}
+function normalizeToolFilters(filters) {
+  if (!filters || typeof filters !== 'object' || Array.isArray(filters)) return {}
+  const out = {}
+  for (const [server, rule] of Object.entries(filters)) {
+    const allow = rule && Array.isArray(rule.allow) ? rule.allow.filter((t) => typeof t === 'string' && t.length > 0) : []
+    out[server] = { allow }
+  }
+  return out
 }
 // 公开名 `mcp__<server>__<raw>` 反解回 (server, raw)：注意 serverName 本身可含
 // 下划线，所以按 `mcp__` 前缀 + __ 分段取“第一段”为 server，余下 join 回 raw。
@@ -540,8 +582,17 @@ let wafCookie = null // { value, at }
 // Solve the acw_sc__v2 cookie by executing the challenge page in jsdom. The
 // challenge HTML arrives as the body of the WAF-blocked request itself (the
 // SPA shell on /mcp is NOT a challenge page and yields no cookie).
+// jsdom is imported lazily on purpose — see the note next to the import list.
+let _jsdom = null
+async function loadJsdom() {
+  if (_jsdom) return _jsdom
+  const mod = await import('jsdom')
+  _jsdom = mod.default && mod.default.JSDOM ? mod.default : mod
+  return _jsdom
+}
 async function solveWafFromChallenge(html) {
   if (wafCookie && Date.now() - wafCookie.at < WAF_TTL) return wafCookie.value
+  const { JSDOM, VirtualConsole } = await loadJsdom()
   const vc = new VirtualConsole()
   vc.on('jsdomError', () => {}) // jsdom navigation is not implemented — that is expected here
   const dom = new JSDOM(html, {
@@ -922,23 +973,37 @@ async function readBody(req) {
   }
 }
 
-export function apply(ctx) {
-  // ── 工具过滤三件套之 (0)：settings namespace 注册 + 快照缓存 ──
-  // settings 经声明式 inject 依赖保证就绪（见上方 export const inject），
-  // 这里同步拿服务；万一缺失不炸，过滤保持全放行（零回归）。
+export function apply(ctx, config) {
+  // ── 工具过滤三件套之 (0)：判定配置后端 + 快照缓存 ──
+  // 0.1.7+：config.toolFilters 是 volatile Ref（.get() 每次返回最新值，编辑热生效）。
+  // rc.x：无 volatile，退回老的 settings.register/get/update（0.3.0 的原始实现）。
+  // 两者皆无 → 恒 {} 全放行（零回归）。
   // 注：cordis 的 ctx.inject(deps, cb) 回调按 (ctx, config) 调用，不是服务展开，
   // 不能拿回调参数当 service 用 —— 0.3.0 曾因此 register 从未落地。
-  const settings = ctx.get('settings')
-  let toolFilters = {}
-  const refreshFilters = () => { toolFilters = readToolFilters(ctx) }
-  if (settings) {
-    try {
-      const scope = settings.register(CONNECTOR_SETTINGS_NS, ToolFilterSchema, { base: { toolFilters: {} } })
-      refreshFilters()
-      ctx.effect(() => scope.watch(() => refreshFilters()), 'connector: watch tool filters')
-    } catch (error) {
-      console.error('[dsh-connector] register tool filter settings failed:', error?.message ?? error)
+  const currentFilters = () => {
+    try { return readToolFilters() } catch { return {} }
+  }
+  try {
+    const field = config && config.toolFilters
+    if (field && typeof field.get === 'function') {
+      _filterRef = field
+      ctx.effect(() => () => { _filterRef = null }, 'connector: release tool filter ref')
+    } else {
+      // ── rc.x 老后端：注册 settings namespace（本插件自己的两段式配置）──
+      const settings = ctx.get('settings')
+      if (settings && typeof settings.register === 'function') {
+        const scope = settings.register(CONNECTOR_SETTINGS_NS, ToolFilterSchema, { base: { toolFilters: {} } })
+        _legacySvc = settings
+        _legacyScope = scope
+        ctx.effect(() => () => { _legacySvc = null; _legacyScope = null }, 'connector: release legacy tool filter scope')
+        // scope 存在时用它的 watch 做热刷新（0.3.0 的行为）；读仍走 settings.get。
+        if (scope && typeof scope.watch === 'function') {
+          ctx.effect(() => scope.watch(() => {}), 'connector: watch tool filters')
+        }
+      }
     }
+  } catch (error) {
+    console.error('[dsh-connector] tool filter config unavailable:', error?.message ?? error)
   }
 
   // ── 三件套之 (1)：prompt 层过滤 —— assemble waterfall 真替换 ──
@@ -950,7 +1015,7 @@ export function apply(ctx) {
     ctx.on('system-prompt/assemble', async (_assembly, _context, next) => {
       const assembled = await next()
       if (!assembled || !Array.isArray(assembled.tools)) return assembled
-      const kept = assembled.tools.filter((t) => isToolAllowed(toolFilters, t && t.name))
+      const kept = assembled.tools.filter((t) => isToolAllowed(currentFilters(), t && t.name))
       if (kept.length === assembled.tools.length) return assembled
       return { ...assembled, tools: kept }
     }, { global: true })
@@ -961,7 +1026,7 @@ export function apply(ctx) {
     if (tools && typeof tools.guard === 'function') {
       ctx.effect(() => tools.guard((exec) => {
         if (!exec || typeof exec.name !== 'string') return undefined
-        if (isToolAllowed(toolFilters, exec.name)) return undefined
+        if (isToolAllowed(currentFilters(), exec.name)) return undefined
         const split = splitPublicName(exec.name)
         return `connector: 工具 ${exec.name} 已被过滤（server "${split ? split.server : '?'}” 的 allow 列表未包含它）`
       }), 'connector: mcp tool filter guard')
@@ -1058,14 +1123,14 @@ export function apply(ctx) {
         } catch (error) {
           return json(res, 500, { error: String(error?.message ?? error).slice(0, 200) })
         }
-        const filters = readToolFilters(ctx)
+        const filters = readToolFilters()
         const rule = filters[serverName]
         return json(res, 200, { server: serverName, tools: names.sort(), allow: rule ? rule.allow : [] })
       }
 
       // GET /api/mcp/filters — 全部 server 的过滤规则（UI 批量展示用）
       if (req.method === 'GET' && path === API_PREFIX + '/mcp/filters') {
-        return json(res, 200, { filters: readToolFilters(ctx) })
+        return json(res, 200, { filters: readToolFilters() })
       }
 
       // PUT /api/mcp/filters — 保存过滤规则 → settings.yaml `connector:` 节
@@ -1092,13 +1157,24 @@ export function apply(ctx) {
         }
         try {
           const settings = ctx.get('settings')
-          if (!settings) return json(res, 503, { error: 'settings service unavailable' })
-          await settings.update(CONNECTOR_SETTINGS_NS, { toolFilters: clean })
+          if (_filterRef) {
+            // 0.1.7+：settings 服务托管配置。replace() 先清空本 entry 的全部 volatile
+            // 字段再写入本节：toolFilters 是唯一 volatile 字段，所以等价于「整节覆盖」，
+            // 空 allow 的 server 已被上面清掉。
+            if (!settings || typeof settings.replace !== 'function') {
+              return json(res, 503, { error: 'settings service unavailable (DSH 0.1.7+ required to persist tool filters)' })
+            }
+            await settings.replace(CONNECTOR_ENTRY_ID, { toolFilters: clean })
+          } else if (_legacySvc && typeof _legacySvc.update === 'function') {
+            // rc.x：老的命名空间写入（settings.yaml `connector:` 节）
+            await _legacySvc.update(CONNECTOR_SETTINGS_NS, { toolFilters: clean })
+          } else {
+            return json(res, 503, { error: 'settings service unavailable; cannot persist tool filters' })
+          }
         } catch (error) {
           return json(res, 500, { error: String(error?.message ?? error).slice(0, 300) })
         }
-        refreshFilters()
-        return json(res, 200, { ok: true, filters: readToolFilters(ctx) })
+        return json(res, 200, { ok: true, filters: readToolFilters() })
       }
 
       // GET /api/skills — list

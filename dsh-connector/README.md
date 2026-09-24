@@ -1,13 +1,13 @@
 # @omdp/dsh-connector
 
-**MCP 服务器 + 用户 Skills + 魔搭市场浏览三合一设置页**（`v0.3.2`）。适合需要在 DSH 里频繁增删改 MCP server / skills、又不想手改 `cordis.patch.yml` 的用户。
+**MCP 服务器 + 用户 Skills + 魔搭市场浏览三合一设置页**（`v0.3.3`）。适合需要在 DSH 里频繁增删改 MCP server / skills、又不想手改 `cordis.patch.yml` 的用户。
 
 ## Requirements
 
 - DeepSeek Harness 带 `web` profile GUI（`npx @deepseek-ai/dsh web`）
 - Node.js `^22.19` 或 `>=24`
-- `@deepseek-ai/cordis` `4.0.1` / `4.0.2`（已实测版本；插件无 peer 声明，唯一 DSH 硬依赖是 `ctx.webServer`）
-- 已实测 DSH **0.1.5-rc.1**（源码级核查，2026-09-10）、**0.1.5-rc.2** 与 **0.1.6-alpha.1**（源码级 + 运行时冒烟：`/connector/api/*` 正常服务、设置页渲染，2026-09-15，见 `docs/plugin-compatibility.md`）
+- `@deepseek-ai/schemastery` `3.18.1` / `3.18.2` / `3.18.4`（peer 枚举，供工具过滤的 Config 声明用；无则过滤静默全放行）
+- 已实测 DSH **0.1.5-rc.1**（源码级核查，2026-09-10）、**0.1.5-rc.2** 与 **0.1.6-alpha.1**（源码级 + 运行时冒烟：`/connector/api/*` 正常服务、设置页渲染，2026-09-15，见 `docs/plugin-compatibility.md`）、**0.1.7-rc.1**（0.3.3 适配：修掉 import 期崩溃 + 迁移到 settings 托管配置，2026-09-24）
 
 ## Overview
 
@@ -15,7 +15,7 @@
 合并到 DSH Web UI 的同一个设置页（设置页标签：**Connector**）。
 
 - **MCP**：读取/编辑 `profiles/web/cordis.patch.yml` 中的 `mcp-*` 块（结构化表单）。保存后**重启 `dsh` 生效**。
-- **工具过滤（0.3.0 新增）**：每台 MCP server 卡片下可勾选放行的工具（`mcp__<server>__<raw>` 公开名按 `__` 切分回 raw 名）。规则存 `settings.yaml` 的 `connector.toolFilters`（`{<serverName>: {allow: [...]}}`），**无配置 = 全量放行**；保存后新会话即生效、无需重启。生效三件套：`systemPrompt.tools(provider)` 隐藏 schema + `ctx.tools.guard` 执行期硬拦截（做法参照 `hyqhyq3/dsh-mcp-manager`）。典型场景：tinyfish 这类 15 个工具只留 `search`/`fetch_content` 两个免费工具。
+- **工具过滤（0.3.0 新增）**：每台 MCP server 卡片下可勾选放行的工具（`mcp__<server>__<raw>` 公开名按 `__` 切分回 raw 名）。规则存本插件自己的配置（0.1.7+ 为 profile 条目 `connector` 行的 `config.toolFilters`；rc.x 为 `settings.yaml` 的 `connector.toolFilters`，双后端自动判别），**无配置 = 全量放行**；保存后新会话即生效、无需重启。生效三件套：`systemPrompt.tools(provider)` 隐藏 schema + `ctx.tools.guard` 执行期硬拦截（做法参照 `hyqhyq3/dsh-mcp-manager`）。典型场景：tinyfish 这类 15 个工具只留 `search`/`fetch_content` 两个免费工具。
 - **Skills**：列出/查看/编辑/删除 `~/.dsh/skills` 下的 `SKILL.md`。保存**即时生效**（filesystem provider 自动重新发现）。
 - **市场探索（0.2.0 新增）**：只读浏览魔搭社区 [Skills 中心](https://modelscope.cn/skills) 与 [MCP 广场](https://modelscope.cn/mcp)（匿名 OpenAPI，无需密钥）。
   - 列表/详情：名称、作者、分类、下载/浏览数、认证标识（Hosted 官方托管 / 已认证）
@@ -145,7 +145,7 @@ pnpm remove @omdp/dsh-connector
    - 列出当前 `cordis.patch.yml` 里的 `mcp-*` 服务器
    - 「编辑」改名称/传输/URL/命令/参数/Header；「删除」移除；「＋ 添加」新建
    - 每台 server 卡片下有**工具过滤**多选（chips）：勾选即放行，未勾选的工具模型不可见、调用被拒；「清除」回到全量放行
-   - 保存后提示**重启 dsh** 才会真正加载新的 MCP server（工具过滤规则除外：存 settings，**新会话即生效**）
+   - 保存后提示**重启 dsh** 才会真正加载新的 MCP server（工具过滤规则除外：存**本插件的 profile 条目配置**，**新会话即生效**）
 2. **Skills** 区：
    - 列出 `~/.dsh/skills` 下的用户技能
    - 「编辑」改 frontmatter 与正文；「删除」移除目录；「＋ 新建」创建
@@ -164,7 +164,7 @@ pnpm remove @omdp/dsh-connector
 | 设置页 | client half 注册 `settings.section` 槽位（"Connector" 页签；client factory 须 `exports.inject = ['slots']`，否则 fiber 在 slots 就绪前跑 apply 会静默丢注册） |
 | 跨边界调用 | client 用 `fetch('/connector/api/...')`，host 用 `ctx.webServer.register` 接收（安装包走 HTTP） |
 | MCP 持久化 | 文本块级提取并替换 `cordis.patch.yml` 中含 `mcp-` 的 insert 块，**保留 `!!js` 表达式与 env 块原样**（preserve 桶） |
-| 工具过滤 | 规则存 settings `connector` 命名空间（`toolFilters`）；`systemPrompt.tools(provider)` 滤 schema + `tools.guard` 硬拦截；`dsh-mcp-client` Config 封闭，规则**不能**写进 mcp 行 config |
+| 工具过滤 | 规则存本插件 profile 条目（`connector` 行）的 `config.toolFilters`，经 `Config` 的 `.volatile()` 字段由 DSH settings 服务托管（0.1.7+）；`systemPrompt.tools(provider)` 滤 schema + `tools.guard` 硬拦截；`dsh-mcp-client` Config 封闭，规则**不能**写进 mcp 行 config |
 | Skill 持久化 | 直接读写 `~/.dsh/skills/<name>/SKILL.md` |
 
 ## 已知限制
@@ -182,7 +182,7 @@ pnpm remove @omdp/dsh-connector
 | 问题 | 原因 / 解决 |
 |---|---|
 | 设置页看不到 Connector 标签 | bundle 未挂载：确认 `dsh.profile.bundles` 含 `@omdp/dsh-connector`，重启 dsh；仍无则检查 client.js 尾部 `exports.inject = ['slots']` 是否在（缺了会静默丢注册） |
-| 工具过滤不生效（模型仍能看到/调用） | 过滤规则只对**新会话**生效（当前会话的 schema 已下发）；确认 settings.yaml 有 `connector.toolFilters` 且 serverName 拼写与 patch 一致 |
+| 工具过滤不生效（模型仍能看到/调用） | 过滤规则只对**新会话**生效（当前会话的 schema 已下发）；确认规则落盘位置正确——0.1.7+ 看 profile 条目 `connector` 的 `config.toolFilters`，rc.x 看 `~/.dsh/settings.yaml` 的 `connector.toolFilters`；再确认 serverName 拼写与 patch 一致 |
 | 保存 MCP 被拒（HTTP 400） | 配置不合法（transport/serverName/command/url 校验失败），按提示修正——插件不会写入坏配置 |
 | MCP server 保存后不生效 | 需**重启 dsh**（`dsh-mcp-client` 静态加载） |
 | `/connector/api/*` 404 | client/host 边界异常：确认插件 host 半边已加载（重启），浏览器强刷缓存 |
@@ -229,9 +229,9 @@ MIT License。安全问题请通过 GitHub Issues 私密报告（https://github.
 
 | 数据 | 访问方式 | 说明 |
 |---|---|---|
-| `profiles/web/cordis.patch.yml` | **读写** | MCP 块的结构化编辑（保留 `!!js`/env 原样） |
+| `profiles/web/cordis.patch.yml` | **读写** | MCP 块的结构化编辑（保留 `!!js`/env 原样）；0.1.7+ 工具过滤规则也由 DSH settings 服务写回本行 `config.toolFilters` |
 | `~/.dsh/skills/**/SKILL.md` | **读写** | 用户技能文件的查看/编辑/删除/新建；「记录来源」会写 `source`/`sourceUpdated` frontmatter |
-| `~/.dsh/settings.yaml` 等 | 只读 | 不主动读写 |
+| `~/.dsh/settings.yaml` 等 | rc.x 经 settings 服务读 | 0.1.7+ 不再直接读写该文件（DSH 已改为 profile 条目托管） |
 | HTTP `/connector/api/*` | 本机监听 | 与 DSH GUI 同源，无额外鉴权 |
 | 魔搭 `modelscope.cn/openapi/v1` | **只读外部** | 市场浏览代理（匿名）；结果仅存进程内存（30 分钟 TTL），**不写文件、不落盘** |
 | 环境变量 | 只读引用 | 只读 `process.env.*`，不持久化 |
@@ -242,9 +242,43 @@ MIT License。安全问题请通过 GitHub Issues 私密报告（https://github.
 
 本插件采用**抗崩溃架构**，DSH 更新时不会导致 DSH 崩溃（硬保证）。
 
-- **纯静态依赖**：只 `import node:*` + `yaml`（唯一第三方依赖，版本 `^2.9.0`），**零 `@deepseek-ai/*` 依赖**（`@deepseek-ai/schemastery` 仅 peer 声明，供工具过滤的 settings schema 用，无则过滤静默全放行）。
+- **纯静态依赖**：只 `import node:*` + `yaml`（`^2.9.0`）；`jsdom`（`^24.1.3`）**只在魔搭 WAF 挑战求解时动态 `import()`**，不在模块顶层加载（见下方 0.1.7 说明）。`@deepseek-ai/schemastery` 仅 peer 声明（供工具过滤的 Config 声明用），且用 `typeof field.volatile === 'function'` 守卫，具备则走 0.1.7+ 托管配置。
 - **唯一的 DSH 硬依赖**：`ctx.webServer`（`inject: ['webServer']`），用于注册 `/connector/api/*` HTTP 路由。
 - **失败隔离**：webServer 不可用/变化时插件**干净失败不加载**，DSH 照常运行；内部多处 try/catch 防御。
+
+### 为什么 jsdom 必须懒加载（0.3.3 修复）
+
+0.3.2 在模块顶层 `import { JSDOM, VirtualConsole } from 'jsdom'`，这会在插件 import 期就拉起
+`jsdom → whatwg-url → tr46` 依赖图，而 `tr46/index.js` 第 3 行是 `require("punycode/")`。
+DSH `0.1.7-rc.1` 的解析路由（`dsh-app-boot` `ResolutionRouter.routeScoped`）对 `punycode/`
+这种**带子路径的内置模块名**会先切出裸名 `punycode`，再用
+`createRequire(...).resolve.paths("punycode")` 求查找路径 —— Node 对裸内置模块名返回
+`null`，而该处循环没有兜底，直接抛：
+
+```
+TypeError: createRequire.resolve.paths is not a function or its return value is not iterable
+    at ResolutionRouter.routeScoped (…/dsh-app-boot/lib/index.js:1414:58)
+```
+
+后果不是"市场功能不可用"，而是**整个插件的 import 失败**：fiber 建不起来，设置页那行永远停在
+「已安装，重启后生效」，`/connector/api/*` 全部 404（重启也不会好，因为抛错是确定性的）。
+修复即把 jsdom 挪进 `loadJsdom()`，只在真正要解 WAF 挑战时才 `await import('jsdom')`，
+失败范围收敛到该功能本身。
+
+> ⚠️ **诚实说明：这是缓解，不是根治。** DSH 的解析拦截（`PluginPackages` 安装的
+> `installRuntimeInterception`）在**进程生命周期内常驻**（只在 `ctx.effect` 清理时 `dispose()`），
+> 所以懒加载只是把同一个 `TypeError` **推迟到首次解 WAF 挑战时**，并非消除：
+>
+> | | 0.3.2（顶层静态 import） | 0.3.3（懒加载） |
+> |---|---|---|
+> | 插件 import | ❌ 崩溃 ⇒ 设置页死的、全部路由 404 | ✅ 干净 |
+> | 设置页 / MCP / Skills / 工具过滤 | ❌ 全废 | ✅ 恢复 |
+> | 魔搭市场浏览（走 WAF 解） | ❌（插件都没起来） | ⚠️ 首次解挑战仍会抛，但被 `marketError` 包成 **502 + 明确 message**，不挂起 |
+> | 爆炸半径 | 整个插件 | 单个功能分支 |
+>
+> 实测该 WAF 挑战当前**未下发**（`PUT /api/v1/dolphin/mcpServers` 返回 HTTP 200、116103 字节、
+> 无 `acw_sc__v2`/`aliyunwaf`），故该路径处于休眠。**根治仍应由 DSH 在 `dsh-app-boot` 的该循环
+> 补 `?? []` 兜底**（同文件 `packageDirFromAnchor` 是有兜底的，新增 `routeScoped` 时漏了）。
 
 | 场景 | 崩溃？ |
 |---|---|
@@ -253,6 +287,19 @@ MIT License。安全问题请通过 GitHub Issues 私密报告（https://github.
 | yaml 版本 | ✅ 独立 npm 包，不受 DSH 更新影响 |
 | 魔搭市场不可达 | ✅ 市场接口报 502，本地 MCP/skill 管理不受影响 |
 
-**最后验证**：DSH `0.1.0-rc.8`（2026-08-20）；0.2.0 市场功能以 `node --check` +
-真实 HTTP 集成测试通过（11 项：skills/mcp 列表与详情、证书/Hosted 标识、安装命令、
-记录来源回写、更新判定），未改动 DSH 实例。当前 npm 版本 `0.3.0`。
+**最后验证**：DSH `0.1.7-rc.1`（2026-09-24，本轮修复：模块 import 期零抛错，`node --check` + 实际
+`import()` 冒烟通过；工具过滤读写改用 0.1.7 的 `Config`+`.volatile()`+`settings.replace()`）。历史：
+DSH `0.1.0-rc.8`（2026-08-20）；0.2.0 市场功能以 `node --check` + 真实 HTTP 集成测试通过（11 项：
+skills/mcp 列表与详情、证书/Hosted 标识、安装命令、记录来源回写、更新判定），未改动 DSH 实例。
+
+## 变更记录
+
+- **0.3.3**（2026-09-24）：**适配 DSH 0.1.7-rc.1**。
+  1. **修复 import 期崩溃**：`jsdom` 由顶层静态 import 改为按需 `await import()`（原因见上方
+     「为什么 jsdom 必须懒加载」）——0.3.2 在 0.1.7 上整个插件 import 失败、设置页永远显示
+     「已安装，重启后生效」、API 全 404。
+  2. **工具过滤迁到 0.1.7 托管配置**：导出 `Config = z.object({ toolFilters: <dict>.volatile() })`，
+     读取走注入的 `config.toolFilters` 活 Ref、写入走 `settings.replace(entryId, …)`；同时对
+     0.1.5/0.1.6 rc.x 保留老的 `settings.register/get/update` 后端（`typeof volatile === 'function'`
+     守卫自动分流），**新旧两代均可用**。
+  3. 补 `@deepseek-ai/schemastery` peer 枚举 `3.18.4`（0.1.7 自带版本）。
