@@ -32,9 +32,16 @@ function deriveEnvName(name) {
 export const name = 'key-fallback'
 export const inject = ['llm', 'settings', 'webServer', 'credentials']
 const API_BASE = '/dsh-key-fallback'
-const SETTINGS_FILE = join(homedir(), '.dsh', 'settings.yaml')
-const CRED_FILE = join(homedir(), '.dsh', '.credentials.yaml')
-const BACKUP_DIR = join(homedir(), '.dsh', 'backups')
+// 遵循 DSH_HOME（未设置时回落 ~/.dsh）：与 dsh-connector / dsh-archived-sessions 的
+// 路径推导保持一致，也让隔离冒烟环境可以直接切换整个 home。
+const DSH_HOME = (() => {
+  const h = process.env.DSH_HOME
+  return (typeof h === 'string' && h) ? h : join(homedir(), '.dsh')
+})()
+const SETTINGS_FILE = join(DSH_HOME, 'settings.yaml')
+const SETTINGS_FILE_IMPORTED = SETTINGS_FILE + '.imported'
+const CRED_FILE = join(DSH_HOME, '.credentials.yaml')
+const BACKUP_DIR = join(DSH_HOME, 'backups')
 if (!existsSync(BACKUP_DIR)) try { mkdirSync(BACKUP_DIR, { recursive: true }) } catch (e) {}
 let _backupCounter = 0
 function tsName(prefix) {
@@ -66,21 +73,80 @@ const profileSchema = z.object({
   refsCompacted: z.boolean().default(false),
 })
 
-function readSettings() {
-  if (!existsSync(SETTINGS_FILE)) return { providers: {} }
+// ── 配置后端（双版本兼容）─────────────────────────────────────────────
+// 0.1.5-rc.3：配置在 <home>/settings.yaml 的 `key-fallback:` 段，插件自己读写该文件。
+// 0.1.7+   ：DSH 启动时把 settings.yaml 改名为 settings.yaml.imported，段内容成为该 entry 的
+//            config override（写进 profiles/<p>/cordis.patch.yml），由 ctx.settings 服务托管；
+//            插件通过「volatile Config + describe/replace」读写，不再碰 settings.yaml。
+//
+// 关键前提：0.1.7 的迁移走 settings.update(ns, values) → write()，要求该 entry 存在且其
+// Config 含 volatile 字段，否则抛错并打印「section ... was not imported」——配置静默丢失。
+// 因此必须声明 Config（下面），且只在本版本 schemastery 支持 .volatile() 时声明，
+// 使 rc.3 行为与改造前逐字节一致。
+const _providersField = z.dict(z.any()).default({})
+export const Config = (typeof _providersField.volatile === 'function')
+  ? z.object({ providers: _providersField.volatile() })
+  : undefined
+
+const ENTRY_ID = 'key-fallback'
+const diagLog = []
+const diag = (kind, msg) => {
   try {
-    const raw = readFileSync(SETTINGS_FILE, 'utf8')
-    const doc = loadYaml(raw) || {}
-    const block = (doc && (doc['key-fallback'] || doc.keyFallback)) || {}
-    return block && block.providers ? block : { providers: {} }
-  } catch (e) { return { providers: {} } }
+    diagLog.push({ kind, msg: String(msg).slice(0, 300), at: Date.now() })
+    if (diagLog.length > 200) diagLog.splice(0, diagLog.length - 200)
+  } catch (e) {}
+}
+let _settingsSvc = null   // ctx.settings（0.1.7+）
+let _liveRef = null       // 0.1.7+: config.providers 的 volatile Ref（原地热更新）
+let _cache = null         // 0.1.7+: 内存权威副本（乐观写，避免异步落盘窗口内读到旧值）
+let _writing = 0          // 未确认写入计数
+
+function readSettingsFromFile() {
+  // settings.yaml 优先；0.1.7 迁移后已改名，回退读 .imported（只读引导，避免配置真空）
+  for (const file of [SETTINGS_FILE, SETTINGS_FILE_IMPORTED]) {
+    if (!existsSync(file)) continue
+    try {
+      const doc = loadYaml(readFileSync(file, 'utf8')) || {}
+      const block = (doc && (doc[ENTRY_ID] || doc.keyFallback)) || {}
+      if (block && block.providers) return block
+    } catch (e) {}
+  }
+  return { providers: {} }
+}
+
+function cloneJson(v) {
+  try { return v === undefined ? {} : JSON.parse(JSON.stringify(v)) } catch (e) { return v }
+}
+
+function readSettings() {
+  if (_liveRef) {
+    // _liveRef 就是 config.providers 这个 Ref：.get() 直接返回 providers 字典。
+    // 它由 DSH deepFreeze，调用方却要就地改（新增/删除 provider、compactRefs 改 keyRefs），
+    // 所以这里始终返回「可变深拷贝」。未决写入期间以内存副本为源（replace 是异步的，
+    // 否则会读到落盘前的旧树，UI 立刻刷新会闪回旧值）。
+    let src = _cache
+    if (_writing === 0) { try { src = { providers: _liveRef.get() || {} } ; _cache = src } catch (e) {} }
+    if (!src) { try { src = { providers: _liveRef.get() || {} }; _cache = src } catch (e) { src = { providers: {} } } }
+    return { providers: cloneJson(src.providers) || {} }
+  }
+  return readSettingsFromFile()
 }
 
 function writeSettings(data) {
+  if (_liveRef) {
+    _cache = { providers: cloneJson((data && data.providers) || {}) }
+    if (!_settingsSvc || typeof _settingsSvc.replace !== 'function') return
+    _writing++
+    Promise.resolve()
+      .then(() => _settingsSvc.replace(ENTRY_ID, { providers: cloneJson(_cache.providers) }))
+      .catch((e) => diag('settings-write', 'replace failed: ' + ((e && e.message) || e)))
+      .finally(() => { _writing-- })
+    return
+  }
   backupFile(SETTINGS_FILE, 'settings')
   let root = {}
   try { if (existsSync(SETTINGS_FILE)) root = loadYaml(readFileSync(SETTINGS_FILE, 'utf8')) || {} } catch (e) {}
-  root['key-fallback'] = data
+  root[ENTRY_ID] = data
   writeFileSync(SETTINGS_FILE, dumpYaml(root, { lineWidth: 120 }), 'utf8')
 }
 
@@ -168,11 +234,26 @@ function displayNameOf(entry) {
   return ref
 }
 
-export function apply(ctx) {
-  try { ctx.logger.info('key-fallback: v6 host apply() starting (config = settings.yaml)') } catch (e) {}
-  const diagLog = []
-  const diag = (kind, msg) => { try { diagLog.push({ kind, msg: String(msg).slice(0, 300), at: Date.now() }); if (diagLog.length > 200) diagLog.splice(0, diagLog.length - 200) } catch (e) {} }
+export function apply(ctx, config) {
+  try { ctx.logger.info('key-fallback: v7 host apply() starting') } catch (e) {}
   diag('apply', 'host loaded')
+
+  // ── 0.1.7+：把配置接到 settings 服务托管的那份树 ──
+  // config.providers 平时是 volatile Ref（.get() 随编辑热更新）；无 config 或非 Ref 时
+  // 保持文件后端。两者都在这里判定一次，之后 readSettings/writeSettings 自动分流。
+  try {
+    const svc = ctx.get('settings')
+    const prov = config && config.providers
+    if (svc && typeof svc.replace === 'function' && prov && typeof prov.get === 'function') {
+      _settingsSvc = svc
+      _liveRef = prov   // = config.providers，Ref.get() 直接给 providers 字典
+      _cache = { providers: prov.get() || {} }
+      diag('settings', 'backend = profile entry (0.1.7+), providers=' + Object.keys(_cache.providers).join(','))
+      // 无需额外订阅：readSettings() 每次（无未决写入时）都从 Ref 重取，外部编辑自动生效
+    } else {
+      diag('settings', 'backend = settings.yaml file (rc.x)')
+    }
+  } catch (e) { diag('settings', 'probe failed: ' + ((e && e.message) || e)) }
   // ── 包装 credentials.resolve：ref 命中池 env 时返回池当前 key（llm-pi-ai 唯一读取入口）──
   const poolsByEnv = new Map()
   const credSvc = ctx.credentials

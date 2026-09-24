@@ -187,14 +187,19 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 
 ---
 
-## 4. @omdp/dsh-key-fallback（v3.1.7）【活跃插件】
+## 4. @omdp/dsh-key-fallback（v3.2.0）【活跃插件】
 
 ### 架构
 
-- **ESM bundle**：`lib/index.js` 为 `type: module`（`main`/`exports` → `./lib/index.js`），静态 import `@deepseek-ai/dsh-credentials`（只用 reference 半边 `credentialRef`/`resolve`/`describe`/`set`/`unset`；`isCredentialRefName` 本地实现兜底）与 `node:*` 内置。
+- **ESM bundle**：`lib/index.js` 为 `type: module`（`main`/`exports` → `./lib/index.js`），静态 import `@deepseek-ai/dsh-credentials`（只用 reference 半边 `credentialRef`/`resolve`/`describe`/`set`/`unset`；`isCredentialRefName` 本地实现兜底）、`@deepseek-ai/schemastery`（仅用于 `Config`）与 `node:*` 内置。
 - **Host**: `inject: ['llm','settings','webServer','credentials']`。`agent/request` 预写 key（`credentials.set` **和** `process.env` 双写）；`agent/request-error` 注册 `prepend: true` 先于 `dsh-llm-retry` 看到错误，按池 `rotateOn` 判定后切 key，**重发交还 llm-retry**。`webServer` 用 `ctx.get('webServer')` 可选获取（不硬 inject 缺失不崩）。
 - **Client**: 独立设置页 `Settings → API Key 回退`，经 `slots.inject('settings.section')` + `slots.register` 注册（`id: 'key-fallback'`, `order: 62`），不再依赖 `installSettingsSection`/`settings.plugin.item` 双路渲染。
 - **能力**：多 key 池按 `rotateOn`（失败码/状态/关键字）判定轮换；固定 `cooldownMs` 冷却；`useKeyRef` 锁定/`nextRef` 链；短 ref 自动命名 + 旧长 ref 一次性幂等迁移；`GET /keys/plain` 明文揭示（仅池内 key/env）；env key 可编辑（describe 只读拒绝）。
+- **配置双后端（v3.2.0 新增，为兼容 DSH 0.1.7 而改造）**：启动时判别后端 ——
+  - **rc.x（≤ `0.1.5-rc.3`）**：无 volatile schema 支持 ⇒ `Config` 导出为 `undefined`，插件直接读写 `<DSH_HOME>/settings.yaml` 的 `key-fallback:` 段（附时间戳备份），行为与 v3.1.x 逐字节一致。
+  - **`0.1.7`+**：`.volatile()` 可用 ⇒ 导出 `Config = z.object({ providers: <dict>.volatile() })`；配置由 DSH 从 settings.yaml 迁移进 profile 补丁（`profiles/<p>/cordis.patch.yml`）中该条目的 `config`，插件经注入的 `config.providers`（活 volatile ref）读取、经 `ctx.settings.replace()` 写入。
+  - 因 `config.providers` 被 DSH **深冻结**，`readSettings()` 返回可变深拷贝；写入先乐观更新内存副本再异步落盘（未决写入计数避免读到旧树）。
+  - **关键前提**：不声明 volatile `Config` 会导致 `0.1.7` 的迁移调用 `settings.update()` 抛错、仅打印 `settings: section ... was not imported`，**配置静默丢失**（这正是 v3.1.7 在 `0.1.7` 上被 `dsh: skipping profile bundle` 跳过的原因之一）；而 `.volatile()` 在 schemastery `3.18.2`（rc.3）上不存在，故导出必须做 `typeof field.volatile === 'function'` 守卫。
 
 ### 依赖的 DSH 接口
 
@@ -202,22 +207,26 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 |---|---|---|
 | `ctx.credentials`（`inject` 硬依赖） | `set`/`unset`/`describe`/`resolve` + `credentialRef`（reference 半边，rc.6 起稳定） | 低–中（record 半边 rc.8 新增，插件未用） |
 | `ctx.llm`（`inject` 硬依赖） | `agent/request` + `agent/request-error` waterfall 换 key 链 | 中（事件名/载荷若变需适配） |
-| `ctx.settings`（`inject` 硬依赖） | 池配置持久化到 `settings.yaml` 的 `keyFallback.providers` | 低 |
+| `ctx.settings`（`inject` 硬依赖） | **`0.1.7`+**：`describe`/`replace`（读写 profile entry config）。⚠️ rc.x 的 `get`/`register`/`installSection` 在 `0.1.7` 上**已移除**（实测 `get=undefined installSection=undefined`） | **高**（0.1.7 破坏性变更，v3.2.0 已适配） |
+| `config.providers`（`apply(ctx, config)` 第 2 参） | **`0.1.7`+**：volatile ref（`.get()` 热更新）；首次 apply 时为 `{}`（迁移在 `loader.await()` 之后） | **高**（新机制，v3.2.0 已适配） |
 | `ctx.webServer`（`ctx.get` 可选） | `GET/POST /dsh-key-fallback/*` HTTP API（客户端设置页 fetch 用） | 中（缺失时设置页不可用，插件本体仍工作） |
 | client `slots`（`ctx.get` 可选） | `settings.section` 槽位注册设置页 | 低（缺失则 UI 不显示，聊天轮换不受影响） |
 
 ### 风险点
 
-- **peer 声明严格枚举实测版本**（2026-08-31 起）：credentials `0.1.0-rc.6 || 0.1.1-rc.2 || 0.1.2-alpha.1 || 0.1.2-alpha.2 || 0.1.2-alpha.3 || 0.1.2-alpha.4 || 0.1.2-alpha.5 || 0.1.2-rc.1 || 0.1.5-rc.1`、llm/settings `0.1.1-rc.2 || 0.1.2-alpha.1 || 0.1.2-alpha.2 || 0.1.2-alpha.3 || 0.1.2-alpha.4 || 0.1.2-alpha.5 || 0.1.2-rc.1 || 0.1.5-rc.1`、cordis `4.0.1 || 4.0.2`、schemastery `3.18.1 || 3.18.2`——只声明已实际兼容测试过的版本，不用开放范围；`0.1.2-alpha.2`→`alpha.5`→`0.1.2-rc.1` 配套包逐字节一致（2026-09-03 复核），`0.1.5-rc.1` 于 2026-09-10 核查通过后**追加**（credentials/settings 仅版本号变化、llm 变化全为附加式），旧版本继续保留在枚举内。
+- **peer 声明严格枚举实测版本**（2026-08-31 起，2026-09-24 扩充）：credentials `0.1.0-rc.6 || 0.1.1-rc.2 || 0.1.2-alpha.1 || 0.1.2-alpha.2 || 0.1.2-alpha.3 || 0.1.2-alpha.4 || 0.1.2-alpha.5 || 0.1.2-rc.1 || 0.1.5-rc.1 || 0.1.5-rc.2 || 0.1.5-rc.3 || 0.1.6-alpha.1 || 0.1.7-rc.1`、llm/settings 同构、cordis `4.0.1 || 4.0.2 || 4.0.4`、schemastery `3.18.1 || 3.18.2 || 3.18.4`——只声明已实际兼容测试过的版本，不用开放范围。
+- **`0.1.7` 的配置迁移是"全有或全无"**：整个 settings.yaml 被一次性改名 + 逐段导入，任何一段导入失败都只留下日志、配置残留在 `settings.yaml.imported`。插件自身已通过声明 volatile `Config` 保证可导入；但其他未适配的插件仍可能触发该警告。
+- **`.volatile()` API 版本漂移**：schemastery `3.18.2`（rc.3）无此方法、`3.18.4`（0.1.7）有。若未来 rc.x 分支也被回移该方法，需重新评估守卫写法。
 - **`ctx.llm` 事件**是主要变数：`agent/request`/`agent/request-error` 的载荷结构若在 DSH 大版本调整，轮换判定需适配；但所有 handler 都走 `next()` 链，异常不会让 DSH 崩溃。
 - **`webServer` 可选**：用 `ctx.get('webServer')` 而非硬 inject，缺失时插件其余功能（轮换）照常。
-- **防御性编码**：凭证读写、`describe`、状态计算均有 try/catch；`ctx.credentials.describe` 存在性检查。
+- **防御性编码**：凭证读写、`describe`、状态计算、后端判别均有 try/catch；`ctx.credentials.describe` 存在性检查。
 
 ### 结论
 
 | 场景 | 崩溃？ |
 |---|---|
 | DSH 小更新/补丁 | ✅ 不会崩 |
+| DSH `0.1.5-rc.3` → `0.1.7-rc.1` | ✅ 不崩：v3.2.0 双后端自动判别（rc.3 文件后端 / 0.1.7 profile entry 后端），**两版均已实测读写通过** |
 | DSH 大版本 | ✅ DSH 不崩；`agent/*` 事件载荷或 `webServer` 若变，轮换/设置页需适配 |
 | `dsh-credentials` 版本漂移 | ✅ reference 半边自 rc.6 稳定，低风险 |
 | 服务缺失 | ✅ 设置页不显示/轮换降级，不崩溃 |
@@ -275,13 +284,61 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 | dsh-gitbash-win（归档） | 0.1.6 | 无（动态加载 5 个 @deepseek-ai/*） | `tools`/`subprocess`/`systemPrompt`/`shellEnv` | 顶层零依赖 + 动态加载 + 失败隔离 | `dsh-sandbox`（Windows ACL 上游 bug） |
 | dsh-connector | 0.3.2 | `yaml`（+ peer `schemastery` 仅过滤用） | `webServer`（`settings`/`tools.guard`/`systemPrompt` 可选） | 纯静态 + try/catch + 可选服务失败隔离 | `ctx.webServer` API 变化 |
 | dsh-vision-bridge | 0.1.12 | 无 | `tools`/`attachments`/`llm`/`credentials` | 纯静态 + 零 @deepseek-ai + 防御性编码 | `ctx.llm` API 变化 / composer 输入层变化 / Agent 路由载荷变化（`requestHeader().config`） |
-| dsh-key-fallback | 3.1.7 | 无（reference 半边 dsh-credentials） | `credentials`/`llm`/`settings`（`webServer`/`slots` 可选） | ESM import + `agent/*` 事件 + `process.env + credentials.set` 双写 + 防御性编码 | `agent/request-error` 载荷 / `webServer` API 变化 |
+| dsh-key-fallback | 3.2.0 | `schemastery`（仅 `Config` 声明用） | `credentials`/`llm`/`settings`（`webServer`/`slots` 可选） | ESM import + `agent/*` 事件 + `process.env + credentials.set` 双写 + **配置双后端自动判别** + 防御性编码 | `agent/request-error` 载荷 / `0.1.7` 配置迁移机制 / `webServer` API 变化 |
 | dsh-archived-sessions | 0.3.4 | 无（jsonl 后端可选 import + 内置编码 fallback） | `webServer`（`sessionPersistence`/`workspaceRegistry`/`sessionQuery`/`fs`/`shell` 可选） | 路径自解析（root 由 `DSH_HOME` 推导）+ 删除目录名校验 + try/catch + 可选服务失败隔离 | `sessionPersistence` 路径布局 / `workspaceRegistry` 字段变化 / 宿主同槽位撞 slot id（0.3.4 起用 `omdp-` 前缀免疫） |
+
+## DSH 0.1.7 兼容性专项（2026-09-24）
+
+DSH `0.1.7` 引入两处**破坏性变更**，本仓库插件已按"优先双版本兼容"的原则处理：
+
+### 变更 1：profile bundle 版本门禁
+
+`0.1.7` 新增 `evaluatePluginCompatibility`：只检查前缀为 `@deepseek-ai/dsh` / `@deepseek-ai/dsh-*` 的 peer，
+用 `semver.satisfies(runtime, range, { includePrerelease: true })` 判定；不满足则**跳过整个 bundle**
+（打印 `dsh: skipping profile bundle ...`，DSH 本体不崩、退出码仍为 `0`）。可用
+`dsh plugin --profile <p> allow-version <pkg@ver> --dsh-version <ver> --accept-risk` 写
+`profiles/<p>/compatibility.json` 豁免。
+
+| 插件 | 门禁影响 | 处理 |
+|---|---|---|
+| dsh-key-fallback | **原 v3.1.7 被跳过**（3/3 peer 不含 `0.1.7-rc.1`） | v3.2.0 追加 `0.1.7-rc.1`（credentials/llm/settings）与 cordis `4.0.4`、schemastery `3.18.4` |
+| dsh-connector | **不受门禁**（peer 只有 schemastery，非 `dsh-*`） | 无需改动 |
+| dsh-archived-sessions | **不受门禁**（peer 只有 cordis） | 无需改动 |
+| dsh-vision-bridge | **不受门禁**（无 dsh peer） | 无需改动 |
+
+> 注意 `dshCompat` 字段（dsh-bridge 曾用）在 `0.1.7` 源码中**零命中**——它只是自我文档，不参与门禁。
+
+### 变更 2：插件配置从 settings.yaml 迁移到 profile entry config
+
+`0.1.7` 首启会把 `<DSH_HOME>/settings.yaml` **改名为 `settings.yaml.imported`**，逐段写入 profile 补丁
+（`profiles/<p>/cordis.patch.yml`）中对应条目的 `config:`；此后 `ctx.settings.get/register/installSection`
+**全部移除**（实测 `get=undefined installSection=undefined`），改由 `describe`/`update`/`replace`/`mutate`
+操作，配置经 `apply(ctx, config)` 第 2 参注入。
+
+- **迁移前提**：目标条目必须声明 **volatile** 字段（`z.string().volatile()` 或 `s.meta.volatile = true`），
+  否则 `settings.update()` 抛错、仅打印 `settings: section ... was not imported`，配置静默残留在 `.imported`。
+- **版本漂移陷阱**：`.volatile()` 在 schemastery `3.18.4`（0.1.7）可用，但 `3.18.2`（rc.3）**没有**该方法；
+  想同时兼容两版，必须用 `typeof field.volatile === 'function'` 守卫（或用两版都支持的 `meta.volatile = true`）。
+- **`DSH_HOME`**：`0.1.7` 经 `@deepseek-ai/dsh-home-paths` 正式支持（优先级：显式配置 > `$DSH_HOME` > `~/.dsh`）。
+
+### 变更 3：Agent preset 改为声明式（Craft-Agent 相关）
+
+- rc.3 扫 `~/.dsh/.agent-presets/<id>/{agent.cordis.yml,preset.yml}`；`0.1.7` **不再扫描该目录**
+  （源码零命中 `dsh-agent-presets` 复数包），改为由 bundle 提供一条
+  `@deepseek-ai/dsh-agent-preset` 声明（`config.plugins` 即原 `agent.cordis.yml` 数组）。
+- 顺带两处改名/路径失效：`dsh-workflow-worker-thread` → `dsh-workflow-ptc`；
+  原技能目录绝对路径（`dsh-agent-presets/presets/cordis/skills`）失效，改用官方
+  `createRequire(baseUrl).resolve('@deepseek-ai/dsh-agent-preset/package.json')` 写法。
+- ⚠️ **该 preset bundle 在 rc.3 上会硬崩**（`ERR_MODULE_NOT_FOUND: @deepseek-ai/dsh-agent-preset`，退出码 `1`，
+  非"跳过"），因此 `setup.ps1` 以 DSH 自身 `package.json` 是否依赖 `@deepseek-ai/dsh-agent-preset`（单数）
+  作为判据做**版本门控**，只在 `0.1.7`+ 注册该 bundle。
 
 ## 总体结论
 
-1. **活跃插件都不会导致 DSH 崩溃**——这是共同的硬保证（架构设计使然）。
+1. **活跃插件都不会导致 DSH 崩溃**——这是共同的硬保证（架构设计使然）；`0.1.7` 的门禁机制同样只"跳过 bundle"而非崩溃。
 2. **最坏情况**：DSH 大版本更新后，某个插件功能不可用/降级，需适配更新插件版本（不是 DSH 的问题）。
 3. **相互隔离**：任一插件失效，不影响其他插件和 DSH 本体。
 4. **建议**：DSH 大版本升级后，逐个验证活跃插件（connector API、vision-bridge 识图、key-fallback），
    有问题就更新对应插件版本。
+5. **本仓库现状**：`key-fallback` v3.2.0 已实现 rc.3 与 0.1.7 **双版本兼容**，无需为 `0.1.7` 单独发版；
+   其余三个活跃插件不受 `0.1.7` 变更影响，无需发版。

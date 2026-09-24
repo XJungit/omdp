@@ -4,13 +4,54 @@
 
 **Multi-key API key pool with automatic rotation for [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness)** — sits between the LLM adapter and the credential store. Before each request the plugin picks a key from the per-provider pool and pre-writes it into the provider's credential reference; when a configured trigger error occurs it marks the failed key cooling (fixed `cooldownMs`, no exponential backoff) and advances to the next key. **Re-sending is left entirely to DSH's own `dsh-llm-retry`** — this plugin never re-sends on its own; it only switches the key and lets the retry policy decide.
 
-Current version: **v3.1.7** (`v6` UI generation).
+Current version: **v3.2.0** (`v7` UI generation).
 
 ## Requirements
 
 - DeepSeek Harness with a `web`-profile GUI (`npx @deepseek-ai/dsh web`)
 - Node.js `^22.19` or `>=24`
-- Peer ranges strictly enumerate **only compatibility-tested versions** — `@deepseek-ai/dsh-credentials` `0.1.0-rc.6 || 0.1.1-rc.2 || 0.1.2-alpha.1 || 0.1.2-alpha.2 || 0.1.2-alpha.3 || 0.1.2-alpha.4 || 0.1.2-alpha.5 || 0.1.2-rc.1 || 0.1.5-rc.1 || 0.1.5-rc.2 || 0.1.6-alpha.1`, `@deepseek-ai/dsh-llm` / `@deepseek-ai/dsh-settings` `0.1.1-rc.2 || 0.1.2-alpha.1 || 0.1.2-alpha.2 || 0.1.2-alpha.3 || 0.1.2-alpha.4 || 0.1.2-alpha.5 || 0.1.2-rc.1 || 0.1.5-rc.1 || 0.1.5-rc.2 || 0.1.6-alpha.1`, `@deepseek-ai/cordis` `4.0.1 || 4.0.2`, `@deepseek-ai/schemastery` `3.18.1 || 3.18.2`. No open-ended ranges (`<0.2.0`, caret): untested versions are deliberately excluded until verified. The plugin only uses the credential-reference half (`resolve`/`describe`/`set`/`unset`/`credentialRef` — stable since `0.1.0-rc.6`) and the `agent/request` + `agent/request-error` waterfall (payload unchanged across the enumerated versions); `isCredentialRefName` (added `rc.8`) is implemented locally for compatibility. The `0.1.2-alpha.2 → alpha.5 → 0.1.2-rc.1` companion packages are byte-identical (2026-09-03 verified), so DSH `0.1.2-rc.1` (`next`) needs no plugin change.
+- Peer ranges strictly enumerate **only compatibility-tested versions** — `@deepseek-ai/dsh-credentials` `0.1.0-rc.6 || 0.1.1-rc.2 || 0.1.2-alpha.1 || 0.1.2-alpha.2 || 0.1.2-alpha.3 || 0.1.2-alpha.4 || 0.1.2-alpha.5 || 0.1.2-rc.1 || 0.1.5-rc.1 || 0.1.5-rc.2 || 0.1.5-rc.3 || 0.1.6-alpha.1 || 0.1.7-rc.1`, `@deepseek-ai/dsh-llm` / `@deepseek-ai/dsh-settings` `0.1.1-rc.2 || 0.1.2-alpha.1 || 0.1.2-alpha.2 || 0.1.2-alpha.3 || 0.1.2-alpha.4 || 0.1.2-alpha.5 || 0.1.2-rc.1 || 0.1.5-rc.1 || 0.1.5-rc.2 || 0.1.5-rc.3 || 0.1.6-alpha.1 || 0.1.7-rc.1`, `@deepseek-ai/cordis` `4.0.1 || 4.0.2 || 4.0.4`, `@deepseek-ai/schemastery` `3.18.1 || 3.18.2 || 3.18.4`. No open-ended ranges (`<0.2.0`, caret): untested versions are deliberately excluded until verified. The plugin only uses the credential-reference half (`resolve`/`describe`/`set`/`unset`/`credentialRef` — stable since `0.1.0-rc.6`) and the `agent/request` + `agent/request-error` waterfall (payload unchanged across the enumerated versions); `isCredentialRefName` (added `rc.8`) is implemented locally for compatibility. The `0.1.2-alpha.2 → alpha.5 → 0.1.2-rc.1` companion packages are byte-identical (2026-09-03 verified), so DSH `0.1.2-rc.1` (`next`) needs no plugin change.
+
+## What v3.2.0 offers
+
+- **DSH `0.1.7-rc.1` support declared, with `0.1.5-rc.3` kept** (2026-09-24). This release is the first to need an
+  actual code change, because DSH `0.1.7` **relocates plugin configuration**: see the next section.
+
+### Two config backends, one build
+
+Since DSH `0.1.7`, plugin configuration stopped living in `<DSH_HOME>/settings.yaml`. On first boot, `0.1.7`
+**renames that file to `settings.yaml.imported`** and copies each section into the profile patch
+(`~/.dsh/profiles/<profile>/cordis.patch.yml`) as the `config:` of the matching loader entry; from then on the
+`settings` service owns it, and plugins read it through an injected `config` parameter instead of touching the
+YAML file. `ctx.settings.get()` / `register()` / `installSection()` — the rc.x API — **no longer exist** on `0.1.7`.
+
+This plugin therefore auto-detects the backend at startup and keeps both paths working:
+
+| | DSH `0.1.5-rc.3` (and older rc.x) | DSH `0.1.7-rc.1` (and newer) |
+|---|---|---|
+| Where pools live | `<DSH_HOME>/settings.yaml`, section `key-fallback:` | profile patch, the `key-fallback` entry's `config` |
+| How the plugin reads/writes | reads/writes that YAML file directly (with timestamped backups) | `config.providers` is a live volatile ref; writes go through `settings.replace()` |
+| Detection | no volatile-schema support ⇒ file backend | `Config` declares a volatile field ⇒ backend comes from `config` |
+
+Two implementation notes that matter if you port this pattern elsewhere:
+
+1. **`Config` must exist, or the migration silently drops your config.** `0.1.7`'s import path calls
+   `settings.update(ns, values)`, which throws unless the entry declares a **volatile** field; on failure it logs
+   `settings: section ... was not imported` and the section survives only inside `settings.yaml.imported`. So
+   `v3.2.0` exports `Config = z.object({ providers: <dict>.volatile() })`.
+2. **The volatile API differs between the two schemastery builds.** `.volatile()` is available in schemastery
+   `3.18.4` (`0.1.7`) but **not** in `3.18.2` (`rc.3`) — calling it there returns `undefined` and registering a
+   schema without it would change rc.3 behaviour. The export is therefore guarded:
+   `typeof field.volatile === 'function' ? z.object({ providers: field.volatile() }) : undefined` — rc.3 gets
+   **no** `Config` (byte-identical behaviour to v3.1.x) while `0.1.7` gets the volatile one.
+
+The values from `config.providers` are deep-frozen by DSH, so `readSettings()` hands callers a mutable deep copy;
+writes are applied optimistically to an in-memory copy and flushed via `settings.replace()` (an unresolved-write
+counter prevents the UI from briefly re-reading the pre-write tree).
+
+Both backends were exercised end-to-end on real installs: read (both providers appear in `/dsh-key-fallback/pools`
+with live env-key values), create/update/delete (POST/DELETE round-trip, persisted), and the rc.3 regression
+(`settings.yaml` untouched and *not* renamed, `cordis.patch.yml` still `[]`, backups still written).
 
 ## What v3.1.7 offers
 
@@ -81,7 +122,7 @@ dsh plugin --profile web add link:D:/WorkSpace/omdp/dsh-key-fallback
 ## Known limitations
 
 - Cooldown is a fixed per-pool `cooldownMs` (no exponential backoff); a cooled key becomes live again when the timer expires.
-- The plugin manages rotation/cooldown state in-memory plus persisted pool config (`keyFallback.providers` in `settings.yaml`); a DSH restart re-reads config and recomputes live status.
+- The plugin manages rotation/cooldown state in-memory plus persisted pool config; a DSH restart re-reads config and recomputes live status. On DSH `0.1.5-rc.3` and older that config is the `key-fallback` section of `<DSH_HOME>/settings.yaml`; on `0.1.7`+ it is the `key-fallback` entry's `config` inside `~/.dsh/profiles/<profile>/cordis.patch.yml`.
 - The env key cannot be deleted through the UI (it is the pool's identity).
 
 ## License

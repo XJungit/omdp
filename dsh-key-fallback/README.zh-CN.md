@@ -1,16 +1,56 @@
 # @omdp/dsh-key-fallback
 
-English | [简体中文](README.md)
+[English](README.md) | 简体中文
 
 **为 [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) 提供多 key 池 + 自动轮换**——插件位于 LLM 适配器与凭证存储之间：每次请求前从按 provider 分组的 key 池里选一把，预写入该 provider 的凭证引用；遇到配置的触发错误时，把失败 key 标记为冷却（固定 `cooldownMs`，无指数退避）并前进到下一把。**重发完全交给 DSH 自带的 `dsh-llm-retry`**——本插件从不自行重发，只负责换 key，重试策略由 retry policy 决定。
 
-当前版本：**v3.1.7**（v6 UI 代）。
+当前版本：**v3.2.0**（v7 UI 代）。
 
 ## 环境要求
 
 - DeepSeek Harness 带 `web` profile GUI（`npx @deepseek-ai/dsh web`）
 - Node.js `^22.19` 或 `>=24`
-- peer 范围**只枚举已实际进行过兼容测试的版本**——`@deepseek-ai/dsh-credentials` `0.1.0-rc.6 || 0.1.1-rc.2 || 0.1.2-alpha.1 || 0.1.2-alpha.2 || 0.1.2-alpha.3 || 0.1.2-alpha.4 || 0.1.2-alpha.5 || 0.1.2-rc.1 || 0.1.5-rc.1 || 0.1.5-rc.2 || 0.1.6-alpha.1`、`@deepseek-ai/dsh-llm` / `@deepseek-ai/dsh-settings` `0.1.1-rc.2 || 0.1.2-alpha.1 || 0.1.2-alpha.2 || 0.1.2-alpha.3 || 0.1.2-alpha.4 || 0.1.2-alpha.5 || 0.1.2-rc.1 || 0.1.5-rc.1 || 0.1.5-rc.2 || 0.1.6-alpha.1`、`@deepseek-ai/cordis` `4.0.1 || 4.0.2`、`@deepseek-ai/schemastery` `3.18.1 || 3.18.2`。不使用 `<0.2.0`、caret 之类的开放范围：未测试版本在核查通过前刻意排除。插件只使用 credential-reference 半边（`resolve`/`describe`/`set`/`unset`/`credentialRef`，自 `0.1.0-rc.6` 起稳定）与 `agent/request` + `agent/request-error` waterfall（载荷跨上述枚举版本未变）；`isCredentialRefName`（rc.8 新增）本地实现兜底。`0.1.2-alpha.2 → alpha.5 → 0.1.2-rc.1` 配套包逐字节一致（2026-09-03 复核），故 DSH `0.1.2-rc.1`（`next`）无需改动插件。
+- peer 范围**只枚举已实际进行过兼容测试的版本**——`@deepseek-ai/dsh-credentials` `0.1.0-rc.6 || 0.1.1-rc.2 || 0.1.2-alpha.1 || 0.1.2-alpha.2 || 0.1.2-alpha.3 || 0.1.2-alpha.4 || 0.1.2-alpha.5 || 0.1.2-rc.1 || 0.1.5-rc.1 || 0.1.5-rc.2 || 0.1.5-rc.3 || 0.1.6-alpha.1 || 0.1.7-rc.1`、`@deepseek-ai/dsh-llm` / `@deepseek-ai/dsh-settings` `0.1.1-rc.2 || 0.1.2-alpha.1 || 0.1.2-alpha.2 || 0.1.2-alpha.3 || 0.1.2-alpha.4 || 0.1.2-alpha.5 || 0.1.2-rc.1 || 0.1.5-rc.1 || 0.1.5-rc.2 || 0.1.5-rc.3 || 0.1.6-alpha.1 || 0.1.7-rc.1`、`@deepseek-ai/cordis` `4.0.1 || 4.0.2 || 4.0.4`、`@deepseek-ai/schemastery` `3.18.1 || 3.18.2 || 3.18.4`。不使用 `<0.2.0`、caret 之类的开放范围：未测试版本在核查通过前刻意排除。插件只使用 credential-reference 半边（`resolve`/`describe`/`set`/`unset`/`credentialRef`，自 `0.1.0-rc.6` 起稳定）与 `agent/request` + `agent/request-error` waterfall（载荷跨上述枚举版本未变）；`isCredentialRefName`（rc.8 新增）本地实现兜底。`0.1.2-alpha.2 → alpha.5 → 0.1.2-rc.1` 配套包逐字节一致（2026-09-03 复核），故 DSH `0.1.2-rc.1`（`next`）无需改动插件。
+
+## v3.2.0 新增
+
+- **声明支持 DSH `0.1.7-rc.1`，同时保留 `0.1.5-rc.3`**（2026-09-24）。这是本插件首个需要改动代码的版本，原因是 DSH `0.1.7`
+  **改变了插件配置的存放位置**——详见下节。
+
+### 两种配置后端，同一份构建
+
+自 DSH `0.1.7` 起，插件配置不再位于 `<DSH_HOME>/settings.yaml`。首次启动时 `0.1.7` 会把该文件
+**改名成 `settings.yaml.imported`**，并把每个段的内容写入 profile 补丁
+（`~/.dsh/profiles/<profile>/cordis.patch.yml`）中对应 loader 条目的 `config:`；此后由 `settings` 服务托管，
+插件通过注入的 `config` 参数读取，而不再自行读写该 YAML。rc.x 时代的 `ctx.settings.get()` /
+`register()` / `installSection()` 在 `0.1.7` 上**已不存在**。
+
+因此本插件在启动时自动判别后端，两条路径同时可用：
+
+| | DSH `0.1.5-rc.3`（及更早 rc.x） | DSH `0.1.7-rc.1`（及更新） |
+|---|---|---|
+| 池配置位置 | `<DSH_HOME>/settings.yaml` 的 `key-fallback:` 段 | profile 补丁中 `key-fallback` 条目的 `config` |
+| 插件如何读写 | 直接读写该 YAML 文件（附时间戳备份） | `config.providers` 是活的 volatile ref；写入走 `settings.replace()` |
+| 判别方式 | 无 volatile schema 支持 ⇒ 文件后端 | `Config` 声明了 volatile 字段 ⇒ 后端来自 `config` |
+
+移植该模式时有两个关键点：
+
+1. **必须声明 `Config`，否则迁移会静默丢弃配置。** `0.1.7` 的导入路径调用
+   `settings.update(ns, values)`，若该条目没有声明 **volatile** 字段就会抛错，仅打印
+   `settings: section ... was not imported`，配置只残留在 `settings.yaml.imported` 里。因此
+   `v3.2.0` 导出 `Config = z.object({ providers: <dict>.volatile() })`。
+2. **volatile API 在两种 schemastery 构建上不同。** `.volatile()` 在 schemastery `3.18.4`（`0.1.7`）上可用，
+   但在 `3.18.2`（`rc.3`）上**不存在**——在那里调用会得到 `undefined`，而若据此注册一个无 volatile 的
+   schema 就会改变 rc.3 的行为。故导出做了守卫：
+   `typeof field.volatile === 'function' ? z.object({ providers: field.volatile() }) : undefined`——
+   rc.3 拿到 **没有** `Config`（行为与 v3.1.x 逐字节一致），`0.1.7` 拿到含 volatile 的那一份。
+
+`config.providers` 的值被 DSH 深度冻结，故 `readSettings()` 向调用方返回可变深拷贝；写入先乐观地更新内存副本
+再经 `settings.replace()` 落盘（未决写入计数避免 UI 短暂读回写入前的旧树）。
+
+两条后端均已在真实安装上端到端实测：读取（两个 provider 都出现在 `/dsh-key-fallback/pools`，含 env key 实时值）、
+增删改（POST/DELETE 往返并落盘）、以及 rc.3 回归（`settings.yaml` 未被改名也未改内容、`cordis.patch.yml` 仍为
+`[]`、备份照旧生成）。
 
 ## v3.1.7 新增
 
@@ -81,7 +121,7 @@ dsh plugin --profile web add link:D:/WorkSpace/omdp/dsh-key-fallback
 ## 已知限制
 
 - 冷却为每池固定 `cooldownMs`（无指数退避）；冷却到期 key 自动恢复 live。
-- 轮换/冷却状态为内存态 + 持久化池配置（`settings.yaml` 的 `keyFallback.providers`）；DSH 重启会重读配置并重算 live 状态。
+- 轮换/冷却状态为内存态 + 持久化池配置；DSH 重启会重读配置并重算 live 状态。在 DSH `0.1.5-rc.3` 及更早版本上，该配置是 `<DSH_HOME>/settings.yaml` 的 `key-fallback` 段；在 `0.1.7`+ 上则是 `~/.dsh/profiles/<profile>/cordis.patch.yml` 中 `key-fallback` 条目的 `config`。
 - env key 不能通过 UI 删除（它是池的身份标识）。
 
 ## License
