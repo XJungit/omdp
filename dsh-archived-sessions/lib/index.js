@@ -126,15 +126,27 @@ function assertSessionDirName(dirPath) {
 
 /** Delete a directory recursively through the shell executor (pwsh / rm).
  *
- * DSH 0.1.7's shell service has no `run()`: a caller resolves a request into a
- * spec, executes the spec to get a handle, then awaits the handle's `result()`.
- * Requiring `run()` here made every delete throw "shell executor unavailable"
- * before it ever touched the disk — the 0.3.x delete banner bug.
+ * `ctx.shell` changed shape in DSH 0.1.7 — the method set is version-dependent,
+ * so this must NOT hard-require either one:
+ *   · 0.1.7+  : `resolve()` → `execute(spec)` → `ShellExecution` → `await result()`
+ *   · ≤0.1.6  : `resolve()` → `run(spec)` → `Promise<ShellRunResult>` (direct)
+ * `dsh-shell`'s own `.d.ts` proves the split: 0.1.5-rc.3 / 0.1.6-alpha.1 declare
+ * only `run`/`start`, while 0.1.7-rc.1 declares only `resolve`/`execute`.
+ *
+ * 0.3.4 required `run()` (worked on rc.x, failed on 0.1.7);
+ * 0.3.5 required `execute()` (worked on 0.1.7, silently broke rc.x).
+ * Each single-method gate turned the other era into "every delete throws before
+ * it touches the disk — the 0.3.x delete banner bug". Detect at call time.
  */
 async function removeDir(ctx, dirPath) {
   assertSessionDirName(dirPath);
   const shell = ctx.get("shell");
-  if (!shell || typeof shell.resolve !== "function" || typeof shell.execute !== "function") {
+  if (!shell || typeof shell.resolve !== "function") {
+    throw new Error("shell executor unavailable; cannot delete from disk");
+  }
+  const useExecute = typeof shell.execute === "function";
+  const useRun = !useExecute && typeof shell.run === "function";
+  if (!useExecute && !useRun) {
     throw new Error("shell executor unavailable; cannot delete from disk");
   }
   const isWindows = /^[A-Za-z]:[\\/]/.test(dirPath);
@@ -152,8 +164,12 @@ async function removeDir(ctx, dirPath) {
   }
   let result;
   try {
-    const execution = await shell.execute(spec);
-    result = await execution.result();
+    if (useExecute) {
+      const execution = await shell.execute(spec);
+      result = await execution.result();
+    } else {
+      result = await shell.run(spec);
+    }
   } catch (e) {
     throw new Error("删除失败: " + String((e && e.message) || e));
   }
