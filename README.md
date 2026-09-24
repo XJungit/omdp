@@ -202,6 +202,7 @@ Local `link:` installs (`"@omdp/<plugin>": "link:<abs-path>/omdp/<plugin>"`) sti
 | [`docs/AI-DSH-plugin-quality.md`](docs/AI-DSH-plugin-quality.md) | community research: why AI-written DSH plugins break, and defensive practices |
 | [`docs/DSH-plugin-quality-zh-discussion.md`](docs/DSH-plugin-quality-zh-discussion.md) | Chinese write-up of the same research + omdp practice |
 | [`docs/dsh-drag-and-drop-troubleshooting.md`](docs/dsh-drag-and-drop-troubleshooting.md) | troubleshooting record for the `dsh-drag-and-drop` plugin (Windows/Chinese) |
+| [`docs/9router-opencode-zen.md`](docs/9router-opencode-zen.md) | **single entry point** for reaching OpenCode Zen free models via 9router: the 4-axis gate, error-code triage, upgrade SOP (+ the control-group method for telling "upstream fixed it" from "Zen relaxed it") |
 | [`notes/README.md`](notes/README.md) | development lessons & notes index (`notes/<date>/<category>/`) — see [AGENTS.md](AGENTS.md) 规范 2 |
 
 ---
@@ -404,4 +405,5 @@ GitHub 安装（`dsh plugin add github:XJungit/omdp#path:<插件>`）能用，�
 | [`docs/AI-DSH-plugin-quality.md`](docs/AI-DSH-plugin-quality.md) | 社区研究：为什么 AI 写的 DSH 插件会坏，以及防御性实践 |
 | [`docs/DSH-plugin-quality-zh-discussion.md`](docs/DSH-plugin-quality-zh-discussion.md) | 同一研究的中文版 + omdp 实践 |
 | [`docs/dsh-drag-and-drop-troubleshooting.md`](docs/dsh-drag-and-drop-troubleshooting.md) | `dsh-drag-and-drop` 插件排障记录（Windows/中文） |
+| [`docs/9router-opencode-zen.md`](docs/9router-opencode-zen.md) | **经 9router 接入 OpenCode Zen 免费模型的唯一入口**：四维门禁判据、错误码决策树、升级 SOP（含「上游修复 vs 门禁放宽」的对照组判定法） |
 | [`notes/README.md`](notes/README.md) | 开发教训与笔记索引（`notes/<date>/<category>/`）——见 [AGENTS.md](AGENTS.md) 规范 2 |

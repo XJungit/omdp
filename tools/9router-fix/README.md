@@ -53,9 +53,9 @@ packages/opencode/src/tool/shell/id.ts               export const ToolID = "bash
 **`glob`/`grep` 不是判据**：早期「四件套 `{bash,glob,grep,read}`」的结论是对第一次二分的**过拟合**
 （四件套恰好包含必需的 `read`+`bash`，所以能过；而 `{bash,glob,grep}` 失败是因为缺 `read`，不是因为缺第四个名字）。
 
-9router（含当前上游 master v0.5.75）**四项全违反**：UA 发裸 `"opencode"`、
-session 发 `ses_`+32 位 hex、调用方工具集常常缺 `read`/`bash`、且经常非流式。
-本脚本就地修正编译产物中的这四处。
+9router **≤ v0.5.75** 曾四项全违反：UA 发裸 `"opencode"`、session 发 `ses_`+32 位 hex、
+调用方工具集常常缺 `read`/`bash`、且经常非流式 —— 本脚本就地修正编译产物中的这四处。
+**v0.5.86 起上游自己修好了**（见顶部状态说明与 `docs/9router-opencode-zen.md`）。
 
 ### 已排除的因素（2026-09-18 实测）
 
@@ -184,7 +184,11 @@ C 层覆盖**两条通道**：4 个 chat 模型 + 2 个 `muse-spark-*`（走 `/r
 > 用来判断「是 Zen 变了还是 9router 变了」——这次正是靠它把
 > 「上游修复」（A 层不变、C 层转变）与「门禁放宽」（A 层会变）区分开。
 
-## 给 DSH 插件作者（如 opencode2dsh / 自研 provider）
+## 给「将来若还要自研 provider」的参考清单
+
+> **当前方向已定：直接用 9router，不自研 DSH provider 插件**（决策依据见
+> [`../../docs/9router-opencode-zen.md`](../../docs/9router-opencode-zen.md) 第 2 节）。
+> 本节保留为**参考**：万一 9router 停止跟门禁，或要接其它受限端点时用得上。
 
 同一门禁也约束**任何**代理 Zen 免费层的 DSH provider 插件。自查清单：
 
@@ -196,7 +200,12 @@ C 层覆盖**两条通道**：4 个 chat 模型 + 2 个 `muse-spark-*`（走 `/r
    若原样透传工具集就会 403，必须补一个 `bash` 声明；
    补的声明是**纯指纹**（空 schema、无实现），实测在真实工具集在场时不会被模型选中；
    同时**去重**要识别 nested/flat 两种形状，**重名会被上游 400 拒绝**；
-4. 必须 `stream: true`。
+4. 必须 `stream: true`；
+5. **按通道给对形状**（responses 扁平 / chat nested），否则是 400 而非 403 ——
+   静默挂掉整条通道。
+
+> 上游 9router 的做法值得抄：注入时把别名映射成必需名、**响应里再映射回原名**，
+> 比空壳注入更完备（不会出现「模型调用了假工具」）。
 
 > 相关：DSH 为何在 Windows 上只给 `pwsh`（且不是"缺 bash"）见
 > [`../../notes/2026-09-18/dsh-internals/windows-shell-tool-pwsh-not-bash.md`](../../notes/2026-09-18/dsh-internals/windows-shell-tool-pwsh-not-bash.md)
