@@ -54,7 +54,7 @@ omdp/
 
 ### Plugins
 
-#### `@omdp/dsh-connector` — MCP + Skills manager (`v0.3.3`)
+#### `@omdp/dsh-connector` — MCP + Skills manager (`v0.3.4`)
 
 One settings tab (**Connector**) that manages three things from the DSH Web UI:
 
@@ -63,12 +63,13 @@ One settings tab (**Connector**) that manages three things from the DSH Web UI:
 - **Market explorer (v0.2.0+)** — read-only browsing of ModelScope [Skills hub](https://modelscope.cn/skills) and [MCP plaza](https://modelscope.cn/mcp) via anonymous OpenAPI; one-click copy of install commands / `mcpServers` config snippets, skill "check update" via `source`/`sourceUpdated` frontmatter. Market data lives only in process memory (30-min TTL), never on disk.
 - **Tool filter (v0.3.0+)** — per-server allow-list for MCP tools (DSH 0.1.7+: the `connector` profile entry's `config.toolFilters`; older rc.x: `settings.yaml` `connector.toolFilters`), prompt hiding + execution guard; unset = allow all.
 - **DSH 0.1.7 support (v0.3.3)** — `jsdom` is no longer imported at module top level (a `punycode/` resolution defect in DSH's package resolver made the whole plugin fail to import); tool filters moved to the volatile `Config` / `settings.replace()` backend while keeping the rc.x `settings.yaml` backend.
+- **Declared DSH support + a stranded-filter rescue (v0.3.4)** — new `@deepseek-ai/dsh` peer (`0.1.7-rc.1`, enumerated per version), enforced by DSH's own `evaluatePluginCompatibility()`: an untested newer runtime has the bundle gracefully skipped instead of failing undefined-ly, while runtimes `≤0.1.6` just see an unrecognized peer (the gate does not exist before 0.1.7). Also fixes tool filters silently reverting to allow-all: 0.1.7's one-shot importer renames `settings.yaml` → `settings.yaml.imported` and **silently skips sections without a volatile `Config`**, so `connector.toolFilters` stayed behind in `.imported`; `ensureLegacyFiltersMigration()` now moves it back on the first request (never overwriting filters you already have, never deleting `.imported`).
 
 ```jsonc
-"dependencies": { "@omdp/dsh-connector": "^0.3.3" }
+"dependencies": { "@omdp/dsh-connector": "^0.3.4" }
 ```
 
-#### `@omdp/dsh-key-fallback` — multi-key API key pool with rotation (`v3.2.1`)
+#### `@omdp/dsh-key-fallback` — multi-key API key pool with rotation (`v3.2.2`)
 
 Sits between the LLM adapter and the credential store. Before each request the plugin picks a key from the per-provider pool and pre-writes it into the provider's credential reference; on a configured trigger error it marks the failed key cooling and advances to the next key — **re-sending is left entirely to DSH's own `dsh-llm-retry`**. Ships an always-visible settings page (**Settings → API Key 回退**) with a redesigned UI:
 
@@ -78,9 +79,10 @@ Sits between the LLM adapter and the credential store. Before each request the p
 - **Plaintext reveal** via an eye toggle (`GET /keys/plain`, pool-owned keys / env key only) and **editable env keys** (file-backed ones; read-only when supplied by the launching environment).
 - Per-key `nextRef`, pool lock ("设为当前"), cooldown reset, and delete.
 - **DSH 0.1.7 support (v3.2.0/v3.2.1)** — dual config backend: the volatile `Config` / `settings.replace()` profile-entry backend on 0.1.7+, the `settings.yaml` file backend on older rc.x. v3.2.1 adds a one-shot rescue that recovers pools stranded in `settings.yaml.imported` (the 0.1.7 migration renames the file, so the file-reading backend never sees them again).
+- **Declared DSH support (v3.2.2)** — new `@deepseek-ai/dsh` peer (`0.1.7-rc.1`, enumerated per version), making the supported runtime an explicit, machine-checked contract (see the connector entry above for the gate's semantics).
 
 ```jsonc
-"dependencies": { "@omdp/dsh-key-fallback": "^3.2.1" }
+"dependencies": { "@omdp/dsh-key-fallback": "^3.2.2" }
 ```
 
 #### `@omdp/dsh-vision-bridge` — vision for text-only models (`v0.1.12`)
@@ -91,7 +93,7 @@ A zero-dependency plugin that gives **text-only models** vision: it auto-detects
 "dependencies": { "@omdp/dsh-vision-bridge": "^0.1.12" }
 ```
 
-#### `@omdp/dsh-archived-sessions` — archived-session manager (`v0.3.5`)
+#### `@omdp/dsh-archived-sessions` — archived-session manager (`v0.3.6`)
 
 Fork of [`@muwinds/dsh-archived-sessions`](https://github.com/MuWinds/dsh-archived-sessions) 0.2.0, adapted for **DSH 0.1.5-rc.1**, **0.1.6-alpha.1** (since 0.3.4) and **0.1.7-rc.1** (since 0.3.5) — upstream is unmaintained and broken on 0.1.5+ (`sessionPersistence.list()` returns snapshots, `locate()` was removed). Adds **Settings → 归档会话管理**, coexisting with the native archived-sessions page introduced in DSH 0.1.6:
 
@@ -100,10 +102,11 @@ Fork of [`@muwinds/dsh-archived-sessions`](https://github.com/MuWinds/dsh-archiv
 - **Delete** (删除): delete the session directory + prune the archive id (two-step confirm);
 - **Tree delete**: deleting a main session also deletes its `parentSession` subtree (fixes upstream issue #2 — orphan subagents);
 - **Orphan sweep**: scan and clean leftover subagent dirs whose parent session is already gone;
-- Deletion safety: refuses to delete any path whose directory name is not a session dir (`session-<uuid>` or bare UUID); on DSH 0.1.7 deletion goes through `ctx.shell.resolve()` → `execute()` → `result()` (the old `shell.run()` was removed — that is the 0.3.5 fix, without which every delete failed with "shell executor unavailable").
+- Deletion safety: refuses to delete any path whose directory name is not a session dir (`session-<uuid>` or bare UUID); deletion is **dual-era** since 0.3.6 — it prefers `ctx.shell.resolve()` → `execute()` → `await result()` on DSH 0.1.7+, and falls back to `resolve()` → `run()` on ≤0.1.6, so one build deletes across the whole line. (0.3.5 only called `execute()` — which fixed 0.1.7 but silently broke rc.x, where `run()` is the only method; 0.3.4 had the mirror-image bug. Verified by unpacking each `@deepseek-ai/dsh-shell` tarball's `lib/types/index.d.ts`.)
+- Declared DSH support (0.3.6): `@deepseek-ai/dsh` peer `0.1.7-rc.1`, enumerated per version.
 
 ```jsonc
-"dependencies": { "@omdp/dsh-archived-sessions": "^0.3.5" }
+"dependencies": { "@omdp/dsh-archived-sessions": "^0.3.6" }
 ```
 
 ### Installing from npm (recommended)
@@ -113,10 +116,10 @@ All four plugins are published to **npm** automatically by GitHub Actions on eve
 ```jsonc
 // ~/.dsh/profiles/<name>/package.json — you can use one or mix-and-match
 "dependencies": {
-  "@omdp/dsh-connector": "^0.3.3",
+  "@omdp/dsh-connector": "^0.3.4",
   "@omdp/dsh-vision-bridge": "^0.1.12",
-  "@omdp/dsh-key-fallback": "^3.2.1",
-  "@omdp/dsh-archived-sessions": "^0.3.5"
+  "@omdp/dsh-key-fallback": "^3.2.2",
+  "@omdp/dsh-archived-sessions": "^0.3.6"
 }
 ```
 
@@ -164,10 +167,10 @@ The same monorepo layout is used by other DSH plugin collections, e.g. [zhu10900
 ### Releasing a new version (GitHub Actions)
 
 1. Bump `version` in the subdirectory's `package.json` (only the one(s) you touched).
-2. Commit, then tag and push:
+2. Commit, then tag and push — one tag per released package, `<version>-<plugin>`:
    ```sh
-   git tag v3.2.1
-   git push origin master && git push origin v3.2.1
+   git tag v0.3.4-dsh-connector
+   git push origin master && git push origin v0.3.4-dsh-connector
    ```
 3. `.github/workflows/publish.yml` publishes the touched packages to npm with provenance (re-publishing an already-published version is a no-op — skip message is printed).
 4. Update your profile: `pnpm update @omdp/<plugin>`.
@@ -252,7 +255,7 @@ omdp/
 
 ### 插件
 
-#### `@omdp/dsh-connector` — MCP + Skills 管理器（`v0.3.3`）
+#### `@omdp/dsh-connector` — MCP + Skills 管理器（`v0.3.4`）
 
 一个设置页（**Connector**），从 DSH Web UI 管理三件事：
 
@@ -261,12 +264,13 @@ omdp/
 - **市场浏览器（v0.2.0+）** —— 匿名 OpenAPI 只读浏览 ModelScope [Skills 集市](https://modelscope.cn/skills) 与 [MCP 广场](https://modelscope.cn/mcp)；一键复制安装命令 / `mcpServers` 配置片段；通过 `source`/`sourceUpdated` frontmatter 检查技能更新。市场数据只存进程内存（30 分钟 TTL），绝不落盘。
 - **工具过滤（v0.3.0+）** —— 每 server 的 MCP 工具 allow 名单（DSH 0.1.7+ 存 `connector` profile 条目的 `config.toolFilters`；旧版 rc.x 存 `settings.yaml` 的 `connector.toolFilters`），提示词隐藏 + 执行期拦截；不配 = 全放行。
 - **DSH 0.1.7 适配（v0.3.3）** —— `jsdom` 不再顶层静态 import（DSH 包解析器对 `punycode/` 这类「内置名 + 子路径」会抛 `TypeError`，导致整个插件 import 失败、设置页永远停在「已安装，重启后生效」）；工具过滤迁到 volatile `Config` / `settings.replace()`，同时保留 rc.x 的 `settings.yaml` 后端。
+- **声明 DSH 版本支持 + 抢救滞留的过滤规则（v0.3.4）** —— 新增 `@deepseek-ai/dsh` peer（`0.1.7-rc.1`，逐版本枚举），由 DSH 自己的 `evaluatePluginCompatibility()` 执行：未实测的新运行时会让 bundle 被**优雅跳过**（而不是以未定义方式崩掉），而 `≤0.1.6` 的运行时只是看到一条不认识的 peer（该门禁 0.1.7 才引入）。同时修复工具过滤静默变回「全放行」：0.1.7 的一次性导入器把 `settings.yaml` 改名为 `settings.yaml.imported`，并**静默跳过没有 volatile `Config` 的段**，于是 `connector.toolFilters` 被留在 `.imported`；`ensureLegacyFiltersMigration()` 会在首个请求时把它搬回（不覆盖你已有的过滤规则、不删 `.imported`）。
 
 ```jsonc
-"dependencies": { "@omdp/dsh-connector": "^0.3.3" }
+"dependencies": { "@omdp/dsh-connector": "^0.3.4" }
 ```
 
-#### `@omdp/dsh-key-fallback` — 多 key API 池 + 轮换（`v3.2.1`）
+#### `@omdp/dsh-key-fallback` — 多 key API 池 + 轮换（`v3.2.2`）
 
 位于 LLM 适配器与凭据存储之间。每次请求前，插件从对应 provider 的 key 池里选一把，预写入 provider 的凭据引用；遇配置的触发错误时，把失败 key 标记为冷却并切到下一把——**重发完全交给 DSH 自带的 `dsh-llm-retry`**。带一个常驻可见的设置页（**设置 → API Key 回退**）与全新 UI：
 
@@ -276,9 +280,10 @@ omdp/
 - 眼睛开关**明文揭示**（`GET /keys/plain`，仅限池内 key / env key）与**可编辑 env key**（文件托管的可编辑；由启动环境注入的只读）。
 - 每把 key 的 `nextRef`、池锁定（"设为当前"）、冷却重置与删除。
 - **DSH 0.1.7 适配（v3.2.0/v3.2.1）** —— 配置双后端：0.1.7+ 用 volatile `Config` / `settings.replace()` 写本插件 profile 条目，旧版 rc.x 用 `settings.yaml` 文件后端。v3.2.1 追加一次性救援：把残留在 `settings.yaml.imported` 里的池捞回来（0.1.7 的迁移会改名该文件，文件后端从此再也看不到它们，被救池表现为「尚未启用 / 还没有任何池」且重启无效）。
+- **声明 DSH 版本支持（v3.2.2）** —— 新增 `@deepseek-ai/dsh` peer（`0.1.7-rc.1`，逐版本枚举），把「支持的运行时」变成显式且机器可校验的契约（门禁语义见上方 connector 条目）。
 
 ```jsonc
-"dependencies": { "@omdp/dsh-key-fallback": "^3.2.1" }
+"dependencies": { "@omdp/dsh-key-fallback": "^3.2.2" }
 ```
 
 #### `@omdp/dsh-vision-bridge` — 给纯文本模型的视觉（`v0.1.12`）
@@ -289,7 +294,7 @@ omdp/
 "dependencies": { "@omdp/dsh-vision-bridge": "^0.1.12" }
 ```
 
-#### `@omdp/dsh-archived-sessions` — 归档会话管理（`v0.3.5`）
+#### `@omdp/dsh-archived-sessions` — 归档会话管理（`v0.3.6`）
 
 fork 自 [`@muwinds/dsh-archived-sessions`](https://github.com/MuWinds/dsh-archived-sessions) 0.2.0，适配 **DSH 0.1.5-rc.1**，0.3.4 起适配 **DSH 0.1.6-alpha.1**、0.3.5 起适配 **DSH 0.1.7-rc.1**（上游已不维护，且在 0.1.5+ 下损坏：`sessionPersistence.list()` 返回快照、`locate()` 被移除）。新增 **设置 → 归档会话管理**，与 DSH 0.1.6 起内置的原生「已归档会话」页共存：
 
@@ -298,10 +303,11 @@ fork 自 [`@muwinds/dsh-archived-sessions`](https://github.com/MuWinds/dsh-archi
 - **删除**：删会话目录 + 移除归档标记（两步确认）；
 - **按树删除**：删主会话时连同其 `parentSession` 子树一起删（修复上游 issue #2——孤儿子代理）；
 - **孤儿清理**：扫描并清理「父会话已删除、自己还在盘上」的残留子会话目录；
-- 删除安全：目录名不是会话目录（`session-<uuid>` 或裸 UUID）一律拒绝删除；DSH 0.1.7 下删除走 `ctx.shell.resolve()` → `execute()` → `result()`（旧的 `shell.run()` 已被移除——这就是 0.3.5 的修复点，不修则所有删除都报「shell executor unavailable」）。
+- 删除安全：目录名不是会话目录（`session-<uuid>` 或裸 UUID）一律拒绝删除；删除自 0.3.6 起**双时代自适应**——DSH 0.1.7+ 走 `ctx.shell.resolve()` → `execute()` → `await result()`，`≤0.1.6` 回退 `resolve()` → `run()`，一份构建覆盖整条版本线。（0.3.5 只调 `execute()`：修好了 0.1.7 却让 rc.x **静默失效**——那里只有 `run()`；0.3.4 则恰好相反。依据：逐版解包 `@deepseek-ai/dsh-shell` 的 `lib/types/index.d.ts`。）
+- 声明 DSH 版本支持（0.3.6）：`@deepseek-ai/dsh` peer `0.1.7-rc.1`，逐版本枚举。
 
 ```jsonc
-"dependencies": { "@omdp/dsh-archived-sessions": "^0.3.5" }
+"dependencies": { "@omdp/dsh-archived-sessions": "^0.3.6" }
 ```
 
 ### 从 npm 安装（推荐）
@@ -311,10 +317,10 @@ fork 自 [`@muwinds/dsh-archived-sessions`](https://github.com/MuWinds/dsh-archi
 ```jsonc
 // ~/.dsh/profiles/<name>/package.json —— 可用其一或自由组合
 "dependencies": {
-  "@omdp/dsh-connector": "^0.3.3",
+  "@omdp/dsh-connector": "^0.3.4",
   "@omdp/dsh-vision-bridge": "^0.1.12",
-  "@omdp/dsh-key-fallback": "^3.2.1",
-  "@omdp/dsh-archived-sessions": "^0.3.5"
+  "@omdp/dsh-key-fallback": "^3.2.2",
+  "@omdp/dsh-archived-sessions": "^0.3.6"
 }
 ```
 
@@ -362,10 +368,10 @@ allowBuilds:
 ### 发布新版本（GitHub Actions）
 
 1. 在子目录的 `package.json` 里 bump `version`（只 bump 你动过的）。
-2. 提交，然后打 tag 并推送：
+2. 提交，然后打 tag 并推送——每个待发包一个 tag，格式 `<version>-<plugin>`：
    ```sh
-   git tag v3.2.1
-   git push origin master && git push origin v3.2.1
+   git tag v0.3.4-dsh-connector
+   git push origin master && git push origin v0.3.4-dsh-connector
    ```
 3. `.github/workflows/publish.yml` 把动过的包发布到 npm（带 provenance；已发布的版本重复发布是 no-op，会打印 skip 信息）。
 4. 更新你的 profile：`pnpm update @omdp/<plugin>`。
