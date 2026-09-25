@@ -4,13 +4,27 @@
 
 **为 [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) 提供多 key 池 + 自动轮换**——插件位于 LLM 适配器与凭证存储之间：每次请求前从按 provider 分组的 key 池里选一把，预写入该 provider 的凭证引用；遇到配置的触发错误时，把失败 key 标记为冷却（固定 `cooldownMs`，无指数退避）并前进到下一把。**重发完全交给 DSH 自带的 `dsh-llm-retry`**——本插件从不自行重发，只负责换 key，重试策略由 retry policy 决定。
 
-当前版本：**v3.2.2**（v7 UI 代）。
+当前版本：**v3.2.3**（v7 UI 代）。
 
 ## 环境要求
 
 - DeepSeek Harness 带 `web` profile GUI（`npx @deepseek-ai/dsh web`）
 - Node.js `^22.19` 或 `>=24`
-- peer 范围**只枚举已实际进行过兼容测试的版本**——`@deepseek-ai/dsh` `0.1.7-rc.1`（本插件声明的 DSH 运行时；**执行该声明的门禁本身只有 0.1.7 才有**，更旧的运行时只是看到一条不认识的 peer 而已，不受影响）、`@deepseek-ai/dsh-credentials` `0.1.0-rc.6 || 0.1.1-rc.2 || 0.1.2-alpha.1 || 0.1.2-alpha.2 || 0.1.2-alpha.3 || 0.1.2-alpha.4 || 0.1.2-alpha.5 || 0.1.2-rc.1 || 0.1.5-rc.1 || 0.1.5-rc.2 || 0.1.5-rc.3 || 0.1.6-alpha.1 || 0.1.7-rc.1`、`@deepseek-ai/dsh-llm` / `@deepseek-ai/dsh-settings` `0.1.1-rc.2 || 0.1.2-alpha.1 || 0.1.2-alpha.2 || 0.1.2-alpha.3 || 0.1.2-alpha.4 || 0.1.2-alpha.5 || 0.1.2-rc.1 || 0.1.5-rc.1 || 0.1.5-rc.2 || 0.1.5-rc.3 || 0.1.6-alpha.1 || 0.1.7-rc.1`、`@deepseek-ai/cordis` `4.0.1 || 4.0.2 || 4.0.4`、`@deepseek-ai/schemastery` `3.18.1 || 3.18.2 || 3.18.4`。不使用 `<0.2.0`、caret 之类的开放范围：未测试版本在核查通过前刻意排除。插件只使用 credential-reference 半边（`resolve`/`describe`/`set`/`unset`/`credentialRef`，自 `0.1.0-rc.6` 起稳定）与 `agent/request` + `agent/request-error` waterfall（载荷跨上述枚举版本未变）；`isCredentialRefName`（rc.8 新增）本地实现兜底。`0.1.2-alpha.2 → alpha.5 → 0.1.2-rc.1` 配套包逐字节一致（2026-09-03 复核），故 DSH `0.1.2-rc.1`（`next`）无需改动插件。
+- peer 范围**只枚举已实际进行过兼容测试的版本**——`@deepseek-ai/dsh` `0.1.7-rc.1 || 0.1.7-rc.2`（本插件声明的 DSH 运行时；**执行该声明的门禁本身只有 0.1.7 才有**，更旧的运行时只是看到一条不认识的 peer 而已，不受影响）、`@deepseek-ai/dsh-credentials` `0.1.0-rc.6 || 0.1.1-rc.2 || 0.1.2-alpha.1 || 0.1.2-alpha.2 || 0.1.2-alpha.3 || 0.1.2-alpha.4 || 0.1.2-alpha.5 || 0.1.2-rc.1 || 0.1.5-rc.1 || 0.1.5-rc.2 || 0.1.5-rc.3 || 0.1.6-alpha.1 || 0.1.7-rc.1 || 0.1.7-rc.2`、`@deepseek-ai/dsh-llm` / `@deepseek-ai/dsh-settings` `0.1.1-rc.2 || 0.1.2-alpha.1 || 0.1.2-alpha.2 || 0.1.2-alpha.3 || 0.1.2-alpha.4 || 0.1.2-alpha.5 || 0.1.2-rc.1 || 0.1.5-rc.1 || 0.1.5-rc.2 || 0.1.5-rc.3 || 0.1.6-alpha.1 || 0.1.7-rc.1 || 0.1.7-rc.2`、`@deepseek-ai/cordis` `4.0.1 || 4.0.2 || 4.0.4`、`@deepseek-ai/schemastery` `3.18.1 || 3.18.2 || 3.18.4`。不使用 `<0.2.0`、caret 之类的开放范围：未测试版本在核查通过前刻意排除。插件只使用 credential-reference 半边（`resolve`/`describe`/`set`/`unset`/`credentialRef`，自 `0.1.0-rc.6` 起稳定）与 `agent/request` + `agent/request-error` waterfall（载荷跨上述枚举版本未变）；`isCredentialRefName`（rc.8 新增）本地实现兜底。`0.1.2-alpha.2 → alpha.5 → 0.1.2-rc.1` 配套包逐字节一致（2026-09-03 复核），故 DSH `0.1.2-rc.1`（`next`）无需改动插件。
+
+## v3.2.3 新增
+
+- **peer 枚举追加 DSH `0.1.7-rc.2`**（2026-09-25）——**代码零改动**。DSH **桌面版**（DeepSeek Harness
+  desktop，运行时 `0.1.7-rc.2`）上线后，精确到 `rc.1` 的声明一夜过时：门禁把 bundle 跳过
+  （`skipping profile bundle`，插件列表徽标「异常」）。声明前核查三步：
+  1. **tarball 逐文件 diff（rc.1 → rc.2）**：`dsh-credentials` 的 `lib/` **逐字节一致**（只改了 README 与
+     package.json）；`dsh-llm` 只**新增**内容类型与 `ACCOUNT_QUOTA` 错误码（本插件用到的
+     `agent/request` waterfall、credential-reference API 签名均未变）；`dsh-shell` / `dsh-settings`
+     的 `lib/` 逐字节一致。
+  2. **门禁执行**：用 rc.2 的 `evaluatePluginCompatibility()` 跑新声明 → 在 `0.1.7-rc.1` 与
+     `0.1.7-rc.2` 上均返回 `undefined`（放行）。
+  3. **真机回归**：scratch profile（`@deepseek-ai/dsh@0.1.7-rc.2` + 插件 3.2.2 + 精确版本豁免）真机启动
+     → 池页 HTTP 200（scratch profile 无池配置，`[]` 属预期）。
 
 ## v3.2.2 新增
 
