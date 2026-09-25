@@ -95,6 +95,9 @@ let _legacyScope = null   // rc.x: settings.register(...) 返回的 scope
 let _legacySvc = null     // rc.x: settings 服务（读用 get，写用 update）
 let _settingsSvc = null   // 0.1.7+: ctx.settings（迁移写回用，见 ensureLegacyFiltersMigration）
 let _migrationAttempted = false
+// 0.1.7+ 的 profileContext.patchPath：本进程真正在用的 profile 补丁文件。
+// 0.1.5/0.1.6 没有这个服务，回退到历史路径（见 patchPath）。
+let _profilePatchPath = null
 function readToolFilters() {
   try {
     // 优先 0.1.7+ 的活 Ref（.get() 每次返回最新值）
@@ -191,8 +194,13 @@ function resolveHome() {
     : join(homedir(), '.dsh')
 }
 
+// 本进程要编辑的 profile 补丁文件。
+// 0.1.7 起 dsh 通过 profileContext 服务提供当前 profile 的绝对路径（desktop / web /
+// 自定义 profile 都不同），必须用它；否则桌面端会去改 profiles/web 的文件 —— 写下去
+// 对桌面端自己的 MCP 配置毫无影响，还会误导 UI 提示（0.3.5 及以前的 bug）。
+// 0.1.5/0.1.6 没有 profileContext：退回历史硬编码路径保持老行为。
 function patchPath() {
-  return join(resolveHome(), 'profiles', 'web', 'cordis.patch.yml')
+  return _profilePatchPath ?? join(resolveHome(), 'profiles', 'web', 'cordis.patch.yml')
 }
 
 function skillsRoot() {
@@ -235,6 +243,13 @@ function stripQuotes(v) {
   return v
 }
 
+// Normalize any line ending (CRLF / lone CR) to LF. Every line-based parser here
+// anchors regexes with `$`, which in JS does not match before a `\r`, so a CRLF
+// profile patch silently loses fields instead of failing loudly.
+function toLf(text) {
+  return String(text).replace(/\r\n?/g, '\n')
+}
+
 // Extract the bare scalar from a YAML block-sequence item line like
 // `  - '--transport'` -> `--transport`. Handles quoted and unquoted values.
 function stripListScalar(line) {
@@ -265,7 +280,12 @@ const SKIP_KEYS = new Set(['name', 'config'])
  * (env blocks, `!!js` lines, any other keys) so a rewrite never drops them.
  */
 function parseMcpServers(blockText) {
-  const lines = blockText.split('\n')
+  // 先统一换行：CRLF 文件里每行都以 `\r` 结尾，而下面的键值正则
+  // `^\s+(\w+):\s*(.*)$` 中 `.*` 不匹配 `\r`、`$` 也不匹配 `\r` 之前的位置，
+  // 于是一整行的 transport/serverName/command/url 全部匹配失败、统统落进
+  // `preserve` —— serverName 空 → UI 工具过滤区静默消失（`if (!props.serverName) return null`）。
+  // 归一化后与 LF 文件完全同构，顺带让 stripQuotes/stripListScalar 的 `$` 正则重新生效。
+  const lines = toLf(blockText).split('\n')
   const servers = []
   let cur = null
   let curIndent = 0
@@ -1024,6 +1044,18 @@ async function readBody(req) {
 }
 
 export function apply(ctx, config) {
+  // ── 绑定本进程的 profile 补丁文件（0.1.7+）──
+  // profileContext 由 dsh 启动器提供，patchPath 就是当前 profile 的
+  // cordis.patch.yml 绝对路径；没有它就只能沿用历史硬编码路径。
+  try {
+    const profile = ctx.get('profileContext')
+    if (profile && typeof profile.patchPath === 'string' && profile.patchPath.length > 0) {
+      _profilePatchPath = profile.patchPath
+      console.info('[dsh-connector] profile patch file:', profile.name ? `${profile.name} -> ${profile.patchPath}` : profile.patchPath)
+      ctx.effect(() => () => { _profilePatchPath = null }, 'connector: release profile patch path')
+    }
+  } catch {}
+
   // ── 工具过滤三件套之 (0)：判定配置后端 + 快照缓存 ──
   // 0.1.7+：config.toolFilters 是 volatile Ref（.get() 每次返回最新值，编辑热生效）。
   // rc.x：无 volatile，退回老的 settings.register/get/update（0.3.0 的原始实现）。
@@ -1106,7 +1138,7 @@ export function apply(ctx, config) {
         }
         const found = findMcpBlock(text)
         const servers = found ? parseMcpServers(found.blockText) : []
-        return json(res, 200, { servers, exists: true, version: '0.1.1' })
+        return json(res, 200, { servers, exists: true, version: '0.1.2', patchPath: patchPath() })
       }
 
       // POST /api/mcp — replace server entries. Preserve env/!!js from the
@@ -1141,7 +1173,7 @@ export function apply(ctx, config) {
           const prev = existing.get(s.id)
           return prev ? { ...s, preserve: s.preserve || prev.preserve } : s
         })
-        const next = buildPatch(text, servers)
+        const next = toLf(buildPatch(text, servers))
         // Validate the entire resulting patch parses as YAML before writing.
         // cordis.patch.yml uses `!!js` tags; the parser tolerates them via
         // silent log level (values stay raw, nothing printed), so a successful

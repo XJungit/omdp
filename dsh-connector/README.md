@@ -1,13 +1,13 @@
 # @omdp/dsh-connector
 
-**MCP 服务器 + 用户 Skills + 魔搭市场浏览三合一设置页**（`v0.3.5`）。适合需要在 DSH 里频繁增删改 MCP server / skills、又不想手改 `cordis.patch.yml` 的用户。
+**MCP 服务器 + 用户 Skills + 魔搭市场浏览三合一设置页**（`v0.3.6`）。适合需要在 DSH 里频繁增删改 MCP server / skills、又不想手改 `cordis.patch.yml` 的用户。
 
 ## Requirements
 
 - DeepSeek Harness 带 `web` profile GUI（`npx @deepseek-ai/dsh web`）
 - Node.js `^22.19` 或 `>=24`
 - `@deepseek-ai/schemastery` `3.18.1` / `3.18.2` / `3.18.4`（peer 枚举，供工具过滤的 Config 声明用；无则过滤静默全放行）
-- 已实测 DSH **0.1.5-rc.1**（源码级核查，2026-09-10）、**0.1.5-rc.2** 与 **0.1.6-alpha.1**（源码级 + 运行时冒烟：`/connector/api/*` 正常服务、设置页渲染，2026-09-15，见 `docs/plugin-compatibility.md`）、**0.1.7-rc.1**（0.3.3 适配：修掉 import 期崩溃 + 迁移到 settings 托管配置，2026-09-24）、**0.1.7-rc.2**（0.3.5：rc.1→rc.2 tarball 逐文件 diff 零 API 变化 + rc.2 真机回归实测通过，2026-09-25）
+- 已实测 DSH **0.1.5-rc.1**（源码级核查，2026-09-10）、**0.1.5-rc.2** 与 **0.1.6-alpha.1**（源码级 + 运行时冒烟：`/connector/api/*` 正常服务、设置页渲染，2026-09-15，见 `docs/plugin-compatibility.md`）、**0.1.7-rc.1**（0.3.3 适配：修掉 import 期崩溃 + 迁移到 settings 托管配置，2026-09-24）、**0.1.7-rc.2**（0.3.5：rc.1→rc.2 tarball 逐文件 diff 零 API 变化 + rc.2 真机回归实测通过；0.3.6 再修 CRLF 解析 + 取当前 profile 补丁路径，2026-09-25）
 - **`@deepseek-ai/dsh` peer 声明 `0.1.7-rc.1 || 0.1.7-rc.2`**（0.3.4 起逐版本枚举，0.3.5 追加 rc.2；规范见 `AGENTS.md` 规范 3）
 
 ## 兼容性门禁（0.3.4 起声明）
@@ -322,6 +322,22 @@ skills/mcp 列表与详情、证书/Hosted 标识、安装命令、记录来源�
 
 ## 变更记录
 
+- **0.3.6**（2026-09-25）：**修两个真机 bug —— CRLF 补丁文件解析 + 编辑错 profile 的补丁文件**。
+  1. **CRLF 兼容**：`parseMcpServers()` 的键值正则 `^\s+(\w+):\s*(.*)$` 在 CRLF 文件上必然失配
+     （JS 里 `.*` 不匹配 `\r`、`$` 也不匹配 `\r` 之前的位置），于是每行的
+     `transport`/`serverName`/`command`/`url` 全部落进 `preserve` 桶：API 返回
+     `transport:"" serverName:""`，UI 的「工具过滤」区因 `if (!props.serverName) return null`
+     **静默消失**、transport 徽标退化成 `stdio`。修复：解析前用 `toLf()` 归一化换行（连同
+     `stripQuotes`/`stripListScalar` 的 `$` 正则一起恢复），写回时也统一成 LF。
+     验证：同一份配置文本按 LF / CRLF 两种形态跑解析，修复前 CRLF 五项断言全红、修复后 14/14 通过。
+  2. **profile 补丁路径**：`patchPath()` 曾硬编码 `profiles/web/cordis.patch.yml`，在桌面端
+     （跑 `profiles/desktop`）会去改 **另一个 profile** 的文件——写下去对自己的 MCP 配置毫无影响，
+     UI 提示还把错误路径显示给用户。修复：0.1.7+ 从 `ctx.get('profileContext').patchPath` 取当前
+     profile 的真实路径（`dsh-app-boot` 的 `ProfileContext` 契约），无该服务（0.1.5/0.1.6）时保留
+     历史路径；`GET /api/mcp` 一并回传 `patchPath`，设置页提示改成显示真实路径。
+  触发场景：用户手改（或编辑器保存）`cordis.patch.yml` 使其变成 CRLF，桌面端点开
+  「Connector → MCP 服务器」就只剩 4 张光秃秃的卡片。详见
+  `notes/2026-09-25/debug/connector-crlf-patch-parser-and-profile-path.md`。
 - **0.3.5**（2026-09-25）：**追加 DSH `0.1.7-rc.2` 支持**（peer 枚举 `0.1.7-rc.1 || 0.1.7-rc.2`，代码零改动）。
   背景：DSH 桌面版（DeepSeek Harness desktop）0.1.7-rc.2 上线后，门禁把只声明 `0.1.7-rc.1` 的 0.3.4 拦下
   （`skipping profile bundle`，插件列表显示「异常」）。核查：rc.1→rc.2 npm tarball 逐文件 diff——

@@ -412,7 +412,10 @@ window.__ModuleLoader__.load({
         ),
         err ? createElement('div', { className: 'pm_err' }, err) : null,
         createElement('div', { className: 'pm_meta' },
-          props.mcp.exists ? '编辑 profiles/web/cordis.patch.yml 中的 mcp-* 块。保存后重启 dsh 生效。Edit the mcp-* block in cordis.patch.yml; restart dsh to apply.' : '未找到 cordis.patch.yml。cordis.patch.yml not found.'),
+          props.mcp.exists
+            // host 回传真实路径（0.1.7+ 的 profileContext.patchPath）；老 host 没这个字段时退回笼统说法。
+            ? '编辑 ' + (props.mcp.patchPath || '本 profile 的 cordis.patch.yml') + ' 中的 mcp-* 块。保存后重启 dsh 生效。Edit the mcp-* block in cordis.patch.yml; restart dsh to apply.'
+            : '未找到 cordis.patch.yml。cordis.patch.yml not found.'),
         rows,
         editing === null
           ? createElement('button', { className: 'pm_btn pm_btn ghost', onClick: function () { setEditing({ id: 'mcp-new', customId: '', name: '', transport: 'stdio', serverName: '', url: '', command: '', args: '' }) } }, '＋ 添加 MCP 服务器 Add MCP Server')

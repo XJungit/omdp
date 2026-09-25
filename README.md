@@ -55,7 +55,7 @@ omdp/
 
 ### Plugins
 
-#### `@omdp/dsh-connector` — MCP + Skills manager (`v0.3.5`)
+#### `@omdp/dsh-connector` — MCP + Skills manager (`v0.3.6`)
 
 One settings tab (**Connector**) that manages three things from the DSH Web UI:
 
@@ -66,9 +66,10 @@ One settings tab (**Connector**) that manages three things from the DSH Web UI:
 - **DSH 0.1.7 support (v0.3.3)** — `jsdom` is no longer imported at module top level (a `punycode/` resolution defect in DSH's package resolver made the whole plugin fail to import); tool filters moved to the volatile `Config` / `settings.replace()` backend while keeping the rc.x `settings.yaml` backend.
 - **Declared DSH support + a stranded-filter rescue (v0.3.4)** — new `@deepseek-ai/dsh` peer (`0.1.7-rc.1`, enumerated per version), enforced by DSH's own `evaluatePluginCompatibility()`: an untested newer runtime has the bundle gracefully skipped instead of failing undefined-ly, while runtimes `≤0.1.6` just see an unrecognized peer (the gate does not exist before 0.1.7). Also fixes tool filters silently reverting to allow-all: 0.1.7's one-shot importer renames `settings.yaml` → `settings.yaml.imported` and **silently skips sections without a volatile `Config`**, so `connector.toolFilters` stayed behind in `.imported`; `ensureLegacyFiltersMigration()` now moves it back on the first request (never overwriting filters you already have, never deleting `.imported`).
 - **DSH `0.1.7-rc.2` added to the peer enumeration (v0.3.5)** — zero code changes; verified by a file-by-file tarball diff (shell/settings/credentials `lib/` byte-identical, llm additive-only, app-boot changes unrelated to plugins), running the rc.2 gate against the new declaration, and a live regression on a scratch `dsh@0.1.7-rc.2` profile (filters endpoint 200).
+- **CRLF patches + the right profile file (v0.3.6)** — two live bugs. (1) `parseMcpServers()`'s key/value regex `^\s+(\w+):\s*(.*)$` never matches on a CRLF file (in JS `.*` does not match `\r`, and `$` does not match before it), so `transport`/`serverName`/`command`/`url` all fell into the `preserve` bucket: the API answered `transport:"" serverName:""`, which made the **tool-filter section vanish silently** (`if (!props.serverName) return null`) and the transport badge degrade to `stdio`. Parsing now normalizes line endings first (`toLf()`), and writes emit LF. (2) `patchPath()` hardcoded `profiles/web/cordis.patch.yml`, so under the desktop app (which runs `profiles/desktop`) the MCP editor was rewriting **another profile's** file — with no effect on its own MCP config, plus a wrong path shown in the UI. 0.1.7+ now reads the real path from `ctx.get('profileContext').patchPath` (the `dsh-app-boot` `ProfileContext` contract), keeping the legacy path only where that service does not exist (0.1.5/0.1.6); `GET /api/mcp` returns it so the settings page displays the true file.
 
 ```jsonc
-"dependencies": { "@omdp/dsh-connector": "^0.3.5" }
+"dependencies": { "@omdp/dsh-connector": "^0.3.6" }
 ```
 
 #### `@omdp/dsh-key-fallback` — multi-key API key pool with rotation (`v3.2.3`)
@@ -119,7 +120,7 @@ All four plugins are published to **npm** automatically by GitHub Actions on eve
 ```jsonc
 // ~/.dsh/profiles/<name>/package.json — you can use one or mix-and-match
 "dependencies": {
-  "@omdp/dsh-connector": "^0.3.5",
+  "@omdp/dsh-connector": "^0.3.6",
   "@omdp/dsh-vision-bridge": "^0.1.12",
   "@omdp/dsh-key-fallback": "^3.2.3",
   "@omdp/dsh-archived-sessions": "^0.3.7"
@@ -260,7 +261,7 @@ omdp/
 
 ### 插件
 
-#### `@omdp/dsh-connector` — MCP + Skills 管理器（`v0.3.5`）
+#### `@omdp/dsh-connector` — MCP + Skills 管理器（`v0.3.6`）
 
 一个设置页（**Connector**），从 DSH Web UI 管理三件事：
 
@@ -271,6 +272,7 @@ omdp/
 - **DSH 0.1.7 适配（v0.3.3）** —— `jsdom` 不再顶层静态 import（DSH 包解析器对 `punycode/` 这类「内置名 + 子路径」会抛 `TypeError`，导致整个插件 import 失败、设置页永远停在「已安装，重启后生效」）；工具过滤迁到 volatile `Config` / `settings.replace()`，同时保留 rc.x 的 `settings.yaml` 后端。
 - **声明 DSH 版本支持 + 抢救滞留的过滤规则（v0.3.4）** —— 新增 `@deepseek-ai/dsh` peer（`0.1.7-rc.1`，逐版本枚举），由 DSH 自己的 `evaluatePluginCompatibility()` 执行：未实测的新运行时会让 bundle 被**优雅跳过**（而不是以未定义方式崩掉），而 `≤0.1.6` 的运行时只是看到一条不认识的 peer（该门禁 0.1.7 才引入）。同时修复工具过滤静默变回「全放行」：0.1.7 的一次性导入器把 `settings.yaml` 改名为 `settings.yaml.imported`，并**静默跳过没有 volatile `Config` 的段**，于是 `connector.toolFilters` 被留在 `.imported`；`ensureLegacyFiltersMigration()` 会在首个请求时把它搬回（不覆盖你已有的过滤规则、不删 `.imported`）。
 - **peer 枚举追加 DSH `0.1.7-rc.2`（v0.3.5）** —— 代码零改动；依据：tarball 逐文件 diff（shell/settings/credentials 的 `lib/` 逐字节一致、llm 纯新增、app-boot 变更与插件无关）+ rc.2 门禁执行新声明放行 + scratch `dsh@0.1.7-rc.2` profile 真机回归（过滤端点 200）。
+- **CRLF 补丁 + 改错 profile 文件（v0.3.6）** —— 两个真机 bug。(1) `parseMcpServers()` 的键值正则 `^\s+(\w+):\s*(.*)$` 在 CRLF 文件上必然失配（JS 里 `.*` 不匹配 `\r`、`$` 也不匹配 `\r` 之前），`transport`/`serverName`/`command`/`url` 全落进 `preserve`：接口返回 `transport:"" serverName:""` 导致**工具过滤区静默消失**（`if (!props.serverName) return null`）、transport 徽标退化成 `stdio`。现在解析前先归一化换行（`toLf()`），写回也统一 LF。(2) `patchPath()` 曾硬编码 `profiles/web/cordis.patch.yml`，桌面端（跑 `profiles/desktop`）因此在改**另一个 profile** 的文件——对自己的 MCP 配置毫无影响，UI 还显示错误路径。0.1.7+ 改为从 `ctx.get('profileContext').patchPath` 取真实路径（`dsh-app-boot` 的 `ProfileContext` 契约），仅在没有该服务的 0.1.5/0.1.6 上保留历史路径；`GET /api/mcp` 回传该路径供设置页显示。
 
 ```jsonc
 "dependencies": { "@omdp/dsh-connector": "^0.3.5" }
@@ -324,7 +326,7 @@ fork 自 [`@muwinds/dsh-archived-sessions`](https://github.com/MuWinds/dsh-archi
 ```jsonc
 // ~/.dsh/profiles/<name>/package.json —— 可用其一或自由组合
 "dependencies": {
-  "@omdp/dsh-connector": "^0.3.5",
+  "@omdp/dsh-connector": "^0.3.6",
   "@omdp/dsh-vision-bridge": "^0.1.12",
   "@omdp/dsh-key-fallback": "^3.2.3",
   "@omdp/dsh-archived-sessions": "^0.3.7"

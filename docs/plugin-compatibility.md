@@ -97,13 +97,14 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 
 ---
 
-## 2. @omdp/dsh-connector（v0.3.5）【活跃插件】
+## 2. @omdp/dsh-connector（v0.3.6）【活跃插件】
 
 ### 架构
 
 - **顶层零第三方 import**：模块顶层只有 `node:*` + `yaml`（版本 `^2.9.0`）；`jsdom`（`^24.1.3`）**改为在 WAF 挑战求解处动态 `await import()`**（0.3.3 起，见下方 0.1.7 专项「变更 4」——顶层静态引入会在 0.1.7 上让整个插件 import 失败）
 - **零 `@deepseek-ai/*` 硬依赖**（`@deepseek-ai/schemastery` 仅 peer 声明，供工具过滤的 `Config` 声明用；
   0.3.4 起另声明 `@deepseek-ai/dsh` peer，0.3.5 枚举为 `0.1.7-rc.1 || 0.1.7-rc.2`，见 0.1.7 专项「变更 1」）
+- **profile 补丁路径取自 `ctx.get('profileContext').patchPath`**（0.3.6 起；0.1.7+ 由 dsh 启动器提供，见 0.1.7 专项「变更 6」），无该服务时回退历史硬编码路径
 - **Client→Host 走 HTTP API**（`/connector/api/*`），不依赖动态 `host.call`
 
 ### 依赖的 DSH 接口
@@ -146,6 +147,13 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 | DSH `0.1.7-rc.2` | ✅ 不崩：0.3.5 追加 peer 枚举 `0.1.7-rc.2`（代码零改动）。依据：rc.1→rc.2 tarball 逐文件 diff——`dsh-shell`/`dsh-settings`/`dsh-credentials` 的 `lib/` **逐字节零变化**、`dsh-llm` 仅新增内容类型/错误码、`dsh-app-boot` 变更与插件无关；rc.2 门禁执行新声明 → 放行；scratch profile（`dsh@0.1.7-rc.2` + 0.3.4 + 豁免）真机回归 `/connector/api/mcp/filters` → 200 |
 | DSH 大版本 | ✅ DSH 不崩；若 `webServer` API 变化，connector 需适配 |
 | yaml 版本 | ✅ 独立 npm 包，不受 DSH 更新影响 |
+
+**0.3.6 追加的两个真机 bug 修复**（均为插件自身 bug，与 DSH 版本无关）：
+
+| # | 症状 | 根因 | 修复 |
+|---|---|---|---|
+| 1 | 设置页「工具过滤」区**整块消失**（`if (!props.serverName) return null`），transport 徽标一律显示 `stdio` | `cordis.patch.yml` 为 CRLF 时，`parseMcpServers()` 的 `^\s+(\w+):\s*(.*)$` 必然失配（JS 里 `.*` 不匹配 `\r`、`$` 不匹配 `\r` 之前），`transport`/`serverName`/`command`/`url` 全落进 `preserve`，接口回 `serverName:""` | 解析前 `toLf()` 归一化换行，写回统一 LF |
+| 2 | 桌面端（`profiles/desktop`）在 MCP 面板里的编辑**改的是 `profiles/web` 的文件**，UI 提示也是 web 路径 | `patchPath()` 硬编码 `profiles/web/cordis.patch.yml`（历史遗留：桌面端早期确实跑 web profile） | 0.1.7+ 取 `ctx.get('profileContext').patchPath`；`GET /api/mcp` 回传真实路径供 UI 显示 |
 
 ---
 
@@ -322,7 +330,7 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 | 插件 | 版本 | 第三方依赖 | DSH 硬依赖 | 抗崩溃设计 | 最大风险点 |
 |---|---|---|---|---|---|
 | dsh-gitbash-win（归档） | 0.1.6 | 无（动态加载 5 个 @deepseek-ai/*） | `tools`/`subprocess`/`systemPrompt`/`shellEnv` | 顶层零依赖 + 动态加载 + 失败隔离 | `dsh-sandbox`（Windows ACL 上游 bug） |
-| dsh-connector | 0.3.5 | `yaml`（+ `jsdom` 懒加载；peer `schemastery` 仅 Config 声明用、`@deepseek-ai/dsh` 供版本门禁 `0.1.7-rc.1 \|\| 0.1.7-rc.2`） | `webServer`（`settings`/`tools.guard`/`systemPrompt` 可选） | 顶层零第三方 static import + try/catch + 可选服务失败隔离 + **遗留 `toolFilters` 一次性救援** | `ctx.webServer` API 变化 / 内置模块子路径解析崩溃（`punycode/`，0.3.3 懒加载缓解）/ 0.1.7 配置迁移漏段（0.3.4 救援） |
+| dsh-connector | 0.3.6 | `yaml`（+ `jsdom` 懒加载；peer `schemastery` 仅 Config 声明用、`@deepseek-ai/dsh` 供版本门禁 `0.1.7-rc.1 \|\| 0.1.7-rc.2`） | `webServer`（`settings`/`tools.guard`/`systemPrompt`/`profileContext` 可选） | 顶层零第三方 static import + try/catch + 可选服务失败隔离 + **遗留 `toolFilters` 一次性救援** + **CRLF 解析容错** | `ctx.webServer` API 变化 / 内置模块子路径解析崩溃（`punycode/`，0.3.3 懒加载缓解）/ 0.1.7 配置迁移漏段（0.3.4 救援）/ 补丁文件换行被外部工具改成 CRLF（0.3.6） |
 | dsh-vision-bridge | 0.1.12 | 无 | `tools`/`attachments`/`llm`/`credentials` | 纯静态 + 零 @deepseek-ai + 防御性编码 | `ctx.llm` API 变化 / composer 输入层变化 / Agent 路由载荷变化（`requestHeader().config`） |
 | dsh-key-fallback | 3.2.3 | `schemastery`（仅 `Config` 声明用） | `credentials`/`llm`/`settings`（`webServer`/`slots` 可选） | ESM import + `agent/*` 事件 + `process.env + credentials.set` 双写 + **配置双后端自动判别** + **遗留池一次性救援** + **DSH peer 版本门禁** + 防御性编码 | `agent/request-error` 载荷 / `0.1.7` 配置迁移机制 / `webServer` API 变化 |
 | dsh-archived-sessions | 0.3.7 | 无（jsonl 后端可选 import + 内置编码 fallback） | `webServer`（`sessionPersistence`/`workspaceRegistry`/`sessionQuery`/`fs`/`shell` 可选） | 路径自解析（root 由 `DSH_HOME` 推导）+ 删除目录名校验 + **`ctx.shell` 双时代能力探测** + **DSH peer 版本门禁** + try/catch + 可选服务失败隔离 | `sessionPersistence` 路径布局 / `workspaceRegistry` 字段变化 / `ctx.shell` 抽象方法**改名**（0.3.6 双时代探测）/ 宿主同槽位撞 slot id（0.3.4 起用 `omdp-` 前缀免疫） |
@@ -342,7 +350,7 @@ DSH `0.1.7` 引入多处**破坏性变更**，本仓库插件已按"优先双版
 | 插件 | 门禁影响 | 处理 |
 |---|---|---|
 | dsh-key-fallback | **原 v3.1.7 被跳过**（3/3 peer 不含 `0.1.7-rc.1`） | v3.2.0 追加 `0.1.7-rc.1`（credentials/llm/settings）与 cordis `4.0.4`、schemastery `3.18.4`；v3.2.1 追加遗留池救援；v3.2.2 追加 `@deepseek-ai/dsh` peer `0.1.7-rc.1`；v3.2.3 追加 rc.2（dsh/credentials/llm/settings 四条枚举同步扩充） |
-| dsh-connector | **原不受门禁**（peer 只有 schemastery，非 `dsh-*`） | import 期崩溃需修 ⇒ v0.3.3；v0.3.4 **主动纳入门禁**（新增 `@deepseek-ai/dsh` peer）；v0.3.5 追加 rc.2 |
+| dsh-connector | **原不受门禁**（peer 只有 schemastery，非 `dsh-*`） | import 期崩溃需修 ⇒ v0.3.3；v0.3.4 **主动纳入门禁**（新增 `@deepseek-ai/dsh` peer）；v0.3.5 追加 rc.2；v0.3.6 修 CRLF 解析 + `profileContext` 补丁路径 |
 | dsh-archived-sessions | **原不受门禁**（peer 只有 cordis） | `ctx.shell.run()` 移除导致删除失效 ⇒ v0.3.5（追加 cordis `4.0.4` 枚举）、v0.3.6 双时代自适应 + **主动纳入门禁**；v0.3.7 追加 rc.2 |
 | dsh-vision-bridge | **不受门禁**（无 dsh peer） | 无需改动 |
 
@@ -505,6 +513,59 @@ rc 版本号本身没有 range 语义（`0.1.7-rc.1` 不匹配 `0.1.7-rc.2`，se
   凡是「配置放在 `settings.yaml` 里、需要跨 0.1.7 存活」的插件，都应自查这段配置是否真的迁到了
   profile 条目；没有 volatile `Config` 声明的字段**一定**没迁过去。
 
+### 变更 7：profile 补丁文件必须问 `profileContext`（connector 0.3.6 修复）
+
+0.1.7 起，插件若要读写「当前 profile 的 `cordis.patch.yml`」，**必须**从启动器提供的服务取路径，
+不能自己拼 `$DSH_HOME/profiles/<name>/cordis.patch.yml`：
+
+```ts
+// @deepseek-ai/dsh-app-boot — lib/types/profile-context.d.ts
+interface ProfileContext {
+  readonly name: string
+  readonly dir: string          // 当前 profile 目录（绝对路径）
+  readonly patchPath: string    // ★ 当前 profile 的 cordis.patch.yml
+  readonly installAnchor: string
+  readonly cwd: string
+  readonly home: string
+  readonly startedBundles: readonly string[]
+  readonly overlays: readonly PatchOptions[]
+  readonly telemetryDisabledEnv: string | undefined
+}
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    /** Present only in a profile launched by dsh. */
+    profileContext: ProfileContext
+  }
+}
+```
+
+- 写法：`ctx.get('profileContext')?.patchPath`（`dsh-app-boot` 自己就这么读；`ctx.get` 在服务缺失时返回
+  `undefined`，不抛异常）。
+- **实例教训（connector 0.3.5 及以前）**：`patchPath()` 硬编码 `profiles/web/cordis.patch.yml`。
+  桌面端实际跑 `profiles/desktop`（命令行证据：`DeepSeek Harness.exe … dsh-desktop-host … C:\Users\xj\.dsh\profiles\desktop`），
+  于是「Connector → MCP 服务器」面板读写的都是 **web profile** 的文件——对自己的 MCP 配置毫无影响，
+  只因为两个 profile 的 MCP 块当时恰好一致才没暴露；UI 提示里的错误路径也误导了排障。
+- **可复用要点**：0.1.5/0.1.6 没有 `profileContext`，回退逻辑要保留（connector 保留了历史路径）；
+  另外**同一份 `cordis.patch.yml` 在多个 profile 下内容可能不同**，任何「读文件 → 解析 → 写回」的插件
+  都要先确认自己拿到的是当前 profile 的那份。
+
+### 变更 8：CRLF 的 `cordis.patch.yml` 会让锚定正则静默失配（connector 0.3.6 修复）
+
+JS 的 `$`（无 `m` 标志）**不匹配 `\r` 之前的位置**，而 `.` 也不匹配 `\r`。因此
+
+```js
+line.match(/^\s+(\w+):\s*(.*)$/)   // CRLF 文件里每一行都以 \r 结尾 ⇒ 永远匹配失败
+```
+
+在 CRLF 文件上会**静默**把 `transport`/`serverName`/`command`/`url` 全部丢进 `preserve` 桶，
+接口回 `serverName:""`，前端 `if (!props.serverName) return null` 于是让整个「工具过滤」区消失
+（transport 徽标还会退化成默认的 `stdio`）。修复：解析入口 `toLf()` 归一化换行、写回统一 LF。
+
+- **可复用要点**：**任何**逐行解析用户可编辑文本的插件，解析前先 `String(text).replace(/\r\n?/g, '\n')`；
+  写文件时也要显式选一种换行，别把两种混进同一个文件。
+- 排查手法：直接打插件自己的 HTTP 接口看字段（`GET /connector/api/mcp` 回 `serverName:""` 就是它），
+  比在 UI 上猜快得多；再用 `Get-Content -Raw` 数 `\r\n` 定位换行被谁改的。
+
 ## 总体结论
 
 1. **活跃插件都不会导致 DSH 崩溃**——这是共同的硬保证（架构设计使然）；`0.1.7` 的门禁机制同样只"跳过 bundle"而非崩溃。
@@ -512,9 +573,10 @@ rc 版本号本身没有 range 语义（`0.1.7-rc.1` 不匹配 `0.1.7-rc.2`，se
 3. **相互隔离**：任一插件失效，不影响其他插件和 DSH 本体。
 4. **建议**：DSH 大版本升级后，逐个验证活跃插件（connector API、vision-bridge 识图、key-fallback），
    有问题就更新对应插件版本。
-5. **本仓库现状**：`0.1.7-rc.1` 适配已全部落地——`key-fallback` v3.2.2（双后端 + 遗留池救援 + 声明 DSH peer）、
-   `connector` v0.3.4（jsdom 懒加载修 import 崩溃 + 工具过滤迁 volatile `Config` + 遗留过滤救援 + 声明 DSH peer）、
-   `archived-sessions` v0.3.6（`ctx.shell` 契约**双时代自适应**修删除失效 + 声明 DSH peer）；
+5. **本仓库现状**：`0.1.7-rc.1` / `0.1.7-rc.2` 适配已全部落地——`key-fallback` v3.2.3（双后端 + 遗留池救援 + 声明 DSH peer）、
+   `connector` v0.3.6（jsdom 懒加载修 import 崩溃 + 工具过滤迁 volatile `Config` + 遗留过滤救援 + 声明 DSH peer +
+   CRLF 解析与 `profileContext` 补丁路径修复）、
+   `archived-sessions` v0.3.7（`ctx.shell` 契约**双时代自适应**修删除失效 + 声明 DSH peer）；
    `vision-bridge` v0.1.12 无改动（也无 dsh peer）。
    ⚠️ 注意 cron：**抽象服务的「新增方法」兼容、「移除方法」不兼容**（`ctx.shell` 的 `run`→`execute` 是典型：
    改名而非别名），以及**宿主解析器缺陷会在插件 import 期放大**——这两类都不体现在 `.d.ts` 的
