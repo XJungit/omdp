@@ -1,14 +1,14 @@
 # @omdp/dsh-connector
 
-**MCP 服务器 + 用户 Skills + 魔搭市场浏览三合一设置页**（`v0.3.6`）。适合需要在 DSH 里频繁增删改 MCP server / skills、又不想手改 `cordis.patch.yml` 的用户。
+**MCP 服务器 + 用户 Skills + 魔搭市场浏览三合一设置页**（`v0.3.7`）。适合需要在 DSH 里频繁增删改 MCP server / skills、又不想手改 `cordis.patch.yml` 的用户。
 
 ## Requirements
 
 - DeepSeek Harness 带 `web` profile GUI（`npx @deepseek-ai/dsh web`）
 - Node.js `^22.19` 或 `>=24`
 - `@deepseek-ai/schemastery` `3.18.1` / `3.18.2` / `3.18.4`（peer 枚举，供工具过滤的 Config 声明用；无则过滤静默全放行）
-- 已实测 DSH **0.1.5-rc.1**（源码级核查，2026-09-10）、**0.1.5-rc.2** 与 **0.1.6-alpha.1**（源码级 + 运行时冒烟：`/connector/api/*` 正常服务、设置页渲染，2026-09-15，见 `docs/plugin-compatibility.md`）、**0.1.7-rc.1**（0.3.3 适配：修掉 import 期崩溃 + 迁移到 settings 托管配置，2026-09-24）、**0.1.7-rc.2**（0.3.5：rc.1→rc.2 tarball 逐文件 diff 零 API 变化 + rc.2 真机回归实测通过；0.3.6 再修 CRLF 解析 + 取当前 profile 补丁路径，2026-09-25）
-- **`@deepseek-ai/dsh` peer 声明 `0.1.7-rc.1 || 0.1.7-rc.2`**（0.3.4 起逐版本枚举，0.3.5 追加 rc.2；规范见 `AGENTS.md` 规范 3）
+- 已实测 DSH **0.1.5-rc.1**（源码级核查，2026-09-10）、**0.1.5-rc.2** 与 **0.1.6-alpha.1**（源码级 + 运行时冒烟：`/connector/api/*` 正常服务、设置页渲染，2026-09-15，见 `docs/plugin-compatibility.md`）、**0.1.7-rc.1**（0.3.3 适配：修掉 import 期崩溃 + 迁移到 settings 托管配置，2026-09-24）、**0.1.7-rc.2**（0.3.5：rc.1→rc.2 tarball 逐文件 diff 零 API 变化 + rc.2 真机回归实测通过；0.3.6 再修 CRLF 解析 + 取当前 profile 补丁路径，2026-09-25）、**0.2.0-rc.1**（0.3.7：`lib/` 逐字节零变化 + 0.2.0 门禁放行 + 沙箱真机装配入树，2026-09-28）
+- **`@deepseek-ai/dsh` peer 声明 `0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1`**（0.3.4 起逐版本枚举，0.3.5 追加 rc.2，0.3.7 追加 0.2.0-rc.1；规范见 `AGENTS.md` 规范 3）
 
 ## 兼容性门禁（0.3.4 起声明）
 
@@ -16,7 +16,7 @@
 
 ```json
 "peerDependencies": {
-  "@deepseek-ai/dsh": "0.1.7-rc.1 || 0.1.7-rc.2"
+  "@deepseek-ai/dsh": "0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1"
 }
 ```
 
@@ -26,6 +26,7 @@
 |---|---|
 | **`0.1.7-rc.1`**（实测，2026-09-24） | ✅ `evaluatePluginCompatibility()` 返回 `undefined` ⇒ 正常加载，与 0.3.3 行为一致 |
 | **`0.1.7-rc.2`**（实测，2026-09-25） | ✅ 同上：rc.1→rc.2 tarball 逐文件 diff 显示 shell/settings/credentials 的 `lib/` **零变化**（仅 README/package.json 版本号）、app-boot 的变更全部与插件无关；另在 scratch profile（`dsh@0.1.7-rc.2` + 本插件 0.3.4）真机回归 `/connector/api/mcp/filters` → 200 |
+| **`0.2.0-rc.1`**（实测，2026-09-28） | ✅ `lib/` 逐字节零变化（`dsh-web-app`/`dsh-host-webserver` 等本插件依赖面在 rc.2→0.2.0-rc.1 全量文件 SHA1 一致）；0.2.0-rc.1 门禁对本插件 0.3.7 判定放行；沙箱真机（官方 `dsh@0.2.0-rc.1` + 本插件）`--dump-config` 装配入树、零拦截 |
 | **`0.1.7` 及更新的、未实测版本** | ⛔ 门禁拦下：启动时**整个 bundle 被跳过**（stderr 打 `skipping profile bundle "@omdp/dsh-connector"`），安装时该行被置灰 |
 | **`≤0.1.6` 及 `0.1.7-alpha.x`** | ➖ **不受影响**：那些版本里**根本没有这个门禁**（经解包 npm tarball 逐版核对，`0.1.5-rc.2`/`0.1.5-rc.3`/`0.1.6-alpha.1`/`0.1.6-alpha.2`/`0.1.7-alpha.1`/`0.1.7-alpha.2` 的 `dsh-app-boot` 里 `evaluatePluginCompatibility` 出现 **0 次**，只有 `0.1.7-rc.1` 出现 4 次），旧运行时读到这条 peer 只是「不认识的声明」，照常加载 |
 
@@ -322,6 +323,14 @@ skills/mcp 列表与详情、证书/Hosted 标识、安装命令、记录来源�
 
 ## 变更记录
 
+- **0.3.7**（2026-09-28）：**追加 DSH `0.2.0-rc.1` 支持**（peer 枚举 `0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1`，代码零改动）。
+  背景：DSH 桌面端升级到 `0.2.0-rc.1` 后，门禁把只声明到 `0.1.7-rc.2` 的 0.3.6 拦下 ——
+  表现是设置页里 Connector 整项消失、`/connector/api/*` 全部 **404**（`skipping profile bundle`，不是崩溃）。
+  核查依据：`0.1.7-rc.2 → 0.2.0-rc.1` 的 npm tarball 逐文件 diff（本插件依赖的
+  `dsh-web-app` / `dsh-host-webserver` / `dsh-credentials` / `dsh-settings` / `dsh-tools` / `dsh-mcp-client`
+  的 `lib/` **逐字节零变化**）；用 0.2.0-rc.1 自带的 `evaluatePluginCompatibility()` 判定新声明为
+  **放行**；并沙箱安装官方 `@deepseek-ai/dsh@0.2.0-rc.1` + 本插件跑 `--dump-config` 真机装配入树、零拦截；
+  `npm pack` 产物经复核含新枚举。
 - **0.3.6**（2026-09-25）：**修两个真机 bug —— CRLF 补丁文件解析 + 编辑错 profile 的补丁文件**。
   1. **CRLF 兼容**：`parseMcpServers()` 的键值正则 `^\s+(\w+):\s*(.*)$` 在 CRLF 文件上必然失配
      （JS 里 `.*` 不匹配 `\r`、`$` 也不匹配 `\r` 之前的位置），于是每行的

@@ -2,14 +2,35 @@
 
 > ⚠️ **本文档为演进记录**：`@omdp/dsh-gitbash-win` 与 `@omdp/dsh-resume-stream`
 > 已于 2026-08-25 归档（源码移至 `archive/`，不再维护或发布）。下方对 gitbash
-> 的评估保留作为历史架构参考；当前活跃插件版本见各节标题（connector `0.3.4` /
-> vision-bridge `0.1.12` / key-fallback `3.2.2` / archived-sessions `0.3.6`）。
+> 的评估保留作为历史架构参考；当前活跃插件版本见各节标题（connector `0.3.7` /
+> vision-bridge `0.1.12` / key-fallback `3.2.4` / archived-sessions `0.3.8`）。
 >
 > 评估内容：各插件对 DSH（DeepSeek Harness）更新的抗崩溃能力。
 > 核心问题：DSH 更新后，插件会不会导致 DSH 崩溃？
 
 **结论先行**：活跃插件都采用**抗崩溃架构**——DSH 更新时**不会因插件而崩溃**（硬保证），
 最坏情况只是单个插件功能需要适配更新。插件之间互不影响。
+
+**DSH `v0.2.0-rc.1`（桌面端，2026-09-28）适配结论**：connector / key-fallback /
+archived-sessions 三个插件**源码零改动兼容**，唯一动作是把 `0.2.0-rc.1` 追加进
+peer 枚举（分别升 `0.3.7` / `3.2.4` / `0.3.8`；vision-bridge 无 dsh peer，不动作）。
+⚠️ **本轮现象是「被门禁跳过」而非崩溃**——升级到 0.2.0 后设置页里三个插件整项消失、
+路由 404/405，根因是 `0.1.7-rc.2 → 0.2.0-rc.1` 的**门禁第二次生效**（声明里不含新运行时版本）。
+逐项核查（详见下方「DSH 0.2.0 兼容性专项」）：
+
+- **API 面逐字节一致**：`dsh-credentials` / `dsh-llm` / `dsh-settings` / `dsh-shell` /
+  `dsh-tools` / `dsh-mcp-client` / `dsh-web` / `dsh-agent` / `dsh-agent-preset` 的 `lib/`
+  全部文件 SHA1 **零变化**（npm tarball 解包对比，两版均为 `0.2.0-rc.1` 官方发布件）；
+- **仅两处附加式变化**：`dsh-session` `lib/` 5 个文件变化（**新增导出** `ToolCallRecovery` /
+  `TOOL_NOT_STARTED` / `TOOL_OUTCOME_UNKNOWN`，`SessionStore` 等既有导出全保留）、
+  `dsh-tool-cordis` 的 `types/api-catalog.js`（目录数据，与插件无关）；
+- **门禁放行实测**：用 0.2.0-rc.1 自带的 `evaluatePluginCompatibility()` 判定新声明 →
+  `✅ 放行`（旧声明 → `❌ 拦截`，不满足项即 `@deepseek-ai/dsh`）；
+- **真机装配实测**：沙箱安装官方 `@deepseek-ai/dsh@0.2.0-rc.1`（542 包）、
+  独立 `DSH_HOME` + 改过声明的插件 profile，跑 `dsh --profile smoke --dump-config`
+  → 四个插件全部入树、**零门禁拦截、零错误**；
+- **发布件校验**：`npm pack` 实际 tarball 内 `package.json` 已含 `0.2.0-rc.1`，
+  且同一门禁函数对 tarball 清单判定放行。
 
 **DSH `v0.1.6-alpha.1`（`alpha` dist-tag）适配结论（2026-09-15）**：connector / vision-bridge / key-fallback **源码零改动兼容**（key-fallback 追加 peer 枚举升 `3.1.7`）；**archived-sessions `0.3.3` 与新版冲突**（slot id 撞名导致整页 Web UI 启动失败），已修复升 `0.3.4`。本轮除源码级核查（逐包逐文件 SHA256 + `.d.ts` 删除行比对，基线 = 本机在跑的 `0.1.5-rc.2`）外，**首次补做真实运行时冒烟**：在临时目录安装 `0.1.6-alpha.1`、以 `DSH_HOME` + 手工 profile（`dsh-base` + `dsh-web-app` + 发布版插件）启动 web，浏览器实测路由与设置页（releases + npm 双查：GitHub `dsh-v0.1.6-alpha.1` Pre-release 2026-09-15；npm `dist-tags`：`latest=0.1.5-rc.1`、`next=0.1.5-rc.2`、`alpha=0.1.6-alpha.1`）：
 - **逐字节一致（服务面零变化）**：`dsh-host-webserver`（`webServer.register` 提供方，四插件共同硬依赖）、`dsh-credentials`、`dsh-settings`、`dsh-fs`——lib 全部文件哈希一致，仅版本号/README 变化；
@@ -97,7 +118,7 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 
 ---
 
-## 2. @omdp/dsh-connector（v0.3.6）【活跃插件】
+## 2. @omdp/dsh-connector（v0.3.7）【活跃插件】
 
 ### 架构
 
@@ -146,6 +167,7 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 | DSH `0.1.7-rc.1` | ✅ 不崩：0.3.3 修掉 import 期崩溃（jsdom 懒加载）+ 工具过滤迁到 volatile `Config`/`settings.replace`，新旧两代后端自动分流；0.3.4 追加遗留 `toolFilters` 一次性救援（`.imported` 只读）并声明 `@deepseek-ai/dsh` peer `0.1.7-rc.1`（门禁实测通过） |
 | DSH `0.1.7-rc.2` | ✅ 不崩：0.3.5 追加 peer 枚举 `0.1.7-rc.2`（代码零改动）。依据：rc.1→rc.2 tarball 逐文件 diff——`dsh-shell`/`dsh-settings`/`dsh-credentials` 的 `lib/` **逐字节零变化**、`dsh-llm` 仅新增内容类型/错误码、`dsh-app-boot` 变更与插件无关；rc.2 门禁执行新声明 → 放行；scratch profile（`dsh@0.1.7-rc.2` + 0.3.4 + 豁免）真机回归 `/connector/api/mcp/filters` → 200 |
 | DSH 大版本 | ✅ DSH 不崩；若 `webServer` API 变化，connector 需适配 |
+| DSH `0.2.0-rc.1` | ✅ 不崩：0.3.7 追加 peer 枚举 `0.2.0-rc.1`（代码零改动）。依据：本插件唯一的 DSH 硬依赖 `ctx.webServer.register` 提供方 `dsh-host-webserver`/`dsh-web-app` 在 `0.1.7-rc.2 → 0.2.0-rc.1` **`lib/` 逐字节零变化**；0.2.0-rc.1 门禁对旧声明判 **拦截**（`dsh@0.1.7-rc.1 \|\| 0.1.7-rc.2`）、对新声明判 **放行**；沙箱真机装配（官方 `dsh@0.2.0-rc.1` + 本插件 0.3.7）`--dump-config` 入树、零拦截；`npm pack` 产物校验含新枚举 |
 | yaml 版本 | ✅ 独立 npm 包，不受 DSH 更新影响 |
 
 **0.3.6 追加的两个真机 bug 修复**（均为插件自身 bug，与 DSH 版本无关）：
@@ -211,7 +233,7 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 
 ---
 
-## 4. @omdp/dsh-key-fallback（v3.2.2）【活跃插件】
+## 4. @omdp/dsh-key-fallback（v3.2.4）【活跃插件】
 
 ### 架构
 
@@ -261,12 +283,13 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 | DSH `0.1.5-rc.3` → `0.1.7-rc.1` | ✅ 不崩：v3.2.0 双后端自动判别（rc.3 文件后端 / 0.1.7 profile entry 后端）、v3.2.1 追加遗留池一次性救援，**两版均已实测读写通过**；v3.2.2 追加 `@deepseek-ai/dsh` peer `0.1.7-rc.1`（门禁实测通过） |
 | DSH `0.1.7-rc.2` | ✅ 不崩：v3.2.3 追加 peer 枚举 rc.2（代码零改动）。依据：tarball diff——`dsh-credentials` 的 `lib/` **逐字节一致**、`dsh-llm` 仅新增内容类型/错误码（waterfall 与 credential-reference 签名未变）、`dsh-shell`/`dsh-settings` `lib/` 逐字节一致；rc.2 门禁放行；scratch profile 真机回归池页 200 |
 | DSH 大版本 | ✅ DSH 不崩；`agent/*` 事件载荷或 `webServer` 若变，轮换/设置页需适配 |
+| DSH `0.2.0-rc.1` | ✅ 不崩：v3.2.4 追加 peer 枚举 `0.2.0-rc.1`（dsh/credentials/llm/settings 四条同步，代码零改动）。依据：`dsh-credentials`/`dsh-llm`/`dsh-settings` 的 `lib/` 在 `0.1.7-rc.2 → 0.2.0-rc.1` **逐字节零变化**（`ctx.credentials` 的 `resolve`/`describe`/`set`/`unset`、`agent/request(-error)` 事件、`settings.describe/replace` 全保留）；门禁对旧声明判拦截、新声明判放行；沙箱真机装配入树 |
 | `dsh-credentials` 版本漂移 | ✅ reference 半边自 rc.6 稳定，低风险 |
 | 服务缺失 | ✅ 设置页不显示/轮换降级，不崩溃 |
 
 ---
 
-## 5. @omdp/dsh-archived-sessions（v0.3.7）【活跃插件】
+## 5. @omdp/dsh-archived-sessions（v0.3.8）【活跃插件】
 
 > fork 自 `@muwinds/dsh-archived-sessions` 0.2.0。上游在 DSH 0.1.5-rc.1 下损坏（见下方风险点），作者已一个月未维护，2026-09-10 决定 fork 并入 omdp。
 
@@ -320,6 +343,7 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 | DSH `0.1.7-rc.1` | ✅ 不崩：0.3.6 双时代探测 `ctx.shell` 契约（`execute()` 优先、`run()` 回退），删除功能恢复；并声明 `@deepseek-ai/dsh` peer（门禁实测通过） |
 | DSH `0.1.7-rc.2` | ✅ 不崩：0.3.7 追加 peer 枚举 rc.2（代码零改动）。依据：`dsh-shell` 的 `lib/` 在 rc.1→rc.2 **逐字节零变化**（本插件唯一 shell 依赖面）；rc.2 门禁放行；scratch profile（`dsh@0.1.7-rc.2` + 0.3.6 + 豁免）**真机删除实测通过**（`{"ok":true}` + 磁盘目录消失 + 归档集合清空） |
 | DSH 大版本 | ✅ DSH 不崩；`sessionPersistence`/`workspaceRegistry` 若变，需适配路径解析/归档集合 |
+| DSH `0.2.0-rc.1` | ✅ 不崩：0.3.8 追加 peer 枚举 `0.2.0-rc.1`（代码零改动）。依据：`dsh-shell`（本插件唯一 shell 依赖面，`execute`/`resolve`/`result` 三件套）与 `dsh-session` 既有导出在 `0.1.7-rc.2 → 0.2.0-rc.1` **全保留**——`dsh-session` 的 5 个变化文件为**附加式**（新增 `ToolCallRecovery`/`TOOL_NOT_STARTED`/`TOOL_OUTCOME_UNKNOWN`，`SessionStore`/`readTitleSnapshots`/`readSession` 未动）；门禁对旧声明判拦截、新声明判放行；沙箱真机装配入树 |
 | `sessionPersistence` 版本漂移 | ✅ 列表/删除优雅降级（无路径则只清归档标记），不会误删 |
 | 服务缺失 | ✅ 设置页不显示/操作降级，不崩溃 |
 
@@ -330,10 +354,10 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 | 插件 | 版本 | 第三方依赖 | DSH 硬依赖 | 抗崩溃设计 | 最大风险点 |
 |---|---|---|---|---|---|
 | dsh-gitbash-win（归档） | 0.1.6 | 无（动态加载 5 个 @deepseek-ai/*） | `tools`/`subprocess`/`systemPrompt`/`shellEnv` | 顶层零依赖 + 动态加载 + 失败隔离 | `dsh-sandbox`（Windows ACL 上游 bug） |
-| dsh-connector | 0.3.6 | `yaml`（+ `jsdom` 懒加载；peer `schemastery` 仅 Config 声明用、`@deepseek-ai/dsh` 供版本门禁 `0.1.7-rc.1 \|\| 0.1.7-rc.2`） | `webServer`（`settings`/`tools.guard`/`systemPrompt`/`profileContext` 可选） | 顶层零第三方 static import + try/catch + 可选服务失败隔离 + **遗留 `toolFilters` 一次性救援** + **CRLF 解析容错** | `ctx.webServer` API 变化 / 内置模块子路径解析崩溃（`punycode/`，0.3.3 懒加载缓解）/ 0.1.7 配置迁移漏段（0.3.4 救援）/ 补丁文件换行被外部工具改成 CRLF（0.3.6） |
+| dsh-connector | 0.3.7 | `yaml`（+ `jsdom` 懒加载；peer `schemastery` 仅 Config 声明用、`@deepseek-ai/dsh` 供版本门禁 `0.1.7-rc.1 \|\| 0.1.7-rc.2 \|\| 0.2.0-rc.1`） | `webServer`（`settings`/`tools.guard`/`systemPrompt`/`profileContext` 可选） | 顶层零第三方 static import + try/catch + 可选服务失败隔离 + **遗留 `toolFilters` 一次性救援** + **CRLF 解析容错** | `ctx.webServer` API 变化 / 内置模块子路径解析崩溃（`punycode/`，0.3.3 懒加载缓解）/ 0.1.7 配置迁移漏段（0.3.4 救援）/ 补丁文件换行被外部工具改成 CRLF（0.3.6） |
 | dsh-vision-bridge | 0.1.12 | 无 | `tools`/`attachments`/`llm`/`credentials` | 纯静态 + 零 @deepseek-ai + 防御性编码 | `ctx.llm` API 变化 / composer 输入层变化 / Agent 路由载荷变化（`requestHeader().config`） |
-| dsh-key-fallback | 3.2.3 | `schemastery`（仅 `Config` 声明用） | `credentials`/`llm`/`settings`（`webServer`/`slots` 可选） | ESM import + `agent/*` 事件 + `process.env + credentials.set` 双写 + **配置双后端自动判别** + **遗留池一次性救援** + **DSH peer 版本门禁** + 防御性编码 | `agent/request-error` 载荷 / `0.1.7` 配置迁移机制 / `webServer` API 变化 |
-| dsh-archived-sessions | 0.3.7 | 无（jsonl 后端可选 import + 内置编码 fallback） | `webServer`（`sessionPersistence`/`workspaceRegistry`/`sessionQuery`/`fs`/`shell` 可选） | 路径自解析（root 由 `DSH_HOME` 推导）+ 删除目录名校验 + **`ctx.shell` 双时代能力探测** + **DSH peer 版本门禁** + try/catch + 可选服务失败隔离 | `sessionPersistence` 路径布局 / `workspaceRegistry` 字段变化 / `ctx.shell` 抽象方法**改名**（0.3.6 双时代探测）/ 宿主同槽位撞 slot id（0.3.4 起用 `omdp-` 前缀免疫） |
+| dsh-key-fallback | 3.2.4 | `schemastery`（仅 `Config` 声明用） | `credentials`/`llm`/`settings`（`webServer`/`slots` 可选） | ESM import + `agent/*` 事件 + `process.env + credentials.set` 双写 + **配置双后端自动判别** + **遗留池一次性救援** + **DSH peer 版本门禁** + 防御性编码 | `agent/request-error` 载荷 / `0.1.7` 配置迁移机制 / `webServer` API 变化 |
+| dsh-archived-sessions | 0.3.8 | 无（jsonl 后端可选 import + 内置编码 fallback） | `webServer`（`sessionPersistence`/`workspaceRegistry`/`sessionQuery`/`fs`/`shell` 可选） | 路径自解析（root 由 `DSH_HOME` 推导）+ 删除目录名校验 + **`ctx.shell` 双时代能力探测** + **DSH peer 版本门禁** + try/catch + 可选服务失败隔离 | `sessionPersistence` 路径布局 / `workspaceRegistry` 字段变化 / `ctx.shell` 抽象方法**改名**（0.3.6 双时代探测）/ 宿主同槽位撞 slot id（0.3.4 起用 `omdp-` 前缀免疫） |
 
 ## DSH 0.1.7 兼容性专项（2026-09-24）
 
@@ -349,9 +373,9 @@ DSH `0.1.7` 引入多处**破坏性变更**，本仓库插件已按"优先双版
 
 | 插件 | 门禁影响 | 处理 |
 |---|---|---|
-| dsh-key-fallback | **原 v3.1.7 被跳过**（3/3 peer 不含 `0.1.7-rc.1`） | v3.2.0 追加 `0.1.7-rc.1`（credentials/llm/settings）与 cordis `4.0.4`、schemastery `3.18.4`；v3.2.1 追加遗留池救援；v3.2.2 追加 `@deepseek-ai/dsh` peer `0.1.7-rc.1`；v3.2.3 追加 rc.2（dsh/credentials/llm/settings 四条枚举同步扩充） |
-| dsh-connector | **原不受门禁**（peer 只有 schemastery，非 `dsh-*`） | import 期崩溃需修 ⇒ v0.3.3；v0.3.4 **主动纳入门禁**（新增 `@deepseek-ai/dsh` peer）；v0.3.5 追加 rc.2；v0.3.6 修 CRLF 解析 + `profileContext` 补丁路径 |
-| dsh-archived-sessions | **原不受门禁**（peer 只有 cordis） | `ctx.shell.run()` 移除导致删除失效 ⇒ v0.3.5（追加 cordis `4.0.4` 枚举）、v0.3.6 双时代自适应 + **主动纳入门禁**；v0.3.7 追加 rc.2 |
+| dsh-key-fallback | **原 v3.1.7 被跳过**（3/3 peer 不含 `0.1.7-rc.1`） | v3.2.0 追加 `0.1.7-rc.1`（credentials/llm/settings）与 cordis `4.0.4`、schemastery `3.18.4`；v3.2.1 追加遗留池救援；v3.2.2 追加 `@deepseek-ai/dsh` peer `0.1.7-rc.1`；v3.2.3 追加 rc.2（dsh/credentials/llm/settings 四条枚举同步扩充）；v3.2.4 追加 `0.2.0-rc.1`（同四条） |
+| dsh-connector | **原不受门禁**（peer 只有 schemastery，非 `dsh-*`） | import 期崩溃需修 ⇒ v0.3.3；v0.3.4 **主动纳入门禁**（新增 `@deepseek-ai/dsh` peer）；v0.3.5 追加 rc.2；v0.3.6 修 CRLF 解析 + `profileContext` 补丁路径；v0.3.7 追加 `0.2.0-rc.1` |
+| dsh-archived-sessions | **原不受门禁**（peer 只有 cordis） | `ctx.shell.run()` 移除导致删除失效 ⇒ v0.3.5（追加 cordis `4.0.4` 枚举）、v0.3.6 双时代自适应 + **主动纳入门禁**；v0.3.7 追加 rc.2；v0.3.8 追加 `0.2.0-rc.1` |
 | dsh-vision-bridge | **不受门禁**（无 dsh peer） | 无需改动 |
 
 **门禁的两个易误读点（0.3.4/0.3.6 本轮实证）**：
@@ -566,6 +590,98 @@ line.match(/^\s+(\w+):\s*(.*)$/)   // CRLF 文件里每一行都以 \r 结尾 �
 - 排查手法：直接打插件自己的 HTTP 接口看字段（`GET /connector/api/mcp` 回 `serverName:""` 就是它），
   比在 UI 上猜快得多；再用 `Get-Content -Raw` 数 `\r\n` 定位换行被谁改的。
 
+## DSH 0.2.0 兼容性专项（2026-09-28）
+
+### 现象与根因
+
+桌面端升级到 `0.2.0-rc.1` 后，插件设置页里 **connector / key-fallback /
+archived-sessions 三项整项消失**（vision-bridge 正常），实测路由
+`GET /connector/api/mcp` → **404**、`GET /dsh-key-fallback/pools` → **404**、
+`POST /dsh-archived/list` → **405**（路由存在但方法不匹配，说明该前缀未被注册），
+而 `GET /vision-bridge/capabilities` → **200**。
+
+**根因不是崩溃，是门禁第二次生效**：三个插件声明的 `@deepseek-ai/dsh` peer 枚举止于
+`0.1.7-rc.2`，而运行时已变成 `0.2.0-rc.1` —— `semver.satisfies('0.2.0-rc.1',
+'0.1.7-rc.1 || 0.1.7-rc.2', { includePrerelease: true })` = `false`（预发布版本只在
+**同一 `[major,minor,patch]` 三元组内**匹配）⇒ `skipping profile bundle` ⇒ 插件根本
+没被加载。**vision-bridge 因为没有声明任何 `@deepseek-ai/dsh*` peer 而完全不受门禁约束，
+所以它是唯一活着的**——这正好是根因的对照实验。
+
+> 这是「**声明范围 = 承诺测试过的范围**」（`AGENTS.md` 规范 3）的代价也是价值：
+> 门禁宁可 unmet peer 也不预先放行，因此 DSH 每升级一个版本、插件就会**优雅跳过一次**
+> 直到重新核查。跳过是**安全行为**（DSH 本体不崩、其他插件不受影响），不是故障。
+
+### 逐包 API diff（npm tarball 解包 + 逐文件 SHA1）
+
+对比 `@deepseek-ai/<pkg>@0.1.7-rc.2` 与 `@0.2.0-rc.1` 的 `lib/` 全量文件：
+
+| 包 | `lib/` 变化 | 结论 |
+|---|---|---|
+| `dsh-credentials` / `dsh-llm` / `dsh-settings` / `dsh-shell` / `dsh-tools` | **0 文件变化** | 插件调用面零变化 |
+| `dsh-mcp-client` / `dsh-web` / `dsh-agent` / `dsh-agent-preset` | **0 文件变化** | 同上 |
+| `dsh-session` | 5 文件变化（`index.js` +1150 字符、`types/*` 三件） | **附加式**：新增导出 `ToolCallRecovery` / `TOOL_NOT_STARTED` / `TOOL_OUTCOME_UNKNOWN`；`SessionStore` 等既有导出全保留（导出集合比对：仅「新增」无「删除」） |
+| `dsh-tool-cordis` | `types/api-catalog.js` | 目录数据，与插件无关 |
+| `dsh-app-boot` | `lib/index.js` | 门禁本体（`evaluatePluginCompatibility` 逻辑与 rc.2 等价，导出集合一致） |
+
+**方法级存在性复核**（在解包后的实现里正则检索）：`dsh-credentials` 的
+`resolve`/`describe`/`set`/`unset`、`dsh-llm` 的
+`listConfigurableProviders`/`listProviders`/`listModels`/`registerAdapter`/
+`resolveModelInfo`/`stream`、`dsh-settings` 的 `replace`/`set`、`dsh-tools` 的
+`guard`/`register`、`dsh-shell` 的 `execute`/`resolve`/`result` —— **两版全部命中，
+零缺失**。
+
+### 门禁判定实测（用 0.2.0-rc.1 自带的函数）
+
+沙箱安装官方 `@deepseek-ai/dsh@0.2.0-rc.1`（542 包）后，调用其
+`dsh-app-boot` 的 `evaluatePluginCompatibility(manifest, {}, getDshRuntimeVersion())`
+（`getDshRuntimeVersion()` 返回 `0.2.0-rc.1`）：
+
+```
+❌ 拦截  @omdp/dsh-connector@0.3.6            → 不满足: dsh@0.1.7-rc.1 || 0.1.7-rc.2
+✅ 放行  @omdp/dsh-connector@0.3.7            → 声明含 0.2.0-rc.1
+❌ 拦截  @omdp/dsh-key-fallback@3.2.3         → 不满足: dsh / dsh-llm / dsh-settings / dsh-credentials
+✅ 放行  @omdp/dsh-key-fallback@3.2.4
+❌ 拦截  @omdp/dsh-archived-sessions@0.3.7    → 不满足: dsh@0.1.7-rc.1 || 0.1.7-rc.2
+✅ 放行  @omdp/dsh-archived-sessions@0.3.8
+✅ 放行  @omdp/dsh-vision-bridge@0.1.12       （无 dsh peer，门禁不适用）
+```
+
+### 真机装配实测（不是只看声明）
+
+沙箱：独立 `DSH_HOME` + 官方 0.2.0-rc.1 运行时 + 改过声明的四个插件构成的
+`smoke` profile，执行 `dsh --profile smoke --dump-config`：
+
+- 四个插件 **全部出现**在装配树里；
+- **零门禁拦截、零错误**（无 `incompatible` / `skipping profile bundle` / `ERR_`）；
+- `dsh --version` = `0.2.0-rc.1`。
+
+另用 `npm pack` 打真实 tarball 复核发布件：三个包的 `package.json` 均含
+`0.2.0-rc.1`，同一门禁函数对 tarball 内 manifest 判定 **放行**。
+
+### 0.2.0 带来的结构性变化（非破坏，但影响运维）
+
+| 变化 | 说明 |
+|---|---|
+| **运行时内置进应用** | 桌面端不再用全局 npm 安装的 DSH：`app.asar` 内的 `dsh/package.json` 是 `@deepseek-ai/dsh-desktop-runtime@0.2.0-rc.1`（`dependencies` 里全部 `@deepseek-ai/*` 均为 `0.2.0-rc.1`，cordis `4.0.4`）。旧 `~/.dsh/profiles/node_modules/@deepseek-ai/*` 的 junction 指向已失效 |
+| **`~/.dsh/logs` 消失** | 启动日志改到 `AppData\Roaming\@deepseek-ai\dsh-desktop\logs\`（`crash-*.log` / `main.log`），插件管理日志在 `profiles/<p>/.plugin-manager/logs/operation-*/pnpm.log` |
+| **profile 名变化** | `web` → `headless`（本机 `profiles/` 下现为 `desktop` + `headless` + `node_modules`） |
+| **新增官方 bundle** | `@deepseek-ai/dsh-experimental-agent-team-profile`、`@deepseek-ai/dsh-experimental-auto-review` 出现在桌面 profile 的 `dsh.profile.bundles` |
+
+### 教训（可复用）
+
+1. **门禁只拦「声明过 `@deepseek-ai/dsh*` peer 的插件」**——没声明 dsh peer
+   （vision-bridge）的在任何 DSH 版本上都不会被跳过，但这也意味着**它没有自动保护**，
+   兼容性只能靠运行时行为证明。
+2. **「插件消失 + 路由 404」的第一嫌疑是门禁，不是代码 bug**：先跑
+   `evaluatePluginCompatibility`，再看 `skipping profile bundle` 日志，最后才查源码。
+   判据速记：**404/405 且 DSH 本体正常启动** ⇒ 大概率是 bundle 被跳过。
+3. **预发布版本的门禁必须逐版本追加枚举**：`0.1.7-rc.2 → 0.2.0-rc.1` 跨了
+   `minor`，任何 `^0.1.7-rc.2` / `<0.2.0` 式范围都不可能放行，只能显式列出。
+4. **升级 DSH 后要同时核查「官方包 API diff」与「门禁声明」两件事**：本轮 API 面
+   逐字节零变化（本可零改动兼容），却因为声明没跟上而全部被跳过——**两者是独立的关卡**。
+5. **`--dump-config` 是最省事的真机装配验证**：不启动 web、不依赖浏览器，一条命令就能
+   看到「某个 bundle 到底进没进树」。
+
 ## 总体结论
 
 1. **活跃插件都不会导致 DSH 崩溃**——这是共同的硬保证（架构设计使然）；`0.1.7` 的门禁机制同样只"跳过 bundle"而非崩溃。
@@ -573,10 +689,10 @@ line.match(/^\s+(\w+):\s*(.*)$/)   // CRLF 文件里每一行都以 \r 结尾 �
 3. **相互隔离**：任一插件失效，不影响其他插件和 DSH 本体。
 4. **建议**：DSH 大版本升级后，逐个验证活跃插件（connector API、vision-bridge 识图、key-fallback），
    有问题就更新对应插件版本。
-5. **本仓库现状**：`0.1.7-rc.1` / `0.1.7-rc.2` 适配已全部落地——`key-fallback` v3.2.3（双后端 + 遗留池救援 + 声明 DSH peer）、
-   `connector` v0.3.6（jsdom 懒加载修 import 崩溃 + 工具过滤迁 volatile `Config` + 遗留过滤救援 + 声明 DSH peer +
+5. **本仓库现状**：`0.1.7-rc.1` / `0.1.7-rc.2` / `0.2.0-rc.1` 适配已全部落地——`key-fallback` v3.2.4（双后端 + 遗留池救援 + 声明 DSH peer）、
+   `connector` v0.3.7（jsdom 懒加载修 import 崩溃 + 工具过滤迁 volatile `Config` + 遗留过滤救援 + 声明 DSH peer +
    CRLF 解析与 `profileContext` 补丁路径修复）、
-   `archived-sessions` v0.3.7（`ctx.shell` 契约**双时代自适应**修删除失效 + 声明 DSH peer）；
+   `archived-sessions` v0.3.8（`ctx.shell` 契约**双时代自适应**修删除失效 + 声明 DSH peer）；
    `vision-bridge` v0.1.12 无改动（也无 dsh peer）。
    ⚠️ 注意 cron：**抽象服务的「新增方法」兼容、「移除方法」不兼容**（`ctx.shell` 的 `run`→`execute` 是典型：
    改名而非别名），以及**宿主解析器缺陷会在插件 import 期放大**——这两类都不体现在 `.d.ts` 的

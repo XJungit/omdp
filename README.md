@@ -34,7 +34,7 @@ omdp/
 │   ├── cordis.patch.yml # bundle activation row
 │   ├── package.json
 │   └── README.md
-├── dsh-archived-sessions/ # archived-session manager (fork of @muwinds, DSH 0.1.5-rc.1 / 0.1.6-alpha.1 / 0.1.7-rc.1 / 0.1.7-rc.2)
+├── dsh-archived-sessions/ # archived-session manager (fork of @muwinds, DSH 0.1.5-rc.1 / 0.1.6-alpha.1 / 0.1.7-rc.1 / 0.1.7-rc.2 / 0.2.0-rc.1)
 │   ├── lib/index.js     # host half (ESM)
 │   ├── lib/client.js    # client half (Web UI settings tab)
 │   ├── cordis.patch.yml # bundle activation row
@@ -55,7 +55,7 @@ omdp/
 
 ### Plugins
 
-#### `@omdp/dsh-connector` — MCP + Skills manager (`v0.3.6`)
+#### `@omdp/dsh-connector` — MCP + Skills manager (`v0.3.7`)
 
 One settings tab (**Connector**) that manages three things from the DSH Web UI:
 
@@ -68,11 +68,13 @@ One settings tab (**Connector**) that manages three things from the DSH Web UI:
 - **DSH `0.1.7-rc.2` added to the peer enumeration (v0.3.5)** — zero code changes; verified by a file-by-file tarball diff (shell/settings/credentials `lib/` byte-identical, llm additive-only, app-boot changes unrelated to plugins), running the rc.2 gate against the new declaration, and a live regression on a scratch `dsh@0.1.7-rc.2` profile (filters endpoint 200).
 - **CRLF patches + the right profile file (v0.3.6)** — two live bugs. (1) `parseMcpServers()`'s key/value regex `^\s+(\w+):\s*(.*)$` never matches on a CRLF file (in JS `.*` does not match `\r`, and `$` does not match before it), so `transport`/`serverName`/`command`/`url` all fell into the `preserve` bucket: the API answered `transport:"" serverName:""`, which made the **tool-filter section vanish silently** (`if (!props.serverName) return null`) and the transport badge degrade to `stdio`. Parsing now normalizes line endings first (`toLf()`), and writes emit LF. (2) `patchPath()` hardcoded `profiles/web/cordis.patch.yml`, so under the desktop app (which runs `profiles/desktop`) the MCP editor was rewriting **another profile's** file — with no effect on its own MCP config, plus a wrong path shown in the UI. 0.1.7+ now reads the real path from `ctx.get('profileContext').patchPath` (the `dsh-app-boot` `ProfileContext` contract), keeping the legacy path only where that service does not exist (0.1.5/0.1.6); `GET /api/mcp` returns it so the settings page displays the true file.
 
+- **DSH `0.2.0-rc.1` added to the peer enumeration (v0.3.7)** — zero code changes. After the desktop app moved to `0.2.0-rc.1` the gate skipped the bundle declared only up to `0.1.7-rc.2` (Connector tab gone, `/connector/api/*` → 404 — a graceful skip, not a crash). Verified by a file-by-file SHA1 diff over every `lib/` file of both official tarballs (`dsh-web-app`/`dsh-host-webserver`/`dsh-credentials`/`dsh-settings`/`dsh-tools`/`dsh-mcp-client` byte-identical), by running the **0.2.0-rc.1** `evaluatePluginCompatibility()` against the new manifest (pass; the old manifest is blocked), and by a live sandbox assembly — official `@deepseek-ai/dsh@0.2.0-rc.1` + isolated `DSH_HOME` + `--dump-config` → plugin in the tree, no gate skip.
+
 ```jsonc
-"dependencies": { "@omdp/dsh-connector": "^0.3.6" }
+"dependencies": { "@omdp/dsh-connector": "^0.3.7" }
 ```
 
-#### `@omdp/dsh-key-fallback` — multi-key API key pool with rotation (`v3.2.3`)
+#### `@omdp/dsh-key-fallback` — multi-key API key pool with rotation (`v3.2.4`)
 
 Sits between the LLM adapter and the credential store. Before each request the plugin picks a key from the per-provider pool and pre-writes it into the provider's credential reference; on a configured trigger error it marks the failed key cooling and advances to the next key — **re-sending is left entirely to DSH's own `dsh-llm-retry`**. Ships an always-visible settings page (**Settings → API Key 回退**) with a redesigned UI:
 
@@ -84,9 +86,10 @@ Sits between the LLM adapter and the credential store. Before each request the p
 - **DSH 0.1.7 support (v3.2.0/v3.2.1)** — dual config backend: the volatile `Config` / `settings.replace()` profile-entry backend on 0.1.7+, the `settings.yaml` file backend on older rc.x. v3.2.1 adds a one-shot rescue that recovers pools stranded in `settings.yaml.imported` (the 0.1.7 migration renames the file, so the file-reading backend never sees them again).
 - **Declared DSH support (v3.2.2)** — new `@deepseek-ai/dsh` peer (`0.1.7-rc.1`, enumerated per version), making the supported runtime an explicit, machine-checked contract (see the connector entry above for the gate's semantics).
 - **DSH `0.1.7-rc.2` added to all four dsh peer enumerations (v3.2.3)** — zero code changes; verified by tarball diff (credentials `lib/` byte-identical, llm additive-only), gate execution on rc.2, and a live scratch-profile regression.
+- **DSH `0.2.0-rc.1` added to all four dsh peer enumerations (v3.2.4)** — zero code changes; verified by a full `lib/` SHA1 diff (credentials/llm/settings/shell/tools/mcp-client/web/agent all byte-identical — the entire surface this plugin touches), gate execution on 0.2.0-rc.1, and a live sandbox assembly.
 
 ```jsonc
-"dependencies": { "@omdp/dsh-key-fallback": "^3.2.3" }
+"dependencies": { "@omdp/dsh-key-fallback": "^3.2.4" }
 ```
 
 #### `@omdp/dsh-vision-bridge` — vision for text-only models (`v0.1.12`)
@@ -97,9 +100,9 @@ A zero-dependency plugin that gives **text-only models** vision: it auto-detects
 "dependencies": { "@omdp/dsh-vision-bridge": "^0.1.12" }
 ```
 
-#### `@omdp/dsh-archived-sessions` — archived-session manager (`v0.3.7`)
+#### `@omdp/dsh-archived-sessions` — archived-session manager (`v0.3.8`)
 
-Fork of [`@muwinds/dsh-archived-sessions`](https://github.com/MuWinds/dsh-archived-sessions) 0.2.0, adapted for **DSH 0.1.5-rc.1**, **0.1.6-alpha.1** (since 0.3.4), **0.1.7-rc.1** (since 0.3.5) and **0.1.7-rc.2** (since 0.3.7) — upstream is unmaintained and broken on 0.1.5+ (`sessionPersistence.list()` returns snapshots, `locate()` was removed). Adds **Settings → 归档会话管理**, coexisting with the native archived-sessions page introduced in DSH 0.1.6:
+Fork of [`@muwinds/dsh-archived-sessions`](https://github.com/MuWinds/dsh-archived-sessions) 0.2.0, adapted for **DSH 0.1.5-rc.1**, **0.1.6-alpha.1** (since 0.3.4), **0.1.7-rc.1** (since 0.3.5), **0.1.7-rc.2** (since 0.3.7) and **0.2.0-rc.1** (since 0.3.8) — upstream is unmaintained and broken on 0.1.5+ (`sessionPersistence.list()` returns snapshots, `locate()` was removed). Adds **Settings → 归档会话管理**, coexisting with the native archived-sessions page introduced in DSH 0.1.6:
 
 - List archived sessions with title / ID / workspace / disk usage / running state;
 - **Release** (释放): move a session out of the archive set (no data deleted);
@@ -107,10 +110,10 @@ Fork of [`@muwinds/dsh-archived-sessions`](https://github.com/MuWinds/dsh-archiv
 - **Tree delete**: deleting a main session also deletes its `parentSession` subtree (fixes upstream issue #2 — orphan subagents);
 - **Orphan sweep**: scan and clean leftover subagent dirs whose parent session is already gone;
 - Deletion safety: refuses to delete any path whose directory name is not a session dir (`session-<uuid>` or bare UUID); deletion is **dual-era** since 0.3.6 — it prefers `ctx.shell.resolve()` → `execute()` → `await result()` on DSH 0.1.7+, and falls back to `resolve()` → `run()` on ≤0.1.6, so one build deletes across the whole line. (0.3.5 only called `execute()` — which fixed 0.1.7 but silently broke rc.x, where `run()` is the only method; 0.3.4 had the mirror-image bug. Verified by unpacking each `@deepseek-ai/dsh-shell` tarball's `lib/types/index.d.ts`.)
-- Declared DSH support (0.3.6): `@deepseek-ai/dsh` peer `0.1.7-rc.1`, enumerated per version. (0.3.7): rc.2 added to the enumeration — zero code changes, verified by the byte-identical `dsh-shell` diff and a live end-to-end delete test on a scratch `dsh@0.1.7-rc.2` profile (`{"ok":true}` + directory gone + archive set emptied).
+- Declared DSH support (0.3.6): `@deepseek-ai/dsh` peer `0.1.7-rc.1`, enumerated per version. (0.3.7): rc.2 added to the enumeration — zero code changes, verified by the byte-identical `dsh-shell` diff and a live end-to-end delete test on a scratch `dsh@0.1.7-rc.2` profile (`{"ok":true}` + directory gone + archive set emptied). (0.3.8): **0.2.0-rc.1** added — zero code changes, verified by a full `lib/` SHA1 diff (`dsh-shell` byte-identical; `dsh-session`'s changes additive-only, new `ToolCallRecovery` exports, no removals), gate execution on 0.2.0-rc.1, and a live sandbox assembly.
 
 ```jsonc
-"dependencies": { "@omdp/dsh-archived-sessions": "^0.3.7" }
+"dependencies": { "@omdp/dsh-archived-sessions": "^0.3.8" }
 ```
 
 ### Installing from npm (recommended)
@@ -120,10 +123,10 @@ All four plugins are published to **npm** automatically by GitHub Actions on eve
 ```jsonc
 // ~/.dsh/profiles/<name>/package.json — you can use one or mix-and-match
 "dependencies": {
-  "@omdp/dsh-connector": "^0.3.6",
+  "@omdp/dsh-connector": "^0.3.7",
   "@omdp/dsh-vision-bridge": "^0.1.12",
-  "@omdp/dsh-key-fallback": "^3.2.3",
-  "@omdp/dsh-archived-sessions": "^0.3.7"
+  "@omdp/dsh-key-fallback": "^3.2.4",
+  "@omdp/dsh-archived-sessions": "^0.3.8"
 }
 ```
 
@@ -240,7 +243,7 @@ omdp/
 │   ├── cordis.patch.yml # bundle 激活行
 │   ├── package.json
 │   └── README.md
-├── dsh-archived-sessions/ # 归档会话管理（fork @muwinds，适配 DSH 0.1.5-rc.1 / 0.1.6-alpha.1 / 0.1.7-rc.1 / 0.1.7-rc.2）
+├── dsh-archived-sessions/ # 归档会话管理（fork @muwinds，适配 DSH 0.1.5-rc.1 / 0.1.6-alpha.1 / 0.1.7-rc.1 / 0.1.7-rc.2 / 0.2.0-rc.1）
 │   ├── lib/index.js     # host 半区（ESM）
 │   ├── lib/client.js    # client 半区（Web UI 设置页）
 │   ├── cordis.patch.yml # bundle 激活行
@@ -261,7 +264,7 @@ omdp/
 
 ### 插件
 
-#### `@omdp/dsh-connector` — MCP + Skills 管理器（`v0.3.6`）
+#### `@omdp/dsh-connector` — MCP + Skills 管理器（`v0.3.7`）
 
 一个设置页（**Connector**），从 DSH Web UI 管理三件事：
 
@@ -274,11 +277,13 @@ omdp/
 - **peer 枚举追加 DSH `0.1.7-rc.2`（v0.3.5）** —— 代码零改动；依据：tarball 逐文件 diff（shell/settings/credentials 的 `lib/` 逐字节一致、llm 纯新增、app-boot 变更与插件无关）+ rc.2 门禁执行新声明放行 + scratch `dsh@0.1.7-rc.2` profile 真机回归（过滤端点 200）。
 - **CRLF 补丁 + 改错 profile 文件（v0.3.6）** —— 两个真机 bug。(1) `parseMcpServers()` 的键值正则 `^\s+(\w+):\s*(.*)$` 在 CRLF 文件上必然失配（JS 里 `.*` 不匹配 `\r`、`$` 也不匹配 `\r` 之前），`transport`/`serverName`/`command`/`url` 全落进 `preserve`：接口返回 `transport:"" serverName:""` 导致**工具过滤区静默消失**（`if (!props.serverName) return null`）、transport 徽标退化成 `stdio`。现在解析前先归一化换行（`toLf()`），写回也统一 LF。(2) `patchPath()` 曾硬编码 `profiles/web/cordis.patch.yml`，桌面端（跑 `profiles/desktop`）因此在改**另一个 profile** 的文件——对自己的 MCP 配置毫无影响，UI 还显示错误路径。0.1.7+ 改为从 `ctx.get('profileContext').patchPath` 取真实路径（`dsh-app-boot` 的 `ProfileContext` 契约），仅在没有该服务的 0.1.5/0.1.6 上保留历史路径；`GET /api/mcp` 回传该路径供设置页显示。
 
+- **peer 枚举追加 DSH `0.2.0-rc.1`（v0.3.7）** —— 代码零改动。桌面端升到 `0.2.0-rc.1` 后，门禁把只声明到 `0.1.7-rc.2` 的 bundle 跳过（Connector 标签消失、`/connector/api/*` → **404**；是优雅跳过而非崩溃）。依据：两版官方 tarball 全量 `lib/` 文件 SHA1 逐文件 diff（`dsh-web-app`/`dsh-host-webserver`/`dsh-credentials`/`dsh-settings`/`dsh-tools`/`dsh-mcp-client` 逐字节一致）+ 用 **0.2.0-rc.1** 的 `evaluatePluginCompatibility()` 判定新声明**放行**（旧声明被拦）+ 沙箱真机装配（官方 `@deepseek-ai/dsh@0.2.0-rc.1` + 独立 `DSH_HOME` + `--dump-config` → 插件入树、零拦截）。
+
 ```jsonc
-"dependencies": { "@omdp/dsh-connector": "^0.3.5" }
+"dependencies": { "@omdp/dsh-connector": "^0.3.7" }
 ```
 
-#### `@omdp/dsh-key-fallback` — 多 key API 池 + 轮换（`v3.2.3`）
+#### `@omdp/dsh-key-fallback` — 多 key API 池 + 轮换（`v3.2.4`）
 
 位于 LLM 适配器与凭据存储之间。每次请求前，插件从对应 provider 的 key 池里选一把，预写入 provider 的凭据引用；遇配置的触发错误时，把失败 key 标记为冷却并切到下一把——**重发完全交给 DSH 自带的 `dsh-llm-retry`**。带一个常驻可见的设置页（**设置 → API Key 回退**）与全新 UI：
 
@@ -290,9 +295,10 @@ omdp/
 - **DSH 0.1.7 适配（v3.2.0/v3.2.1）** —— 配置双后端：0.1.7+ 用 volatile `Config` / `settings.replace()` 写本插件 profile 条目，旧版 rc.x 用 `settings.yaml` 文件后端。v3.2.1 追加一次性救援：把残留在 `settings.yaml.imported` 里的池捞回来（0.1.7 的迁移会改名该文件，文件后端从此再也看不到它们，被救池表现为「尚未启用 / 还没有任何池」且重启无效）。
 - **声明 DSH 版本支持（v3.2.2）** —— 新增 `@deepseek-ai/dsh` peer（`0.1.7-rc.1`，逐版本枚举），把「支持的运行时」变成显式且机器可校验的契约（门禁语义见上方 connector 条目）。
 - **四条 dsh peer 枚举同步追加 `0.1.7-rc.2`（v3.2.3）** —— 代码零改动；依据：tarball diff（credentials 的 `lib/` 逐字节一致、llm 纯新增）+ rc.2 门禁放行 + scratch profile 真机回归。
+- **四条 dsh peer 枚举同步追加 `0.2.0-rc.1`（v3.2.4）** —— 代码零改动；依据：全量 `lib/` SHA1 diff（credentials/llm/settings/shell/tools/mcp-client/web/agent 逐字节一致——本插件用到的整个调用面）+ 0.2.0-rc.1 门禁放行 + 沙箱真机装配入树。
 
 ```jsonc
-"dependencies": { "@omdp/dsh-key-fallback": "^3.2.3" }
+"dependencies": { "@omdp/dsh-key-fallback": "^3.2.4" }
 ```
 
 #### `@omdp/dsh-vision-bridge` — 给纯文本模型的视觉（`v0.1.12`）
@@ -303,9 +309,9 @@ omdp/
 "dependencies": { "@omdp/dsh-vision-bridge": "^0.1.12" }
 ```
 
-#### `@omdp/dsh-archived-sessions` — 归档会话管理（`v0.3.7`）
+#### `@omdp/dsh-archived-sessions` — 归档会话管理（`v0.3.8`）
 
-fork 自 [`@muwinds/dsh-archived-sessions`](https://github.com/MuWinds/dsh-archived-sessions) 0.2.0，适配 **DSH 0.1.5-rc.1**，0.3.4 起适配 **DSH 0.1.6-alpha.1**、0.3.5 起适配 **DSH 0.1.7-rc.1**、0.3.7 起适配 **DSH 0.1.7-rc.2**（上游已不维护，且在 0.1.5+ 下损坏：`sessionPersistence.list()` 返回快照、`locate()` 被移除）。新增 **设置 → 归档会话管理**，与 DSH 0.1.6 起内置的原生「已归档会话」页共存：
+fork 自 [`@muwinds/dsh-archived-sessions`](https://github.com/MuWinds/dsh-archived-sessions) 0.2.0，适配 **DSH 0.1.5-rc.1**，0.3.4 起适配 **DSH 0.1.6-alpha.1**、0.3.5 起适配 **DSH 0.1.7-rc.1**、0.3.7 起适配 **DSH 0.1.7-rc.2**、0.3.8 起适配 **DSH 0.2.0-rc.1**（上游已不维护，且在 0.1.5+ 下损坏：`sessionPersistence.list()` 返回快照、`locate()` 被移除）。新增 **设置 → 归档会话管理**，与 DSH 0.1.6 起内置的原生「已归档会话」页共存：
 
 - 列表显示归档会话的标题 / ID / 工作区 / 磁盘占用 / 运行状态；
 - **释放**：把会话移出归档集合（不删数据）；
@@ -313,10 +319,10 @@ fork 自 [`@muwinds/dsh-archived-sessions`](https://github.com/MuWinds/dsh-archi
 - **按树删除**：删主会话时连同其 `parentSession` 子树一起删（修复上游 issue #2——孤儿子代理）；
 - **孤儿清理**：扫描并清理「父会话已删除、自己还在盘上」的残留子会话目录；
 - 删除安全：目录名不是会话目录（`session-<uuid>` 或裸 UUID）一律拒绝删除；删除自 0.3.6 起**双时代自适应**——DSH 0.1.7+ 走 `ctx.shell.resolve()` → `execute()` → `await result()`，`≤0.1.6` 回退 `resolve()` → `run()`，一份构建覆盖整条版本线。（0.3.5 只调 `execute()`：修好了 0.1.7 却让 rc.x **静默失效**——那里只有 `run()`；0.3.4 则恰好相反。依据：逐版解包 `@deepseek-ai/dsh-shell` 的 `lib/types/index.d.ts`。）
-- 声明 DSH 版本支持（0.3.6）：`@deepseek-ai/dsh` peer `0.1.7-rc.1`，逐版本枚举；（0.3.7）追加 `0.1.7-rc.2`——代码零改动，依据 `dsh-shell` 逐字节零变化 diff + scratch `dsh@0.1.7-rc.2` profile **真机删除全链路实测**（`{"ok":true}` + 磁盘目录消失 + 归档集合清空）。
+- 声明 DSH 版本支持（0.3.6）：`@deepseek-ai/dsh` peer `0.1.7-rc.1`，逐版本枚举；（0.3.7）追加 `0.1.7-rc.2`——代码零改动，依据 `dsh-shell` 逐字节零变化 diff + scratch `dsh@0.1.7-rc.2` profile **真机删除全链路实测**（`{"ok":true}` + 磁盘目录消失 + 归档集合清空）；（0.3.8）追加 `0.2.0-rc.1`——代码零改动，依据全量 `lib/` SHA1 diff（`dsh-shell` 逐字节一致；`dsh-session` 的 5 个变化文件为**附加式**新增 `ToolCallRecovery` 等导出、既有导出零删除）+ 0.2.0-rc.1 门禁放行 + 沙箱真机装配入树。
 
 ```jsonc
-"dependencies": { "@omdp/dsh-archived-sessions": "^0.3.7" }
+"dependencies": { "@omdp/dsh-archived-sessions": "^0.3.8" }
 ```
 
 ### 从 npm 安装（推荐）
@@ -326,10 +332,10 @@ fork 自 [`@muwinds/dsh-archived-sessions`](https://github.com/MuWinds/dsh-archi
 ```jsonc
 // ~/.dsh/profiles/<name>/package.json —— 可用其一或自由组合
 "dependencies": {
-  "@omdp/dsh-connector": "^0.3.6",
+  "@omdp/dsh-connector": "^0.3.7",
   "@omdp/dsh-vision-bridge": "^0.1.12",
-  "@omdp/dsh-key-fallback": "^3.2.3",
-  "@omdp/dsh-archived-sessions": "^0.3.7"
+  "@omdp/dsh-key-fallback": "^3.2.4",
+  "@omdp/dsh-archived-sessions": "^0.3.8"
 }
 ```
 
