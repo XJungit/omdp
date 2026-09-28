@@ -667,6 +667,58 @@ archived-sessions 三项整项消失**（vision-bridge 正常），实测路由
 | **profile 名变化** | `web` → `headless`（本机 `profiles/` 下现为 `desktop` + `headless` + `node_modules`） |
 | **新增官方 bundle** | `@deepseek-ai/dsh-experimental-agent-team-profile`、`@deepseek-ai/dsh-experimental-auto-review` 出现在桌面 profile 的 `dsh.profile.bundles` |
 
+### 第三方插件：门禁拦截与持久修复（pnpm patch）
+
+0.2.0-rc.1 下桌面 profile 的 9 个第三方 bundle 全部被拦。逐个跑真门禁后，判定与
+「有没有声明 dsh peer」**完全一致**——两个"不异常"的恰好是没声明 peer 的：
+
+| bundle | dsh* peer | 门禁 |
+|---|---|---|
+| `@omdp/dsh-vision-bridge@0.1.12` | **0** | ✅（门禁不适用） |
+| `dsh-preset-craft-bot@0.2.0` | **0** | ✅（门禁不适用） |
+| `dshmarket@1.66.3` | 1（`dsh-settings`） | ❌ |
+| `@mars-sea/dsh-commandcode-provider@0.11.17` | 16 | ❌ |
+| `dsh-cost-meter@1.7.41` | 2 | ❌ |
+| `dsh-client-auto-continue@0.11.9` | 1（`dsh-settings`） | ❌ |
+| `dsh-watcher@0.6.1` | 11 | ❌ |
+| `@wxg-prc-cpg/browser-skill-dsh-plugin@0.3.1` | 5 | ❌ |
+
+**为何不能手改 `node_modules`**（三个独立原因，缺一不可）：
+
+1. `node_modules` 里的文件是**指向 pnpm 内容寻址存储的硬链接**
+   （`LinkType = 'HardLink'`，`fsutil hardlink list` 可验证），就地改写会污染
+   **跨项目共享**的 store；
+2. DSH 启动/更新流程会跑 `pnpm install`，改动按 lockfile 被还原；
+3. **`packageExtensions` 不行**：实测它只把扩展写进 lockfile
+   （`packageExtensionsChecksum`），**不改磁盘 `package.json`**，而门禁读的正是磁盘文件。
+
+**采用 `pnpm patch`**（安装期改写 + 每次 install 自动重放），实测：连续 `pnpm install`
+存活、`--frozen-lockfile` 存活、安装后文件不再是指向 store 的硬链接。产出 6 个补丁，
+登记在 profile 的 `pnpm-workspace.yaml` → `patchedDependencies`：
+
+```
+patchedDependencies:
+  dshmarket@^1.66.3: patches/dshmarket@1.66.3.patch                       # +1 条 peer
+  '@mars-sea/dsh-commandcode-provider@0.11.17': …                         # +16 条
+  dsh-cost-meter@^1.7.41: …                                               # +2 条
+  dsh-client-auto-continue@^0.11.9: …                                     # +1 条
+  dsh-watcher@0.6.1: …                                                     # +11 条
+  '@wxg-prc-cpg/browser-skill-dsh-plugin@^0.3.1': …                       # +5 条
+```
+
+⚠️ **key 必须用 range**：`patchedDependencies` 的 key 匹配不到实际解析版本时，
+pnpm **直接报错中止安装**（`Either remove them from "patchedDependencies" or update
+them to match packages in your dependencies.`）。实测教训：`dsh-cost-meter` 声明 `^1.7.41`
+但 registry 已到 `1.7.43`，用精确 key 时**全新解析的安装直接失败**；改成
+`dsh-cost-meter@^1.7.41` 后既装得上又仍然生效。因此 key 应与 `dependencies` 的
+specifier 对齐（`github:` 类用解析出的版本号）。
+
+**验证方式**：`desktop` 是 Electron 保留 profile，CLI 装配自检会拒绝
+（`profile "desktop" is managed exclusively by the Electron application`）。
+改为把清单 + 补丁复制到**隔离 `DSH_HOME` 下的副本 profile**（不复制 `node_modules`），
+在副本里 `pnpm install` → `dsh --profile <副本> --dump-config`，实测
+`incompatible` 0 处、`skipping profile bundle` 0 处、11 个插件全部进入装配树。
+
 ### 教训（可复用）
 
 1. **门禁只拦「声明过 `@deepseek-ai/dsh*` peer 的插件」**——没声明 dsh peer
@@ -703,3 +755,22 @@ archived-sessions 三项整项消失**（vision-bridge 正常），实测路由
    **仓库改动不会影响在跑的系统**——必须先把版本发到 registry、再把 profile 钉版抬高并 `pnpm install`，
    然后重启 DSH。用手工拷贝覆盖 `node_modules` 里的文件是**不可靠**的：DSH 启动会跑 `pnpm install`，
    pnpm 会按 `pnpm-lock.yaml` 把文件**还原回旧版本**（本轮实测踩过这个坑）。
+7. **第三方插件（非本仓库维护）**：声明跟不上时，**不要在 `node_modules` 里就地改**（详见上文
+   「第三方插件：门禁拦截与持久修复」）——用 `pnpm patch` + `patchedDependencies`，key 用 range。
+   这是临时桥接：上游发版修好声明后应删除补丁、回到真实声明。
+
+## 桌面 profile 本次落地内容（2026-09-28）
+
+`C:\Users\xj\.dsh\profiles\desktop`：
+
+| 项目 | 变更 |
+|---|---|
+| `package.json` | `@omdp/dsh-connector` `0.3.6`→`^0.3.7`、`@omdp/dsh-key-fallback` `^3.2.3`→`^3.2.4`、`@omdp/dsh-archived-sessions` `0.3.7`→`^0.3.8` |
+| `pnpm-workspace.yaml` | 新增 `patchedDependencies`（6 个第三方插件补丁，key 用 range） |
+| `patches/` | 新建，6 个 `.patch` |
+| 备份 | `package.json.bak-020rc1-20260928-220049`、`pnpm-workspace.yaml.bak-020rc1-…`、`pnpm-lock.yaml.bak-020rc1-…` |
+
+门禁复核结果：**11 个 bundle 全部放行，0 拦截**（其中 vision-bridge / craft-bot 无 dsh peer）。
+⚠️ 需**重启 DSH** 才会重新装配；重启前实测端点：connector `/connector/api/mcp` → 404、
+key-fallback `/dsh-key-fallback/pools` → 404、archived `POST /dsh-archived/list` → 405、
+vision `/vision-bridge/capabilities` → **200**（与"只有视觉插件和预设不异常"的现象完全吻合）。
