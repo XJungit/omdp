@@ -2,8 +2,8 @@
 
 > ⚠️ **本文档为演进记录**：`@omdp/dsh-gitbash-win` 与 `@omdp/dsh-resume-stream`
 > 已于 2026-08-25 归档（源码移至 `archive/`，不再维护或发布）。下方对 gitbash
-> 的评估保留作为历史架构参考；当前活跃插件版本见各节标题（connector `0.3.7` /
-> vision-bridge `0.1.12` / key-fallback `3.3.1` / archived-sessions `0.3.8`）。
+> 的评估保留作为历史架构参考；当前活跃插件版本见各节标题（connector `0.3.8` /
+> vision-bridge `0.1.12` / key-fallback `3.3.2` / archived-sessions `0.3.9`）。
 >
 > 评估内容：各插件对 DSH（DeepSeek Harness）更新的抗崩溃能力。
 > 核心问题：DSH 更新后，插件会不会导致 DSH 崩溃？
@@ -11,9 +11,45 @@
 **结论先行**：活跃插件都采用**抗崩溃架构**——DSH 更新时**不会因插件而崩溃**（硬保证），
 最坏情况只是单个插件功能需要适配更新。插件之间互不影响。
 
+**DSH `v0.2.0-rc.2`（桌面端，2026-09-30）适配结论（当前 `latest`/`next`）**：**API 面仍零变化**，
+依然是「被门禁跳过」而非崩溃。相比上轮多一个新变量：**上轮给第三方插件打的 pnpm patch
+本轮失效**——补丁内容写的是精确版本 `0.2.0-rc.1`，只能扛住那一版。
+本机 desktop profile 实测**被拒活 6 个 / 幸存 4 个**（详见下方「DSH 0.2.0-rc.2 兼容性专项」）：
+
+- **rc.1 ↔ rc.2 全量 diff（20 个包逐文件 SHA256）**：`dsh-credentials`/`dsh-settings`/
+  `dsh-shell`/`dsh-session`/`dsh-host-webserver`/`dsh-web-app`/`dsh-attachment`/
+  `dsh-tools`/`dsh-mcp-client`/`dsh-agent`/`dsh-session-persistence-jsonl`/`dsh-workspace`/
+  `dsh-session-query`/`dsh-client-ui-settings`/`dsh-client-ui-slots`/`dsh-app-boot`/`dsh-base`
+  **只有 `package.json` 版本号变化**；`dsh-llm` 唯一代码变化是 `typert.host.js` 内嵌
+  `MessageSourceMap` **新增** `'user-question-reply'` 字段（附加式，插件不用）；
+- **`dsh` 主包的全部变化是 `desktop` profile 支持**：新增 `requireDesktopProfile()` /
+  `manageDesktopProfile` / `runProfilePnpm`。README 措辞由 rc.1 的「CLI rejects boot,
+  config-dump, and plugin-management」改为 rc.2 的「CLI rejects boot and config-dump；
+  plugin-management 也要走桌面应用内置命令」→ ⚠️ **插件安装入口变了**；
+- **同三元组预发布的关键差异**：`0.2.0-rc.1` 与 `rc.2` 同 `[major,minor,patch]`，故
+  `^0.2.0-rc.1` / `>=0.2.0-rc.1 <0.2.1-0` 这类**范围**在 rc.2 下**天然成立**（实测 true）；
+  只有**逐版本精确枚举**的声明需再追加一项。这是本轮「谁炸谁幸存」的唯一分界线；
+  ⚠️ 上界必须写 `<0.2.1-0`（写 `<0.2.1` 会漏放行 `0.2.1-rc.1`——实测
+  `satisfies("0.2.1-rc.1", ">=0.2.0-rc.1 <0.2.1")` 为 **true**）——本仓库据此把三个插件
+  统一改为三元组区间并发布 `0.3.8` / `3.3.2` / `0.3.9`（见「处理结果」）；
+- **被拒活 6 个**（`--dump-config` stderr 实测）：`@omdp/dsh-connector@0.3.7`、
+  `@omdp/dsh-key-fallback@3.3.1`（dsh/credentials/llm/settings 四条）、
+  `@omdp/dsh-archived-sessions@0.3.8`、`dsh-client-auto-continue`、`dsh-watcher`、
+  `@wxg-prc-cpg/browser-skill-dsh-plugin`；
+- **幸存 4 个**：`@omdp/dsh-vision-bridge`（零 peer，门禁根本不看）、
+  `dsh-preset-craft-bot`（零 peer）、`dsh-cost-meter`（`>=0.2.0-rc.1 <0.3.0-0` 范围）、
+  `dshmarket`（`^0.2.0-rc.1` 范围）；
+- ⚠️ **pnpm patch 不会自动跟进版本**：上轮给 `dsh-client-auto-continue` 与
+  `browser-skill-dsh-plugin` 打的补丁把 peer 改成 `... || 0.2.0-rc.1`，
+  补丁**仍然成功应用**（install 无错）却已无意义。**补丁生效 ≠ 补丁有效**——
+  每次 DSH 升版必须复查补丁内容，而非只复查补丁是否还在。
+
 **DSH `v0.2.0-rc.1`（桌面端，2026-09-28）适配结论**：connector / key-fallback /
 archived-sessions 三个插件**源码零改动兼容**，唯一动作是把 `0.2.0-rc.1` 追加进
 peer 枚举（分别升 `0.3.7` / `3.2.4` / `0.3.8`；vision-bridge 无 dsh peer，不动作）。
+> ⚠️ **本节为历史记录**：这三个版本随后被 2026-09-30 的 rc.2 专项取代——
+> connector `0.3.8` / key-fallback `3.3.2` / archived-sessions `0.3.9` 改用三元组区间，
+> **rc.1 的枚举写法已不再使用**。
 （`key-fallback` 于 2026-09-29 升 `3.3.0`——去掉冗余的 `process.env` 写入、修 `/pools` 的 `activeRef` 误报、
 加卸载还原；随后 `3.3.1` 为**文档更正**：v3.3.0 曾误称「换 key 从未生效」，实为包装自 v3.0.0 起一直有效。
 见第 4 节。）
@@ -121,13 +157,14 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 
 ---
 
-## 2. @omdp/dsh-connector（v0.3.7）【活跃插件】
+## 2. @omdp/dsh-connector（v0.3.8）【活跃插件】
 
 ### 架构
 
 - **顶层零第三方 import**：模块顶层只有 `node:*` + `yaml`（版本 `^2.9.0`）；`jsdom`（`^24.1.3`）**改为在 WAF 挑战求解处动态 `await import()`**（0.3.3 起，见下方 0.1.7 专项「变更 4」——顶层静态引入会在 0.1.7 上让整个插件 import 失败）
 - **零 `@deepseek-ai/*` 硬依赖**（`@deepseek-ai/schemastery` 仅 peer 声明，供工具过滤的 `Config` 声明用；
-  0.3.4 起另声明 `@deepseek-ai/dsh` peer，0.3.5 枚举为 `0.1.7-rc.1 || 0.1.7-rc.2`，见 0.1.7 专项「变更 1」）
+  0.3.4 起另声明 `@deepseek-ai/dsh` peer；**0.3.8 起该 peer 为三元组区间 `>=0.2.0-rc.1 <0.2.1-0`**，
+  此前为逐版本枚举——见 0.2.0-rc.2 专项与 `AGENTS.md` 规范 3）
 - **profile 补丁路径取自 `ctx.get('profileContext').patchPath`**（0.3.6 起；0.1.7+ 由 dsh 启动器提供，见 0.1.7 专项「变更 6」），无该服务时回退历史硬编码路径
 - **Client→Host 走 HTTP API**（`/connector/api/*`），不依赖动态 `host.call`
 
@@ -236,7 +273,7 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 
 ---
 
-## 4. @omdp/dsh-key-fallback（v3.3.1）【活跃插件】
+## 4. @omdp/dsh-key-fallback（v3.3.2）【活跃插件】
 
 ### 架构
 
@@ -300,7 +337,7 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 
 ### 风险点
 
-- **peer 声明严格枚举实测版本**（2026-08-31 起，2026-09-24 扩充，2026-09-25 追加 rc.2）：credentials `0.1.0-rc.6 || 0.1.1-rc.2 || 0.1.2-alpha.1 || 0.1.2-alpha.2 || 0.1.2-alpha.3 || 0.1.2-alpha.4 || 0.1.2-alpha.5 || 0.1.2-rc.1 || 0.1.5-rc.1 || 0.1.5-rc.2 || 0.1.5-rc.3 || 0.1.6-alpha.1 || 0.1.7-rc.1 || 0.1.7-rc.2`、llm/settings 同构、cordis `4.0.1 || 4.0.2 || 4.0.4`、schemastery `3.18.1 || 3.18.2 || 3.18.4`——只声明已实际兼容测试过的版本，不用开放范围。
+- **peer 声明用三元组区间**（**v3.3.2 起**；此前 2026-08-31 起为逐版本枚举、2026-09-24/25 两次扩充）：四条 dsh peer（`@deepseek-ai/dsh` / `dsh-credentials` / `dsh-llm` / `dsh-settings`）统一为 `>=0.2.0-rc.1 <0.2.1-0`；`cordis` `4.0.1 || 4.0.2 || 4.0.4`、schemastery `3.18.1 || 3.18.2 || 3.18.4` 仍精确枚举（两者不进版本门禁）。上界带 `-0` 是硬要求（写 `<0.2.1` 会漏放行 `0.2.1-rc.1`），见 `AGENTS.md` 规范 3。⚠️ **v3.3.2 同时收窄支持面**：`0.1.7` 线不再声明。
 - **`0.1.7` 的配置迁移是"全有或全无"**：整个 settings.yaml 被一次性改名 + 逐段导入，任何一段导入失败都只留下日志、配置残留在 `settings.yaml.imported`。插件自身已通过声明 volatile `Config` 保证可导入；但其他未适配的插件仍可能触发该警告。
 - **`.volatile()` API 版本漂移**：schemastery `3.18.2`（rc.3）无此方法、`3.18.4`（0.1.7）有。若未来 rc.x 分支也被回移该方法，需重新评估守卫写法。
 - **`ctx.llm` 事件**是主要变数：`agent/request`/`agent/request-error` 的载荷结构若在 DSH 大版本调整，轮换判定需适配；但所有 handler 都走 `next()` 链，异常不会让 DSH 崩溃。
@@ -322,7 +359,7 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 
 ---
 
-## 5. @omdp/dsh-archived-sessions（v0.3.8）【活跃插件】
+## 5. @omdp/dsh-archived-sessions（v0.3.9）【活跃插件】
 
 > fork 自 `@muwinds/dsh-archived-sessions` 0.2.0。上游在 DSH 0.1.5-rc.1 下损坏（见下方风险点），作者已一个月未维护，2026-09-10 决定 fork 并入 omdp。
 
@@ -387,10 +424,10 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 | 插件 | 版本 | 第三方依赖 | DSH 硬依赖 | 抗崩溃设计 | 最大风险点 |
 |---|---|---|---|---|---|
 | dsh-gitbash-win（归档） | 0.1.6 | 无（动态加载 5 个 @deepseek-ai/*） | `tools`/`subprocess`/`systemPrompt`/`shellEnv` | 顶层零依赖 + 动态加载 + 失败隔离 | `dsh-sandbox`（Windows ACL 上游 bug） |
-| dsh-connector | 0.3.7 | `yaml`（+ `jsdom` 懒加载；peer `schemastery` 仅 Config 声明用、`@deepseek-ai/dsh` 供版本门禁 `0.1.7-rc.1 \|\| 0.1.7-rc.2 \|\| 0.2.0-rc.1`） | `webServer`（`settings`/`tools.guard`/`systemPrompt`/`profileContext` 可选） | 顶层零第三方 static import + try/catch + 可选服务失败隔离 + **遗留 `toolFilters` 一次性救援** + **CRLF 解析容错** | `ctx.webServer` API 变化 / 内置模块子路径解析崩溃（`punycode/`，0.3.3 懒加载缓解）/ 0.1.7 配置迁移漏段（0.3.4 救援）/ 补丁文件换行被外部工具改成 CRLF（0.3.6） |
+| dsh-connector | 0.3.8 | `yaml`（+ `jsdom` 懒加载；peer `schemastery` 仅 Config 声明用、`@deepseek-ai/dsh` 供版本门禁，**v0.3.8 起为三元组区间 `>=0.2.0-rc.1 <0.2.1-0`**） | `webServer`（`settings`/`tools.guard`/`systemPrompt`/`profileContext` 可选） | 顶层零第三方 static import + try/catch + 可选服务失败隔离 + **遗留 `toolFilters` 一次性救援** + **CRLF 解析容错** | `ctx.webServer` API 变化 / 内置模块子路径解析崩溃（`punycode/`，0.3.3 懒加载缓解）/ 0.1.7 配置迁移漏段（0.3.4 救援）/ 补丁文件换行被外部工具改成 CRLF（0.3.6） |
 | dsh-vision-bridge | 0.1.12 | 无 | `tools`/`attachments`/`llm`/`credentials` | 纯静态 + 零 @deepseek-ai + 防御性编码 | `ctx.llm` API 变化 / composer 输入层变化 / Agent 路由载荷变化（`requestHeader().config`） |
-| dsh-key-fallback | 3.3.1 | `schemastery`（仅 `Config` 声明用） | `credentials`/`llm`/`settings`（`webServer`/`slots` 可选） | ESM import + `agent/*` 事件 + **包装 `credentials.resolve` 切换 key（v3.0.0 起）** + **配置双后端自动判别** + **遗留池一次性救援** + **DSH peer 版本门禁** + 防御性编码 | `agent/request-error` 载荷 / `credentials.resolve` 签名 / `0.1.7` 配置迁移机制 / `webServer` API 变化 |
-| dsh-archived-sessions | 0.3.8 | 无（jsonl 后端可选 import + 内置编码 fallback） | `webServer`（`sessionPersistence`/`workspaceRegistry`/`sessionQuery`/`fs`/`shell` 可选） | 路径自解析（root 由 `DSH_HOME` 推导）+ 删除目录名校验 + **`ctx.shell` 双时代能力探测** + **DSH peer 版本门禁** + try/catch + 可选服务失败隔离 | `sessionPersistence` 路径布局 / `workspaceRegistry` 字段变化 / `ctx.shell` 抽象方法**改名**（0.3.6 双时代探测）/ 宿主同槽位撞 slot id（0.3.4 起用 `omdp-` 前缀免疫） |
+| dsh-key-fallback | 3.3.2 | `schemastery`（仅 `Config` 声明用） | `credentials`/`llm`/`settings`（`webServer`/`slots` 可选） | ESM import + `agent/*` 事件 + **包装 `credentials.resolve` 切换 key（v3.0.0 起）** + **配置双后端自动判别** + **遗留池一次性救援** + **DSH peer 版本门禁（v3.3.2 起为三元组区间）** + 防御性编码 | `agent/request-error` 载荷 / `credentials.resolve` 签名 / `0.1.7` 配置迁移机制 / `webServer` API 变化 |
+| dsh-archived-sessions | 0.3.9 | 无（jsonl 后端可选 import + 内置编码 fallback） | `webServer`（`sessionPersistence`/`workspaceRegistry`/`sessionQuery`/`fs`/`shell` 可选） | 路径自解析（root 由 `DSH_HOME` 推导）+ 删除目录名校验 + **`ctx.shell` 双时代能力探测** + **DSH peer 版本门禁（v0.3.9 起为三元组区间）** + try/catch + 可选服务失败隔离 | `sessionPersistence` 路径布局 / `workspaceRegistry` 字段变化 / `ctx.shell` 抽象方法**改名**（0.3.6 双时代探测）/ 宿主同槽位撞 slot id（0.3.4 起用 `omdp-` 前缀免疫） |
 
 ## DSH 0.1.7 兼容性专项（2026-09-24）
 
@@ -406,9 +443,9 @@ DSH `0.1.7` 引入多处**破坏性变更**，本仓库插件已按"优先双版
 
 | 插件 | 门禁影响 | 处理 |
 |---|---|---|
-| dsh-key-fallback | **原 v3.1.7 被跳过**（3/3 peer 不含 `0.1.7-rc.1`） | v3.2.0 追加 `0.1.7-rc.1`（credentials/llm/settings）与 cordis `4.0.4`、schemastery `3.18.4`；v3.2.1 追加遗留池救援；v3.2.2 追加 `@deepseek-ai/dsh` peer `0.1.7-rc.1`；v3.2.3 追加 rc.2（dsh/credentials/llm/settings 四条枚举同步扩充）；v3.2.4 追加 `0.2.0-rc.1`（同四条）；v3.3.0 删冗余 `process.env` 写入 + 修 `activeRef` 显示 + 加卸载还原；v3.3.1 文档更正（v3.3.0 曾误称「换 key 从未生效」，实为 `credentials.resolve` 包装自 v3.0.0 起一直有效） |
-| dsh-connector | **原不受门禁**（peer 只有 schemastery，非 `dsh-*`） | import 期崩溃需修 ⇒ v0.3.3；v0.3.4 **主动纳入门禁**（新增 `@deepseek-ai/dsh` peer）；v0.3.5 追加 rc.2；v0.3.6 修 CRLF 解析 + `profileContext` 补丁路径；v0.3.7 追加 `0.2.0-rc.1` |
-| dsh-archived-sessions | **原不受门禁**（peer 只有 cordis） | `ctx.shell.run()` 移除导致删除失效 ⇒ v0.3.5（追加 cordis `4.0.4` 枚举）、v0.3.6 双时代自适应 + **主动纳入门禁**；v0.3.7 追加 rc.2；v0.3.8 追加 `0.2.0-rc.1` |
+| dsh-key-fallback | **原 v3.1.7 被跳过**（3/3 peer 不含 `0.1.7-rc.1`） | v3.2.0 追加 `0.1.7-rc.1`（credentials/llm/settings）与 cordis `4.0.4`、schemastery `3.18.4`；v3.2.1 追加遗留池救援；v3.2.2 追加 `@deepseek-ai/dsh` peer `0.1.7-rc.1`；v3.2.3 追加 rc.2（dsh/credentials/llm/settings 四条枚举同步扩充）；v3.2.4 追加 `0.2.0-rc.1`（同四条）；v3.3.0 删冗余 `process.env` 写入 + 修 `activeRef` 显示 + 加卸载还原；v3.3.1 文档更正（v3.3.0 曾误称「换 key 从未生效」，实为 `credentials.resolve` 包装自 v3.0.0 起一直有效）；**v3.3.2 四条 peer 改用三元组区间 `>=0.2.0-rc.1 <0.2.1-0`（同时收窄：不再声明 0.1.7 线）** |
+| dsh-connector | **原不受门禁**（peer 只有 schemastery，非 `dsh-*`） | import 期崩溃需修 ⇒ v0.3.3；v0.3.4 **主动纳入门禁**（新增 `@deepseek-ai/dsh` peer）；v0.3.5 追加 rc.2；v0.3.6 修 CRLF 解析 + `profileContext` 补丁路径；v0.3.7 追加 `0.2.0-rc.1`；**v0.3.8 改用三元组区间（同时收窄：不再声明 0.1.7 线）** |
+| dsh-archived-sessions | **原不受门禁**（peer 只有 cordis） | `ctx.shell.run()` 移除导致删除失效 ⇒ v0.3.5（追加 cordis `4.0.4` 枚举）、v0.3.6 双时代自适应 + **主动纳入门禁**；v0.3.7 追加 rc.2；v0.3.8 追加 `0.2.0-rc.1`；**v0.3.9 改用三元组区间（同时收窄：不再声明 0.1.7 线）** |
 | dsh-vision-bridge | **不受门禁**（无 dsh peer） | 无需改动 |
 
 **门禁的两个易误读点（0.3.4/0.3.6 本轮实证）**：
@@ -760,12 +797,140 @@ specifier 对齐（`github:` 类用解析出的版本号）。
 2. **「插件消失 + 路由 404」的第一嫌疑是门禁，不是代码 bug**：先跑
    `evaluatePluginCompatibility`，再看 `skipping profile bundle` 日志，最后才查源码。
    判据速记：**404/405 且 DSH 本体正常启动** ⇒ 大概率是 bundle 被跳过。
-3. **预发布版本的门禁必须逐版本追加枚举**：`0.1.7-rc.2 → 0.2.0-rc.1` 跨了
-   `minor`，任何 `^0.1.7-rc.2` / `<0.2.0` 式范围都不可能放行，只能显式列出。
+3. **跨三元组才需要重新枚举/核查**：`0.1.7-rc.2 → 0.2.0-rc.1` 跨了 `minor`，任何
+   `^0.1.7-rc.2` / `<0.2.0` 式范围都不可能放行。但**同一三元组内**（如
+   `0.2.0-rc.1 → rc.2`）用三元组区间 `>=0.2.0-rc.1 <0.2.1-0` 即可一次性覆盖，
+   不必每版追加——这是 2026-09-30 改用区间声明的直接动因（见下一节与
+   `AGENTS.md` 规范 3）。
 4. **升级 DSH 后要同时核查「官方包 API diff」与「门禁声明」两件事**：本轮 API 面
    逐字节零变化（本可零改动兼容），却因为声明没跟上而全部被跳过——**两者是独立的关卡**。
 5. **`--dump-config` 是最省事的真机装配验证**：不启动 web、不依赖浏览器，一条命令就能
    看到「某个 bundle 到底进没进树」。
+
+## DSH 0.2.0-rc.2 兼容性专项（2026-09-30，当前 `latest`/`next`）
+
+> 本节只记录 **rc.1 → rc.2** 的增量结论；rc.1 的核查方法与结构性变化见上一节。
+
+### 结论：API 面仍零变化，但门禁第三次生效，且上轮的补丁失效
+
+被拒活的**判据只有一个**：声明里有没有 `0.2.0-rc.2`。
+`0.2.0-rc.1` 与 `rc.2` 属于**同一 `[major,minor,patch]` 三元组**，因此：
+
+| 声明写法 | rc.2 下 | 实测 |
+|---|---|---|
+| `^0.2.0-rc.1` | ✅ 满足 | true |
+| `>=0.2.0-rc.1 <0.2.1` | ✅ 满足 | true（**但会漏放行 `0.2.1-rc.1`**，见下） |
+| `>=0.2.0-rc.1 <0.2.1-0` | ✅ 满足 | true —— **本仓库采用的写法**（正确排除下一三元组的预发布） |
+| `>=0.2.0-rc.1 <0.3.0-0` | ✅ 满足 | true（放行过宽，跨了 minor，违规） |
+| 逐版本枚举 `… \|\| 0.2.0-rc.1` | ❌ 不满足 | 需再追加一项 |
+
+⚠️ **上界必须带 `-0`**：semver 里预发布排在正式版**之前**，所以
+`semver.satisfies("0.2.1-rc.1", ">=0.2.0-rc.1 <0.2.1", { includePrerelease: true })` 为
+**true**——写 `<0.2.1` 会把**下一个三元组的 rc** 漏放行。`<0.2.1-0` 才是干净切割。
+
+⇒ **「谁的声明写成了范围」就是本轮「谁炸谁幸存」的唯一分界线。**
+
+### 逐包 diff（20 个包，rc.1 ↔ rc.2 全量逐文件 SHA256）
+
+| 包 | 变化 |
+|---|---|
+| `dsh-credentials` / `dsh-settings` / `dsh-shell` / `dsh-session` / `dsh-host-webserver` / `dsh-web-app` / `dsh-attachment` / `dsh-tools` / `dsh-mcp-client` / `dsh-agent` / `dsh-session-persistence-jsonl` / `dsh-workspace` / `dsh-session-query` / `dsh-client-ui-settings` / `dsh-client-ui-slots` / `dsh-app-boot` / `dsh-base` | **仅 `package.json`（版本号）** |
+| `dsh-llm` | `lib/typert.host.js` + `package.json` |
+| `dsh-agent-preset` | `package.json` + `skills/…/packages.md`（文档） |
+| `dsh` 主包 | `bin.js` / `plugin-*.js` / 三个 `.d.ts` / README |
+
+`dsh-llm` 的唯一代码变化是 `typert.host.js` 内嵌的 `MessageSourceMap` 类型**新增**
+`'user-question-reply'` 字段——附加式，四个插件都不用。
+
+### `dsh` 主包的变化全部是 `desktop` profile 支持 ⚠️
+
+新增 `requireDesktopProfile()`、`manageDesktopProfile` 选项、`runProfilePnpm`，
+`runPlugin(profile, args, packageManager)` 多了一个参数。README 措辞变化：
+
+- rc.1：CLI「rejects boot, config-dump, and plugin-management requests」for `desktop`
+- rc.2：CLI「rejects boot and config-dump requests」；**plugin-management 也拒绝，
+  但桌面应用内置的命令可以管已初始化的 desktop profile**
+
+⇒ **插件安装入口变了**：rc.2 起 desktop profile 的插件要用**应用内置的命令**装，
+npm CLI 管不了。
+
+### 真门禁判定（rc.2 自带函数，`runtimeVersion = 0.2.0-rc.2`）
+
+```
+❌ 拦截  @omdp/dsh-connector@0.3.7            → 不满足: @deepseek-ai/dsh
+❌ 拦截  @omdp/dsh-archived-sessions@0.3.8    → 不满足: @deepseek-ai/dsh
+❌ 拦截  @omdp/dsh-key-fallback@3.3.1         → 不满足: dsh / credentials / llm / settings（四条）
+✅ 放行  @omdp/dsh-vision-bridge@0.1.12       → 零 peer，门禁不适用
+```
+
+追加 `|| 0.2.0-rc.2` 后：connector `0.3.8` / archived-sessions `0.3.9` /
+key-fallback `3.3.2` **全部 ✅ 放行**。
+
+### 真机装配复现（官方 `dsh@0.2.0-rc.2` + 隔离 `DSH_HOME` + desktop profile 副本）
+
+`--dump-config` 的 stderr 实测**被拒活 6 个 / 幸存 4 个**：
+
+| 结果 | 插件 | 原因 |
+|---|---|---|
+| ❌ | `@omdp/dsh-connector@0.3.7` | 枚举止于 rc.1 |
+| ❌ | `@omdp/dsh-key-fallback@3.3.1` | 四条枚举止于 rc.1 |
+| ❌ | `@omdp/dsh-archived-sessions@0.3.8` | 枚举止于 rc.1 |
+| ❌ | `dsh-client-auto-continue@0.11.9` | **补丁写的 `…\|\| 0.2.0-rc.1` 已失效** |
+| ❌ | `@wxg-prc-cpg/browser-skill-dsh-plugin@0.3.1` | **同上，补丁失效** |
+| ❌ | `dsh-watcher@0.6.1` | `>=0.1.7-rc.1 <0.1.8`（该补丁上轮已移除，等上游 0.7.0） |
+| ✅ | `@omdp/dsh-vision-bridge` | 零 peer |
+| ✅ | `dsh-preset-craft-bot` | 零 peer |
+| ✅ | `dsh-cost-meter` | 上游用 `>=0.2.0-rc.1 <0.3.0-0` 范围 |
+| ✅ | `dshmarket` | 上游用 `^0.2.0-rc.1` 范围 |
+
+### ⚠️ 本轮最大认知增量：pnpm patch 生效 ≠ 有效
+
+上轮给两个第三方插件打的补丁把 peer 改成 `"^0.1.5-rc.3 || 0.2.0-rc.1"`。
+本轮 `pnpm install` **补丁依然成功应用（零报错）**，但补出来的声明只认 `0.2.0-rc.1`
+⇒ **补丁应用成功却已无意义**。
+
+教训：**pnpm patch 是按行匹配的文本 diff，补丁内容里的版本号不会随运行时演进**。
+升级 DSH 后必须**复查补丁内容**，而不只是复查补丁是否还在清单里。
+补丁应始终当作临时桥接——上游改用范围声明（如 `dsh-cost-meter` / `dshmarket` 那样）后
+即可删补丁回到真实声明。
+
+### 修复动作（按优先级）
+
+1. **omdp 三个插件**：peer 声明**改用三元组区间 `>=0.2.0-rc.1 <0.2.1-0`**
+   （connector `0.3.7→0.3.8`、archived-sessions `0.3.8→0.3.9`、key-fallback `3.3.1→3.3.2`；
+   key-fallback 要同步四条：dsh / credentials / llm / settings），发版并抬高 desktop profile 钉版。
+   ⚠️ 不采用「枚举追加 `|| 0.2.0-rc.2`」——那只是把下一次 rc 的故障推迟，本轮已是第三次。
+2. **两个失效补丁**：内容改为 `>=0.2.0-rc.1 <0.2.1-0`（一劳永逸覆盖同三元组后续 rc）。
+   ⚠️ **上界必须带 `-0`**：写 `<0.2.1` 会漏放行 `0.2.1-rc.1`
+   （`satisfies("0.2.1-rc.1", ">=0.2.0-rc.1 <0.2.1")` 实测为 **true**）。
+3. `dsh-watcher`：等上游 `0.7.0`（已原生声明 `>=0.2.0-rc.1 <0.2.1`）后抬钉版即可，无需补丁。
+4. `dsh-cost-meter` / `dshmarket` / `vision-bridge` / `craft-bot`：**无需动作**。
+
+### 处理结果（2026-09-30）
+
+三个本仓库插件已改为三元组区间并**发布新版本**：
+
+| 插件 | 新版本 | 新声明 |
+|---|---|---|
+| `@omdp/dsh-connector` | `0.3.8` | `>=0.2.0-rc.1 <0.2.1-0` |
+| `@omdp/dsh-archived-sessions` | `0.3.9` | `>=0.2.0-rc.1 <0.2.1-0` |
+| `@omdp/dsh-key-fallback` | `3.3.2` | 四条 dsh peer 均为 `>=0.2.0-rc.1 <0.2.1-0` |
+
+`@omdp/dsh-vision-bridge` 无 dsh peer ⇒ 不受门禁影响，无需改动。
+三个第三方插件（`dsh-client-auto-continue` / `dsh-watcher` / `browser-skill-dsh-plugin`）
+由用户自行处理（补丁方案见下文「第三方插件」节）。
+
+### 可复用要点
+
+1. **诊断顺序**：设置项消失 + 路由 404/405 ⇒ 先看 stderr 的 `skipping profile bundle` /
+   `disabling profile plugin`（rc.2 两种措辞都出现过），**先怀疑门禁**。
+2. **同三元组的预发布升级，范围声明免疫、精确枚举必须追加**——据此可预判谁会炸。
+   本仓库自 2026-09-30 起统一改用三元组区间（`AGENTS.md` 规范 3），上界必须带 `-0`。
+3. **每次升 DSH 都要复查 pnpm patch 的内容**，不只是它是否还在。
+4. **优先等上游原生修复**（范围声明），补丁只作临时手段。
+5. **`dsh-client-runtime` 这个包不存在**，别在依赖里引用它。
+6. 自检仍用**隔离 `DSH_HOME` 的副本 profile**（`desktop` 是保留名，rc.2 起 npm CLI
+   连 plugin-management 都拒绝）。
 
 ## 总体结论
 
@@ -774,11 +939,16 @@ specifier 对齐（`github:` 类用解析出的版本号）。
 3. **相互隔离**：任一插件失效，不影响其他插件和 DSH 本体。
 4. **建议**：DSH 大版本升级后，逐个验证活跃插件（connector API、vision-bridge 识图、key-fallback），
    有问题就更新对应插件版本。
-5. **本仓库现状**：`0.1.7-rc.1` / `0.1.7-rc.2` / `0.2.0-rc.1` 适配已全部落地——`key-fallback` v3.3.1（双后端 + 遗留池救援 + 声明 DSH peer + **`credentials.resolve` 包装切换 key，自 v3.0.0 生效，实机 200 条 diag 佐证**）、
-   `connector` v0.3.7（jsdom 懒加载修 import 崩溃 + 工具过滤迁 volatile `Config` + 遗留过滤救援 + 声明 DSH peer +
-   CRLF 解析与 `profileContext` 补丁路径修复）、
-   `archived-sessions` v0.3.8（`ctx.shell` 契约**双时代自适应**修删除失效 + 声明 DSH peer）；
+5. **本仓库现状**：`0.2.0` 线（rc.1 → rc.2）适配已全部落地，三个插件**声明改用三元组区间**
+   `>=0.2.0-rc.1 <0.2.1-0` —— 同三元组后续 rc 与正式版 `0.2.0` **不再需要改声明/重发包**：
+   `connector` **v0.3.8**（jsdom 懒加载修 import 崩溃 + 工具过滤迁 volatile `Config` + 遗留过滤救援 +
+   声明 DSH peer + CRLF 解析与 `profileContext` 补丁路径修复）、
+   `key-fallback` **v3.3.2**（双后端 + 遗留池救援 + **`credentials.resolve` 包装切换 key，自 v3.0.0 生效，
+   实机 200 条 diag 佐证**）、
+   `archived-sessions` **v0.3.9**（`ctx.shell` 契约**双时代自适应**修删除失效）；
    `vision-bridge` v0.1.12 无改动（也无 dsh peer）。
+   ⚠️ 本轮共识（2026-09-30）：三个插件**只承诺 `0.2.0` 线**，`0.1.7` 线不再声明——
+   需要在 0.1.7 上运行请用 connector `0.3.7` / key-fallback `3.3.1` / archived-sessions `0.3.8`。
    ⚠️ 注意 cron：**抽象服务的「新增方法」兼容、「移除方法」不兼容**（`ctx.shell` 的 `run`→`execute` 是典型：
    改名而非别名），以及**宿主解析器缺陷会在插件 import 期放大**——这两类都不体现在 `.d.ts` 的
    「删除行」比对里，需靠真实运行时报错定位。另一类盲区是**版本相关的新机制**：`evaluatePluginCompatibility`
@@ -791,6 +961,10 @@ specifier 对齐（`github:` 类用解析出的版本号）。
 7. **第三方插件（非本仓库维护）**：声明跟不上时，**不要在 `node_modules` 里就地改**（详见上文
    「第三方插件：门禁拦截与持久修复」）——用 `pnpm patch` + `patchedDependencies`，key 用 range。
    这是临时桥接：上游发版修好声明后应删除补丁、回到真实声明。
+8. **本仓库自己的声明用三元组区间**（2026-09-30 起，`AGENTS.md` 规范 3）：
+   `>=0.2.0-rc.1 <0.2.1-0` 这类写法让同三元组的后续 rc 与正式版**自动放行**，
+   不必每发一版就改声明 + 重发包——本轮之前已因此连续踩三轮。
+   上界**必须**带 `-0`。
 
 ## 桌面 profile 本次落地内容（2026-09-28）
 

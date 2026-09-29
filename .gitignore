@@ -38,5 +38,8 @@ package-lock.json
 # compatibility-check scratch (packed dsh versions, smoke runtime/home) — regenerable, not source
 .compat-check/
 
+# ad-hoc scratch workspace (packed tarballs, gate-matrices, downloaded dsh copies)
+.scratch/
+
 # external reference clone (deepseek harness docs), not part of this repo
 deepseek-harness-docs/

@@ -48,8 +48,8 @@ pnpm add @omdp/dsh-archived-sessions -w
 
 ### 要求 / Requirements
 
-- DeepSeek Harness **0.1.5-rc.1**、**0.1.5-rc.2**、**0.1.6-alpha.1**、**0.1.7-rc.1**、**0.1.7-rc.2**、**0.2.0-rc.1**（实测版本；**0.3.6 起全兼容**，0.3.7 追加 rc.2 声明、0.3.8 追加 0.2.0-rc.1，0.3.5 与 0.1.5/0.1.6 系列**静默不兼容**——见变更记录）
-- `@deepseek-ai/dsh` `0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1`（peer，逐版本枚举，0.3.6 起新增、0.3.7 追加 rc.2、0.3.8 追加 0.2.0-rc.1；语义见下方「兼容性门禁」）
+- DeepSeek Harness **0.2.0-rc.1 / 0.2.0-rc.2**（实测版本；0.3.9 起改用三元组区间 `>=0.2.0-rc.1 <0.2.1-0`，自动覆盖同三元组后续 rc 与正式版 `0.2.0`）。更早的 **0.1.5~0.1.7 系列**曾支持（0.3.6 起全兼容），但**自 0.3.9 起不再声明**——需要在 0.1.7 上运行请装 0.3.8 或更早
+- `@deepseek-ai/dsh` `>=0.2.0-rc.1 <0.2.1-0`（peer，三元组区间；0.3.9 起；语义见下方「兼容性门禁」）
 - `@deepseek-ai/cordis` `4.0.1` / `4.0.2` / `4.0.4`（peer，逐版本枚举）
 - `@deepseek-ai/dsh-session-persistence-jsonl`（可选，随 DSH 自带；缺失时回退到内置路径编码）
 
@@ -71,9 +71,9 @@ pnpm add @omdp/dsh-archived-sessions -w
 0.1.7 全废），0.3.5 只调 `execute()`（0.1.7 可用、rc.x **静默失效**——`typeof shell.run !== "function"`
 守卫直接抛错，被 UI 收敛成红字「删除失败」），两次都是「只赌一边」。
 
-### 兼容性门禁（0.3.6 起声明）
+### 兼容性门禁（0.3.6 起声明，0.3.9 起改用三元组区间）
 
-0.3.6 起在 `peerDependencies` 显式声明 `"@deepseek-ai/dsh": "0.1.7-rc.1"`（0.3.7 追加 rc.2、0.3.8 追加 `0.2.0-rc.1`，当前枚举为 `0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1`）。
+当前声明为 `"@deepseek-ai/dsh": ">=0.2.0-rc.1 <0.2.1-0"`。
 该声明由 DSH 自己的
 **`evaluatePluginCompatibility()`**（`dsh-app-boot` 的公开导出）在安装与每次启动时校验：命中未实测
 的新版本时会**整包优雅跳过**（stderr 打 `skipping profile bundle`，DSH 照常启动），命中实测版本
@@ -81,6 +81,18 @@ pnpm add @omdp/dsh-archived-sessions -w
 `dsh-app-boot`：`0.1.5-rc.2`/`0.1.5-rc.3`/`0.1.6-alpha.1`/`0.1.6-alpha.2`/`0.1.7-alpha.1`/`0.1.7-alpha.2`
 里 `evaluatePluginCompatibility` 出现 0 次）——旧运行时读到这条 peer
 只是不认识的声明，**不影响加载**，所以老用户不会因为这条声明而失去插件。
+
+**0.3.9 的语义变化**：从逐版本枚举（`0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1`）改为三元组区间。
+逐版本枚举下每发一个 rc 就要改声明 + 重发包（`0.2.0-rc.1 → rc.2` 已连续踩两轮，每轮都表现为
+「设置项消失、路由 405/404」）；而同一 `[major,minor,patch]` 内的 rc 属同一 API 契约迭代
+（实测 rc.1→rc.2 全量 20 包逐文件 SHA256：本插件依赖面**只有 `package.json` 版本号变化**），
+故实测该三元组首个 rc 即可放行其后续 rc 与正式版。**区间最多宽到一个三元组**，跨 patch/minor
+（如 `0.2.1-rc.1`）仍需重新核查后新增区间——见 `AGENTS.md` 规范 3。
+
+> ⚠️ 上界必须写 `<0.2.1-0` 而非 `<0.2.1`：semver 里预发布排在正式版之前，`0.2.1-rc.1 < 0.2.1`
+> 成立，写 `<0.2.1` 会漏放行下一个三元组的 rc。
+> ⚠️ 0.3.9 **不再声明 `0.1.7` 线**：旧运行时上会被门禁跳过，需要 0.1.7 请装 0.3.8 或更早。
+
 0.3.7 追加 `0.1.7-rc.2` 的依据：rc.1→rc.2 tarball 逐文件 diff 显示 `dsh-shell`（本插件删除功能的
 唯一 shell 依赖面）的 `lib/` **逐字节零变化**；再用 rc.2 的门禁跑新声明 → 放行；并在 scratch
 profile（`dsh@0.1.7-rc.2` + 插件 0.3.6 + 精确版本豁免）上**真机实测完整删除链路**：
@@ -98,6 +110,15 @@ profile（`dsh@0.1.7-rc.2` + 插件 0.3.6 + 精确版本豁免）上**真机实�
 | `POST /dsh-archived/sweep` | `{}` | `{ removed, freedBytes, items }` |
 
 ### 变更记录
+
+- **0.3.9**（2026-09-30）：**peer 声明改用三元组区间 `>=0.2.0-rc.1 <0.2.1-0`**（代码零改动）。
+  背景：`0.2.0-rc.2` 发布后门禁又把只声明到 `0.2.0-rc.1` 的 0.3.8 拦下——**连续第三轮同型故障**
+  （设置项消失、`POST /dsh-archived/list` → 405），根因不是不兼容，而是逐版本枚举在 rc 迭代下必然过时。
+  核查：`0.2.0-rc.1 → rc.2` 全量 20 包逐文件 SHA256——`dsh-shell`/`dsh-session`/
+  `dsh-session-persistence-jsonl`/`dsh-session-query`/`dsh-workspace` 的 `lib/` **全部逐字节零变化**
+  （仅 `package.json` 版本号）。门禁矩阵实测：`0.2.0-rc.1`/`rc.2`/`rc.3`/`rc.9`/正式版 `0.2.0` 全 **PASS**，
+  `0.2.1-rc.1`/`0.3.0-rc.1` 全 **BLOCK**。
+  ⚠️ **本条同时收窄支持面**：不再声明 `0.1.7` 线，需要在 0.1.7 上运行请装 **0.3.8**。
 
 - **0.3.8**（2026-09-28）：**追加 DSH `0.2.0-rc.1` 支持**（peer 枚举 `0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1`，代码零改动）。
   背景：DSH 桌面端升到 `0.2.0-rc.1` 后，门禁把只声明到 `0.1.7-rc.2` 的 0.3.7 拦下（设置页里本插件整项消失、
@@ -185,8 +206,8 @@ pnpm add @omdp/dsh-archived-sessions -w
 
 ### Requirements
 
-- DeepSeek Harness **0.1.5-rc.1**, **0.1.5-rc.2**, **0.1.6-alpha.1**, **0.1.7-rc.1**, **0.1.7-rc.2**, **0.2.0-rc.1** (tested; **0.3.6+ works on all of them** — 0.3.7 adds the rc.2 declaration and 0.3.8 adds 0.2.0-rc.1, 0.3.5 is *silently broken* on the 0.1.5/0.1.6 line, see changelog)
-- `@deepseek-ai/dsh` `0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1` (peer, enumerated per version: new in 0.3.6, rc.2 added in 0.3.7, 0.2.0-rc.1 added in 0.3.8)
+- DeepSeek Harness **0.2.0-rc.1 / 0.2.0-rc.2** (tested; since 0.3.9 the peer uses the triple range `>=0.2.0-rc.1 <0.2.1-0`, which automatically covers later rc builds in the same triple and the stable `0.2.0`). The earlier **0.1.5–0.1.7 line** was supported (0.3.6+) but is **no longer declared as of 0.3.9** — use 0.3.8 or older if you need it on 0.1.7.
+- `@deepseek-ai/dsh` `>=0.2.0-rc.1 <0.2.1-0` (peer, triple range; since 0.3.9)
 - `@deepseek-ai/cordis` `4.0.1` / `4.0.2` / `4.0.4` (peer, enumerated per version)
 - `@deepseek-ai/dsh-session-persistence-jsonl` (optional, ships with DSH; falls back to the built-in path encoding when absent)
 
@@ -210,18 +231,26 @@ only `run()` (fine on rc.x, dead on 0.1.7) and 0.3.5 called only `execute()` (fi
 dead** on rc.x, where the `typeof shell.run !== "function"` guard threw immediately and the UI surfaced
 it as the red "删除失败" banner) — both were bets on a single era.
 
-### Compatibility gate (declared since 0.3.6)
+### Compatibility gate (declared since 0.3.6, triple range since 0.3.9)
 
-Since 0.3.6 the plugin declares `"@deepseek-ai/dsh": "0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1"` in `peerDependencies`
-(rc.2 added in 0.3.7, 0.2.0-rc.1 added in 0.3.8). DSH's own
+The current declaration is `"@deepseek-ai/dsh": ">=0.2.0-rc.1 <0.2.1-0"`. DSH's own
 **`evaluatePluginCompatibility()`** (a public export of `dsh-app-boot`) checks it at install time and on
 every boot: on an untested newer runtime the **whole bundle is gracefully skipped** (stderr prints
-`skipping profile bundle`; DSH still boots), and on the tested runtime it loads normally. The declaration
-starts at `0.1.7-rc.1` because **the gate itself only exists from 0.1.7** (verified per version by
-unpacking `dsh-app-boot` tarballs: `evaluatePluginCompatibility` appears 0 times in
-`0.1.5-rc.2`/`0.1.5-rc.3`/`0.1.6-alpha.1`/`0.1.6-alpha.2`/`0.1.7-alpha.1`/`0.1.7-alpha.2`) — older
-runtimes simply see an unrecognized peer declaration, so **existing users on older
-DSH versions do not lose the plugin** because of it.
+`skipping profile bundle`; DSH still boots), and on the tested runtime it loads normally.
+
+**0.3.9 semantic change**: the peer moved from per-version enumeration
+(`0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1`) to a triple range. Enumeration forces a declaration change
+plus a republish for every new rc (`0.2.0-rc.1 → rc.2` hit this twice, each time as "settings item
+gone, route 404/405"), whereas rc builds inside one `[major,minor,patch]` are iterations of the same
+API contract (verified: rc.1 → rc.2 across 20 packages is **byte-identical** except `package.json`
+version strings for everything this plugin touches). So testing the first rc of a triple clears its
+later rc builds and the stable release. **A range never spans more than one triple** — crossing a
+patch/minor (e.g. `0.2.1-rc.1`) still requires a fresh check and a new segment (`AGENTS.md` rule 3).
+
+> ⚠️ The upper bound must be `<0.2.1-0`, never `<0.2.1`: semver sorts prereleases *before* the stable
+> release, so `0.2.1-rc.1 < 0.2.1` holds and `<0.2.1` would leak the next triple's rc.
+> ⚠️ 0.3.9 **drops the `0.1.7` line** — it will be gated off there; use 0.3.8 or older on 0.1.7.
+
 The `0.1.7-rc.2` addition (0.3.7) is based on: a file-by-file tarball diff showing `dsh-shell`'s `lib/`
 (**this plugin's only shell surface**) is **byte-identical** rc.1 → rc.2; running the rc.2 gate against the
 new declaration → pass; and a **live end-to-end delete test** on a scratch profile
@@ -242,9 +271,11 @@ archive set emptied + `list` returning `{items:[]}` (the test session was restor
 
 ### Changelog
 
-- **0.3.7** (2026-09-25): **adds DSH `0.1.7-rc.2` support** (peer enumeration `0.1.7-rc.1 || 0.1.7-rc.2`, zero code changes). Background: the DSH **desktop** app ships runtime `0.1.7-rc.2`, so the gate skipped 0.3.6's exact-`rc.1` declaration (plugin list badge 异常). Verification: `dsh-shell`'s `lib/` is **byte-identical** rc.1 → rc.2 (this plugin's only shell surface); the rc.2 gate passes the new declaration; and a live delete test on a scratch profile (`dsh@0.1.7-rc.2` + 0.3.6 + exemption) succeeded end-to-end — `POST /dsh-archived/delete {"sessionId":"session-f71d25a2-…"}` → `{"ok":true,"deleted":true}` + directory gone + archive set emptied + `list` → `{items:[]}` (test session restored from backup).
+- **0.3.9** (2026-09-30): **peer declaration switched to the triple range `>=0.2.0-rc.1 <0.2.1-0`** (zero code changes). Background: after `0.2.0-rc.2` shipped, the gate blocked 0.3.8 the same way it had blocked 0.3.7 on `0.2.0-rc.1` — the **third consecutive round** of the same failure (settings item gone, `POST /dsh-archived/list` → 405). The root cause was never incompatibility but per-version enumeration going stale on every rc. Verification: full 20-package file-by-file SHA256 diff `0.2.0-rc.1 → rc.2` — `dsh-shell` / `dsh-session` / `dsh-session-persistence-jsonl` / `dsh-session-query` / `dsh-workspace` are all **byte-identical** (only `package.json` version strings changed); the real gate over the full matrix gives `0.2.0-rc.1` / `rc.2` / `rc.3` / `rc.9` / stable `0.2.0` all **PASS** and `0.2.1-rc.1` / `0.3.0-rc.1` all **BLOCK**. ⚠️ **This narrows support**: the `0.1.7` line is **no longer declared** — install **0.3.8** if you need it there.
 
 - **0.3.8** (2026-09-28): **adds DSH `0.2.0-rc.1` support** (peer enumeration `0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1`, zero code changes). Background: after the desktop app moved to `0.2.0-rc.1` the gate skipped the bundle declared only up to `0.1.7-rc.2` (the settings-page item disappeared and `POST /dsh-archived/list` returned **405** with the `/dsh-archived/` prefix unregistered — a graceful skip, not a crash). Verification: full file-by-file tarball diff `0.1.7-rc.2 → 0.2.0-rc.1` over every `lib/` file — nothing this plugin uses broke: `dsh-shell` (its only shell surface: the `execute`/`resolve`/`result` trio) is **byte-identical**, and `dsh-session`'s 5 changed files are **additive** (new exports `ToolCallRecovery` / `TOOL_NOT_STARTED` / `TOOL_OUTCOME_UNKNOWN`; `SessionStore` and every pre-existing export kept — the export-set diff shows additions only, no removals). Also: the `0.2.0-rc.1` gate **passes** the new manifest and **blocks** the old 0.3.7 one; a sandbox with the official `@deepseek-ai/dsh@0.2.0-rc.1` + isolated `DSH_HOME` ran `--dump-config` → plugin present in the tree, no gate skip; the `npm pack` artifact was re-checked to carry the new enumeration.
+
+- **0.3.7** (2026-09-25): **adds DSH `0.1.7-rc.2` support** (peer enumeration `0.1.7-rc.1 || 0.1.7-rc.2`, zero code changes). Background: the DSH **desktop** app ships runtime `0.1.7-rc.2`, so the gate skipped 0.3.6's exact-`rc.1` declaration (plugin list badge 异常). Verification: `dsh-shell`'s `lib/` is **byte-identical** rc.1 → rc.2 (this plugin's only shell surface); the rc.2 gate passes the new declaration; and a live delete test on a scratch profile (`dsh@0.1.7-rc.2` + 0.3.6 + exemption) succeeded end-to-end — `POST /dsh-archived/delete {"sessionId":"session-f71d25a2-…"}` → `{"ok":true,"deleted":true}` + directory gone + archive set emptied + `list` → `{items:[]}` (test session restored from backup).
 
 - **0.3.6** (2026-09-24): **dual-era `ctx.shell` adaptation + declared DSH version support**.
   1. **Fixes a silent rc.x regression from 0.3.5**: 0.3.5 switched to `execute()` and thereby fixed 0.1.7, but `run()` is the only method that exists on 0.1.5/0.1.6, so on those versions 0.3.5 threw `shell executor unavailable; cannot delete from disk` on **every** delete (0.3.4's use of `run()` was conversely fine on rc.x and dead on 0.1.7). 0.3.6 probes at runtime: prefer `execute()` (0.1.7+, awaiting `execution.result()`), else fall back to `run()` (≤0.1.6), and only error when neither exists ⇒ **deletes work across 0.1.5-rc.1 → 0.1.7-rc.1**. Basis: unpacked `@deepseek-ai/dsh-shell` `lib/types/index.d.ts` per version (see "Dual-era `ctx.shell` adaptation" above).

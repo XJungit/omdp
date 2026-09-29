@@ -4,13 +4,26 @@
 
 **为 [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) 提供多 key 池 + 自动轮换**——插件挂在 DSH 的凭证接缝 `credentials.resolve` 上：每次适配器取 key 时，若该 ref 属于已配置的池，就返回池的当前 key；遇到配置的触发错误时，把失败 key 标记为冷却（固定 `cooldownMs`，无指数退避）并前进到下一把。**重发完全交给 DSH 自带的 `dsh-llm-retry`**——本插件从不自行重发，只负责换 key，重试策略由 retry policy 决定。
 
-当前版本：**v3.3.1**（v7 UI 代）。
+当前版本：**v3.3.2**（v7 UI 代）。
+
+## v3.3.2 新增
+
+- **peer 声明改用三元组区间 `>=0.2.0-rc.1 <0.2.1-0`——代码零改动**（2026-09-30）。
+  背景：DSH `0.2.0-rc.2` 发布后，门禁把 3.3.1 拦下的方式与当初把 3.2.4 在 `0.2.0-rc.1` 上拦下
+  完全一致——已是**连续第三轮**同型故障（设置项消失、路由 404/405）。根因从来不是不兼容，而是
+  逐版本枚举在每次 rc 迭代下必然过时。核查依据：`0.2.0-rc.1 → rc.2` 全量 20 包逐文件 SHA256
+  对比显示，本插件声明的六个 peer **只有 `package.json` 版本号变化**；再用真门禁跑全版本矩阵——
+  `0.2.0-rc.1` / `rc.2` / `rc.3` / `rc.9` / 正式版 `0.2.0` 全 **放行**，
+  `0.2.1-rc.1` / `0.3.0-rc.1` 全 **拦截**。
+  ⚠️ **本条同时收窄支持面**：不再声明 `0.1.7` 线，需要在 0.1.7 上运行请装 **3.3.1**。
+  ⚠️ 上界必须写 `<0.2.1-0` 而非 `<0.2.1`：semver 里预发布排在正式版**之前**，
+  `0.2.1-rc.1 < 0.2.1` 成立，写 `<0.2.1` 会漏放行下一个三元组的 rc。
 
 ## 环境要求
 
 - DeepSeek Harness 带 `web` profile GUI（`npx @deepseek-ai/dsh web`）
 - Node.js `^22.19` 或 `>=24`
-- peer 范围**只枚举已实际进行过兼容测试的版本**——`@deepseek-ai/dsh` `0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1`（本插件声明的 DSH 运行时；**执行该声明的门禁本身只有 0.1.7 才有**，更旧的运行时只是看到一条不认识的 peer 而已，不受影响）、`@deepseek-ai/dsh-credentials` `0.1.0-rc.6 || 0.1.1-rc.2 || 0.1.2-alpha.1 || 0.1.2-alpha.2 || 0.1.2-alpha.3 || 0.1.2-alpha.4 || 0.1.2-alpha.5 || 0.1.2-rc.1 || 0.1.5-rc.1 || 0.1.5-rc.2 || 0.1.5-rc.3 || 0.1.6-alpha.1 || 0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1`、`@deepseek-ai/dsh-llm` / `@deepseek-ai/dsh-settings` `0.1.1-rc.2 || 0.1.2-alpha.1 || 0.1.2-alpha.2 || 0.1.2-alpha.3 || 0.1.2-alpha.4 || 0.1.2-alpha.5 || 0.1.2-rc.1 || 0.1.5-rc.1 || 0.1.5-rc.2 || 0.1.5-rc.3 || 0.1.6-alpha.1 || 0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1`、`@deepseek-ai/cordis` `4.0.1 || 4.0.2 || 4.0.4`、`@deepseek-ai/schemastery` `3.18.1 || 3.18.2 || 3.18.4`。不使用 `<0.2.0`、caret 之类的开放范围：未测试版本在核查通过前刻意排除。插件只使用 credential-reference 半边（`resolve`/`describe`/`set`/`unset`/`credentialRef`，自 `0.1.0-rc.6` 起稳定）与 `agent/request` + `agent/request-error` waterfall（载荷跨上述枚举版本未变）；`isCredentialRefName`（rc.8 新增）本地实现兜底。`0.1.2-alpha.2 → alpha.5 → 0.1.2-rc.1` 配套包逐字节一致（2026-09-03 复核），故 DSH `0.1.2-rc.1`（`next`）无需改动插件。
+- peer 范围用**按三元组划分的区间**（自 3.3.2 起；此前为逐版本枚举）——`@deepseek-ai/dsh` / `@deepseek-ai/dsh-credentials` / `@deepseek-ai/dsh-llm` / `@deepseek-ai/dsh-settings` 四条均声明 `>=0.2.0-rc.1 <0.2.1-0`：实测该三元组的首个 rc 即自动放行其后续 rc（`0.2.0-rc.2`/`rc.3`…）与正式版 `0.2.0`，跨三元组（如 `0.2.1-rc.1`）仍会被门禁拦下、须重新核查。上界写 `-0` 是必须的：semver 里预发布排在正式版之前，写 `<0.2.1` 会漏放行下一个三元组的 rc（规范见 `AGENTS.md` 规范 3）。`@deepseek-ai/cordis` `4.0.1 || 4.0.2 || 4.0.4`、`@deepseek-ai/schemastery` `3.18.1 || 3.18.2 || 3.18.4` 仍**精确枚举**（两者不进版本门禁——门禁只检查 `@deepseek-ai/dsh` 与 `dsh-*`——且版本稀疏无预发布链）。插件只使用 credential-reference 半边（`resolve`/`describe`/`set`/`unset`/`credentialRef`，自 `0.1.0-rc.6` 起稳定）与 `agent/request` + `agent/request-error` waterfall（载荷跨各版本未变）；`isCredentialRefName`（rc.8 新增）本地实现兜底。**注意 `0.1.7` 线自 3.3.2 起不再声明**，需要它请装 3.3.1。
 
 ## v3.3.1 新增
 
