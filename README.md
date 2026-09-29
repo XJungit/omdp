@@ -71,12 +71,12 @@ One settings tab (**Connector**) that manages three things from the DSH Web UI:
 "dependencies": { "@omdp/dsh-connector": "^0.3.7" }
 ```
 
-#### `@omdp/dsh-key-fallback` — multi-key API key pool with rotation (`v3.2.4`)
+#### `@omdp/dsh-key-fallback` — multi-key API key pool with rotation (`v3.3.0`)
 
-Sits between the LLM adapter and the credential store. Before each request the plugin picks a key from the per-provider pool and pre-writes it into the provider's credential reference; on a configured trigger error it marks the failed key cooling and advances to the next key — **re-sending is left entirely to DSH's own `dsh-llm-retry`**. Ships an always-visible settings page (**Settings → API Key 回退**) with a redesigned UI:
+Hooks DSH's credential seam `credentials.resolve`: each time an adapter asks for a key, if that ref belongs to a configured pool the wrapper returns the pool's current key; on a configured trigger error it marks the failed key cooling and advances to the next key — **re-sending is left entirely to DSH's own `dsh-llm-retry`**. Ships an always-visible settings page (**Settings → API Key 回退**) with a redesigned UI:
 
 - Configurable **rotation triggers** (`rotateOn`) — clickable chips covering the full DSH `LlmError` standard code set (`QUOTA`/`AUTH`/`RATE_LIMIT`/`TIMEOUT`/`TRANSPORT`/`SERVER`/`EMPTY_RESPONSE`/`INVALID_CREDENTIAL`) plus custom codes (matched exactly against `failure.code`).
-- Shows the **actually-used key** (derived from the last value written to the env), not a truncated hash.
+- Shows the **actually-used key** (the pool's current ref — exactly what the credential seam hands to the adapter), not a truncated hash.
 - **Short refs** (`key_fallback_<provider>_key1`, …) with one-time idempotent migration of legacy long refs.
 - **Plaintext reveal** via an eye toggle (`GET /keys/plain`, pool-owned keys / env key only) and **editable env keys** (file-backed ones; read-only when supplied by the launching environment).
 - Per-key `nextRef`, pool lock ("设为当前"), cooldown reset, and delete.
@@ -84,9 +84,10 @@ Sits between the LLM adapter and the credential store. Before each request the p
 - **Declared DSH support (v3.2.2)** — new `@deepseek-ai/dsh` peer (`0.1.7-rc.1`, enumerated per version), making the supported runtime an explicit, machine-checked contract (see the connector entry above for the gate's semantics).
 - **DSH `0.1.7-rc.2` added to all four dsh peer enumerations (v3.2.3)** — zero code changes; verified by tarball diff (credentials `lib/` byte-identical, llm additive-only), gate execution on rc.2, and a live scratch-profile regression.
 - **DSH `0.2.0-rc.1` added to all four dsh peer enumerations (v3.2.4)** — zero code changes; verified by a full `lib/` SHA1 diff (credentials/llm/settings/shell/tools/mcp-client/web/agent all byte-identical — the entire surface this plugin touches), gate execution on 0.2.0-rc.1, and a live sandbox assembly.
+- **Rotation now actually reaches the provider (v3.3.0)** — fixes a real bug: the old mechanism wrote `process.env[<pool env>]`, which the credential layer never reads (DSH freezes `{...process.env}` into a launch-environment snapshot at boot), so the pool rotated in memory while every request kept authenticating with the boot-time key. Now hooks `credentials.resolve` (the per-request seam all adapters use), removes all 5 env writes plus 2 env-derived current-key lookups, makes `currentRef` the single source of truth (`/pools` reports `activeRef === currentRef`), and restores the original `resolve` on uninstall. Proven end-to-end against the real `dsh-llm-pi-ai` adapter by capturing the key from the outbound HTTP `Authorization` header.
 
 ```jsonc
-"dependencies": { "@omdp/dsh-key-fallback": "^3.2.4" }
+"dependencies": { "@omdp/dsh-key-fallback": "^3.3.0" }
 ```
 
 #### `@omdp/dsh-vision-bridge` — vision for text-only models (`v0.1.12`)
@@ -276,12 +277,12 @@ omdp/
 "dependencies": { "@omdp/dsh-connector": "^0.3.7" }
 ```
 
-#### `@omdp/dsh-key-fallback` — 多 key API 池 + 轮换（`v3.2.4`）
+#### `@omdp/dsh-key-fallback` — 多 key API 池 + 轮换（`v3.3.0`）
 
-位于 LLM 适配器与凭据存储之间。每次请求前，插件从对应 provider 的 key 池里选一把，预写入 provider 的凭据引用；遇配置的触发错误时，把失败 key 标记为冷却并切到下一把——**重发完全交给 DSH 自带的 `dsh-llm-retry`**。带一个常驻可见的设置页（**设置 → API Key 回退**）与全新 UI：
+挂在 DSH 的凭证接缝 `credentials.resolve` 上：每次适配器取 key 时，若该 ref 属于已配置的池，就返回池的当前 key；遇配置的触发错误时，把失败 key 标记为冷却并切到下一把——**重发完全交给 DSH 自带的 `dsh-llm-retry`**。带一个常驻可见的设置页（**设置 → API Key 回退**）与全新 UI：
 
 - 可配置的**轮换触发码**（`rotateOn`）——点选 chips 覆盖 DSH `LlmError` 标准码全集（`QUOTA`/`AUTH`/`RATE_LIMIT`/`TIMEOUT`/`TRANSPORT`/`SERVER`/`EMPTY_RESPONSE`/`INVALID_CREDENTIAL`），也支持自定义码（与 `failure.code` **精确匹配**）。
-- 显示**当前实际使用的 key**（从最后一次写入 env 的值推导），不是截断的哈希。
+- 显示**当前实际使用的 key**（池的当前 ref —— 正是凭证接缝交给适配器的那把），不是截断的哈希。
 - **短 ref**（`key_fallback_<provider>_key1`、…），旧长 ref 一次性幂等迁移。
 - 眼睛开关**明文揭示**（`GET /keys/plain`，仅限池内 key / env key）与**可编辑 env key**（文件托管的可编辑；由启动环境注入的只读）。
 - 每把 key 的 `nextRef`、池锁定（"设为当前"）、冷却重置与删除。
@@ -289,9 +290,10 @@ omdp/
 - **声明 DSH 版本支持（v3.2.2）** —— 新增 `@deepseek-ai/dsh` peer（`0.1.7-rc.1`，逐版本枚举），把「支持的运行时」变成显式且机器可校验的契约（门禁语义见上方 connector 条目）。
 - **四条 dsh peer 枚举同步追加 `0.1.7-rc.2`（v3.2.3）** —— 代码零改动；依据：tarball diff（credentials 的 `lib/` 逐字节一致、llm 纯新增）+ rc.2 门禁放行 + scratch profile 真机回归。
 - **四条 dsh peer 枚举同步追加 `0.2.0-rc.1`（v3.2.4）** —— 代码零改动；依据：全量 `lib/` SHA1 diff（credentials/llm/settings/shell/tools/mcp-client/web/agent 逐字节一致——本插件用到的整个调用面）+ 0.2.0-rc.1 门禁放行 + 沙箱真机装配入树。
+- **轮换现在真的能到 provider 了（v3.3.0）** —— 修真 bug：旧机制写 `process.env[<池 env>]`，而凭证层根本不读它（DSH 启动时把 `{...process.env}` 冻结成启动环境快照），于是池只在内存里轮换、每个请求仍用启动时那把旧 key 鉴权。现改为挂接 `credentials.resolve`（所有适配器每次请求都走的接缝），删掉全部 5 处 env 写入与 2 处 env 反推，`currentRef` 成为唯一权威（`/pools` 报 `activeRef === currentRef`），卸载时还原原始 `resolve`。用真实 `dsh-llm-pi-ai` 适配器、从出站 HTTP `Authorization` 头抓 key 完成端到端实证。
 
 ```jsonc
-"dependencies": { "@omdp/dsh-key-fallback": "^3.2.4" }
+"dependencies": { "@omdp/dsh-key-fallback": "^3.3.0" }
 ```
 
 #### `@omdp/dsh-vision-bridge` — 给纯文本模型的视觉（`v0.1.12`）

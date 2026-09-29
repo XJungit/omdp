@@ -3,8 +3,8 @@
 // v6 = v5 全量功能 + 用户要求的修复与增强：
 //   - 轮转触发码真正生效：agent/request-error 按池的 rotateOn 判断（可配置、chips 可点选），
 //     数字 status 与消息关键字按所选触发码映射；默认集=旧行为超集（无回归）。
-//   - 「当前使用」显示修复：GET /pools 返回 activeRef（= 最近一次预写进 process.env 的 key），
-//     POST/PATCH 改 useKeyRef 后同步刷新内存池 + env，UI 立刻显示真正在用的 key。
+//   - 「当前使用」显示修复：GET /pools 返回 activeRef（= 池的 currentRef，即 resolve 包装
+//     实际返回的那把 key），POST/PATCH 改 useKeyRef 后同步刷新内存池，UI 立刻显示真正在用的 key。
 //   - key 短命名：新增 key 自动命名为 key_fallback_<provider>_key<N>；
 //     旧的长 ref 在首次加载时一次性迁移（refsCompacted 标记，幂等，先 set 新 ref 再 unset 旧 ref）。
 //   - 明文揭示：GET /keys/plain?provider=&ref= 返回真实值（走 rawResolve，绕过池 wrap）。
@@ -289,13 +289,16 @@ export function apply(ctx, config) {
       diag('migrate', 'imported ' + names.length + ' provider(s) from settings.yaml(.imported): ' + names.join(','))
     } catch (e) { diag('migrate', 'failed: ' + ((e && e.message) || e)) }
   }
-  // ── 包装 credentials.resolve：ref 命中池 env 时返回池当前 key（llm-pi-ai 唯一读取入口）──
+  // ── 包装 credentials.resolve：ref 命中池 env 时返回池当前 key ──
+  // 这是 DSH 官方唯一的「每次请求都问一次用哪把 key」接缝（dsh-llm-pi-ai:2563、
+  // dsh-llm-deepseek-api-key:44、dsh-vision-bridge:91、dsh-cost-meter:957 等全部经它取值），
+  // 因此拦这一处即可覆盖所有 provider，且语义与「重发归官方、插件只切 key」完全同构。
   const poolsByEnv = new Map()
   const credSvc = ctx.credentials
   // 原始 resolve（未 wrap 版本）：池重建/读 env 真实值必须走它，否则 wrap 会短路成 currentRef 的值（污染）
   const rawResolve = (credSvc && typeof credSvc.resolve === 'function') ? credSvc.resolve.bind(credSvc) : null
   if (credSvc && typeof credSvc.resolve === 'function') {
-    credSvc.resolve = async (ref) => {
+    const wrappedResolve = async (ref) => {
       let result
       try { result = await rawResolve(ref) } catch (e) { result = undefined }
       const refName = String(ref || '')
@@ -306,7 +309,14 @@ export function apply(ctx, config) {
       }
       return result
     }
+    credSvc.resolve = wrappedResolve
     diag('apply', 'credentials.resolve wrapped')
+    // 卸载时还原原始 resolve：热重载 / fiber 重建会重新 apply，不还原则 wrap 逐层叠加，
+    // 且旧层闭包持有过期 service 与已清空的 poolsByEnv。仅在仍是本层 wrap 时还原，
+    // 避免把后来者的 wrap 覆盖掉。
+    ctx.effect(() => () => {
+      try { if (credSvc.resolve === wrappedResolve) credSvc.resolve = rawResolve } catch (e) {}
+    })
   }
 
   const pools = new Map()          // provider -> { cfg, keyValues, cursor, currentRef }
@@ -480,18 +490,21 @@ export function apply(ctx, config) {
     return undefined
   }
 
-  // 把 useKeyRef 选择立即落到内存池 + process.env，让「当前使用」立刻真实
+  // 把 useKeyRef 选择立即落到内存池，「当前使用」立刻真实。
+  // 注意：这里不再写 process.env —— provider 认证走 credentials.resolve，而 DSH 的凭据层读的是
+  // 启动时冻结的 launchEnvironment 快照（dsh-app-boot:3435 → dsh-launch-environment:30-35），
+  // 运行期改 process.env 对它不可见（官方注释亦称 managed document "is never materialized
+  // into the process environment"）。真正的切换点只有上面的 resolve 包装。
   function applySelection(pool, ref) {
     if (!pool || !ref) return
     const kv = pool.keyValues.find((k) => k.ref === ref)
     if (!kv) return
     pool.currentRef = ref
-    try { process.env[pool.cfg.env] = kv.value } catch (e) {}
   }
 
-  // ── 预写：v1 同款 —— 全局 agent/request（DSH 全局收得到这个 waterfall），
-  //    每次请求同步 buildPools() 重读 settings，选 key，同步写 process.env，
-  //    credentials.set fire-and-forget（不 await 阻塞 waterfall）。
+  // ── 预热：全局 agent/request（DSH 全局收得到这个 waterfall）每次请求重读 settings、选 key，
+  //    写内存池 currentRef；真正的「这次用哪把 key」由上面的 credentials.resolve 包装在
+  //    适配器取值时给出，无需（也无法）预写环境变量。
   async function warmPools() {
     readPools()
     for (const name of pools.keys()) {
@@ -509,11 +522,11 @@ export function apply(ctx, config) {
     }
   }
 
-  // 启动时预热 pools（resolve keyValues，供同步预写 pickKey 用）
+  // 启动时预热 pools（resolve keyValues，供 pickKey 预选用）
   try { warmPools().catch(() => {}) } catch (e) {}
 
   ctx.on('agent/request', (payload, next) => {
-    // next() 是 async，但我们要同步写 env —— 用 then 链，立即返回 p 不阻塞 waterfall
+    // next() 是 async；用 then 链在拿到 config 后同步更新内存池，立即返回 p 不阻塞 waterfall
     const p = next()
     Promise.resolve(p).then((config) => {
       try {
@@ -529,7 +542,6 @@ export function apply(ctx, config) {
         if (!key) return config
         pool.currentRef = key.ref
         diag('agent/request', 'PICK ' + key.ref + ' env=' + pool.cfg.env)
-        try { process.env[pool.cfg.env] = key.value } catch (e) {}
         try { backupFile(CRED_FILE, 'credentials') } catch (e) {}
       } catch (e) {}
       return config
@@ -548,17 +560,20 @@ export function apply(ctx, config) {
     const pool = await getPool(provider)
     if (!pool || pool.keyValues.length === 0 || pool.cfg.enabled === false) return next()
     if (!shouldRotate(pool, canonicalCode(code), rawMsg, status)) return next()
-    let curRef = pool.currentRef
-    if (!curRef) {
-      const envCur = process.env[pool.cfg.env]
-      if (envCur) curRef = pool.keyValues.find((k) => k.value === envCur)?.ref
-    }
-    markFailed(pool, curRef || pool.keyValues[0]?.ref, code, rawMsg)
-    diag('request-error', 'marked ' + (curRef || '?'))
+    // 当前 key 只信 currentRef：它是跨 readPools()/resolvePoolKeys() 重建保留的权威值
+    // （readPools 只对新建 provider 置空、resolvePoolKeys 全程不碰它），
+    // 不再从 process.env 反推 —— 那是它的劣化投影，且运行期改 env 对凭据层不可见。
+    const curRef = pool.currentRef
+    // 认不出当前 key 时不乱罚：宁可只轮换不冷却，也不要误伤一把没用过的 key
+    // （正常情况下 currentRef 已被 agent/request 或 warmPools 置好，此分支近乎不可达）
+    if (curRef) markFailed(pool, curRef, code, rawMsg)
+    diag('request-error', 'marked ' + (curRef || '(none)'))
     // 失败后优先按 nextRef 轮换（用户配置的顺序）；useKeyRef 只决定初始选择
     const nextKey = nextKeyFor(pool, curRef)
     if (nextKey) {
-      try { await backupFile(CRED_FILE, 'credentials'); process.env[pool.cfg.env] = nextKey.value } catch (e) {}
+      // 只改内存池：下一次 credentials.resolve 就会返回新 key。
+      // 重发由 DSH 官方 dsh-llm-retry 按用户自己的 retryPolicy 完成，本插件不干预。
+      try { await backupFile(CRED_FILE, 'credentials') } catch (e) {}
       pool.currentRef = nextKey.ref
     } else {
       // 无 nextRef 可选时：若 useKeyRef 锁定 key 仍 live 则退回它，否则放弃
@@ -576,8 +591,6 @@ export function apply(ctx, config) {
   if (webServer) {
     const route = async (req, res) => {
       try {
-        // 首次请求时补做 legacy 池迁移（此时 fiber 已 ACTIVE，settings.replace 可用）。
-        // 放在所有分支之前，保证无论 UI 先请求哪个端点，池都已被搬进 live 配置。
         // 首次请求时补做 legacy 池迁移（此时 fiber 已 ACTIVE，settings.replace 可用）。
         // 放在所有分支之前，保证无论 UI 先请求哪个端点，池都已被搬进 live 配置。
         await ensureLegacyMigration()
@@ -622,12 +635,13 @@ export function apply(ctx, config) {
             for (const [name, pool] of pools) {
               await resolvePoolKeys(pool, name)
               const now = Date.now()
-              // 真正当前使用的 key：最近一次预写进 process.env 的值
+              // 真正当前使用的 key = 池的 currentRef —— 它就是 resolve 包装返回的那把。
+              // 不再用 process.env 反推：运行期改 env 对凭据层（启动快照）不可见，
+              // 反推会得到启动时那把旧 key，与 resolve 实际返回值不一致。
               let activeRef = ''
-              if (pool.cfg.enabled !== false) {
-                const envCur = process.env[pool.cfg.env]
-                if (envCur) { const m = pool.keyValues.find((k) => k.value === envCur); if (m) activeRef = m.ref }
-                if (!activeRef && pool.currentRef) activeRef = pool.currentRef
+              if (pool.cfg.enabled !== false && pool.currentRef) {
+                const cur = pool.keyValues.find((k) => k.ref === pool.currentRef)
+                if (cur) activeRef = cur.ref
               }
               // 环境密钥可写性（描述：文件=可写，启动环境=只读）
               let envWritable = null
@@ -702,13 +716,13 @@ export function apply(ctx, config) {
             try { validated = profileSchema(upd) } catch (e) { return sendJson(res, 400, { error: 'invalid profile: ' + (e && e.message || e) }) }
             cfg.providers[provider] = validated
             writeSettings(cfg)
-            // 同步内存池 + env，让「当前使用」立刻真实
+            // 同步内存池，让「当前使用」立刻真实（切 key 由 resolve 包装在下次取值时生效）
             try {
               const pool = await getPool(provider)
               if (pool) {
                 if (validated.useKeyRef) applySelection(pool, validated.useKeyRef)
                 else if (pool.currentRef && !pool.keyValues.find((k) => k.ref === pool.currentRef && isLive(k))) {
-                  const pk = pickKey(pool); if (pk) { pool.currentRef = pk.ref; try { process.env[pool.cfg.env] = pk.value } catch (e) {} }
+                  const pk = pickKey(pool); if (pk) pool.currentRef = pk.ref
                 }
               }
             } catch (e) {}
@@ -805,7 +819,7 @@ export function apply(ctx, config) {
               const pool = pools.get(provider)
               if (pool) {
                 pool.keyValues = pool.keyValues.filter((k) => k.ref !== ref)
-                if (pool.currentRef === ref) { pool.currentRef = ''; try { const pk = pickKey(pool); if (pk) { pool.currentRef = pk.ref; try { process.env[pool.cfg.env] = pk.value } catch (e) {} } } catch (e) {} }
+                if (pool.currentRef === ref) { pool.currentRef = ''; try { const pk = pickKey(pool); if (pk) pool.currentRef = pk.ref } catch (e) {} }
               }
             } catch (e) {}
             return sendJson(res, 200, { ok: true })
