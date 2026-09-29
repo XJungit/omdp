@@ -4,7 +4,7 @@
 
 **为 [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) 提供多 key 池 + 自动轮换**——插件挂在 DSH 的凭证接缝 `credentials.resolve` 上：每次适配器取 key 时，若该 ref 属于已配置的池，就返回池的当前 key；遇到配置的触发错误时，把失败 key 标记为冷却（固定 `cooldownMs`，无指数退避）并前进到下一把。**重发完全交给 DSH 自带的 `dsh-llm-retry`**——本插件从不自行重发，只负责换 key，重试策略由 retry policy 决定。
 
-当前版本：**v3.3.0**（v7 UI 代）。
+当前版本：**v3.3.1**（v7 UI 代）。
 
 ## 环境要求
 
@@ -12,34 +12,48 @@
 - Node.js `^22.19` 或 `>=24`
 - peer 范围**只枚举已实际进行过兼容测试的版本**——`@deepseek-ai/dsh` `0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1`（本插件声明的 DSH 运行时；**执行该声明的门禁本身只有 0.1.7 才有**，更旧的运行时只是看到一条不认识的 peer 而已，不受影响）、`@deepseek-ai/dsh-credentials` `0.1.0-rc.6 || 0.1.1-rc.2 || 0.1.2-alpha.1 || 0.1.2-alpha.2 || 0.1.2-alpha.3 || 0.1.2-alpha.4 || 0.1.2-alpha.5 || 0.1.2-rc.1 || 0.1.5-rc.1 || 0.1.5-rc.2 || 0.1.5-rc.3 || 0.1.6-alpha.1 || 0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1`、`@deepseek-ai/dsh-llm` / `@deepseek-ai/dsh-settings` `0.1.1-rc.2 || 0.1.2-alpha.1 || 0.1.2-alpha.2 || 0.1.2-alpha.3 || 0.1.2-alpha.4 || 0.1.2-alpha.5 || 0.1.2-rc.1 || 0.1.5-rc.1 || 0.1.5-rc.2 || 0.1.5-rc.3 || 0.1.6-alpha.1 || 0.1.7-rc.1 || 0.1.7-rc.2 || 0.2.0-rc.1`、`@deepseek-ai/cordis` `4.0.1 || 4.0.2 || 4.0.4`、`@deepseek-ai/schemastery` `3.18.1 || 3.18.2 || 3.18.4`。不使用 `<0.2.0`、caret 之类的开放范围：未测试版本在核查通过前刻意排除。插件只使用 credential-reference 半边（`resolve`/`describe`/`set`/`unset`/`credentialRef`，自 `0.1.0-rc.6` 起稳定）与 `agent/request` + `agent/request-error` waterfall（载荷跨上述枚举版本未变）；`isCredentialRefName`（rc.8 新增）本地实现兜底。`0.1.2-alpha.2 → alpha.5 → 0.1.2-rc.1` 配套包逐字节一致（2026-09-03 复核），故 DSH `0.1.2-rc.1`（`next`）无需改动插件。
 
+## v3.3.1 新增
+
+- **文档更正——代码零改动**（2026-09-29）。v3.3.0 的发布说明断言「本插件从来没真正换过 key，因为写
+  `process.env` 到不了凭证层」。**该断言是错的，在此撤回。** 真正把 key 交给 provider 的
+  `credentials.resolve` 包装自 **v3.0.0** 就存在
+  （`git log -S 'credSvc.resolve =' -- dsh-key-fallback/lib/index.js` → `75ea76a`）；从 registry 下载
+  **已发布的 3.2.4 tarball** 核对，`lib/index.js:298` 就是该包装、`:305` 是它的 `pool-hit` 诊断。
+  也就是说：**轮换一直在生效**，那几处 `process.env` 写入是与可用包装**并存**的冗余，而不是机制本身。
+  v3.3.0 的真实内容见下一节的准确清单。
+- **轮换生效的实机证据** —— 在真实桌面端（DSH `0.2.0-rc.1` + 插件 v3.3.0）会话走池中 provider 时，
+  取 `GET /dsh-key-fallback/diag`：200 条（`resolve` 57 / `agent/request` 51 / `request-error` 90），
+  池里两把 key 分别被用了 **26 次 / 25 次**，每次失败即交替：
+  `PICK key_fallback_sensenova_key1` → `RATE_LIMIT` → `marked key_fallback_sensenova_key1` →
+  `PICK SENSENOVA_API_KEY` → … → `pool-hit SENSENOVA_API_KEY -> key_fallback_sensenova_key1`。
+  每条 `pool-hit` 都写明当时实际生效的那把 —— 正是适配器在网络上真正拿去鉴权的那把。
+
 ## v3.3.0 新增
 
-- **换 key 现在真的能到 provider 了**（2026-09-29）——这是真 bug 修复，不是为整洁而重构。3.2.4 及之前，
-  插件靠写 `process.env[<池 env>] = <key 值>` 来换 key，而**这个写从来没到达凭证层**。DSH 在启动时把
-  `{ ...process.env }` 冻结成「启动环境快照」（`dsh-app-boot`），`dsh-launch-environment` 把它拷进
-  `Map`，`dsh-credentials-local.inherited()` 只读这个快照——所以启动之后写 `process.env` 它看不见。
-  实机（0.2.0-rc.1）实测：`GET /dsh-key-fallback/pools` 报 `activeRef=SENSENOVA_API_KEY`，而池的当前 key
-  是 `key_fallback_sensenova_key1`；同一响应又报 `envSource=file`——既证明写确实落到了真实
-  `process.env`，又证明确实没生效。结果是：池在内存里轮换了，每个请求却仍用启动时那把旧 key 鉴权。
-  - **修法**：改为挂接唯一「每次请求都问一次」的接缝 `credentials.resolve(ref)`。`dsh-llm-pi-ai`
-    （`:2563`）、`dsh-llm-deepseek-api-key`（`:44`）以及所有凭证消费者都经它取 key，因此包装这一个方法
-    即可覆盖全部 provider。若解析的 ref 属于某个池，包装层返回池的当前 key；`describe()` 刻意不动，
-    仍报告存储里的真实值。
-  - **删掉全部 5 处 `process.env` 写入**，以及两处「用 `process.env` 字符串反推当前 key」的逻辑（那是个
-    劣化投影，只会返回启动时那把）。`currentRef` 现在是唯一权威——它能跨 `readPools()` /
-    `resolvePoolKeys()` 重建保留，而 env 写入本来就做不到。
-  - **可见行为变化**：`/pools` 现在报 `activeRef === currentRef`。之前两者可能不一致（`activeRef` 显示
-    的是启动时的陈旧值）。
+- **四项真实修复**（2026-09-29）。**注意**：v3.3.0 最初的说明声称本版才让「换 key 第一次真正到达
+  provider」，那是错的——更正见上方 v3.3.1。v3.3.0 实际改的是：
+  - **`activeRef` 不再报错当前 key。** `/pools` 原先用 `process.env[<池 env>]` 的值去池里反查成员、
+    只在没匹配到时才回退 `currentRef`——所以**可能高亮错误的那把**。实机（0.2.0-rc.1）上它报
+    `activeRef=SENSENOVA_API_KEY`，而 `currentRef` 是 `key_fallback_sensenova_key1`。现在 `activeRef`
+    直接等于 `currentRef`，两者永不矛盾。
+  - **删除 5 处冗余的 `process.env` 写入。** DSH 在启动时把 `{ ...process.env }` 冻结成「启动环境快照」
+    （`dsh-app-boot`），`dsh-launch-environment` 把它拷进 `Map`，`dsh-credentials-local.inherited()`
+    只读这个快照——启动之后写 `process.env` 对凭证层**不可见**。因此这些写入对鉴权是死代码（真正供 key
+    的是 `resolve` 包装）；删掉同时避免插件改写宿主进程环境。**行为提示**：继承 `process.env` 启的子进程
+    现在看到的是启动时的值而非轮换后的值——没有任何凭证消费者依赖它，因为它们全部都经
+    `credentials.resolve` 取值，而那正是包装拦截的地方。
+  - **失败归因加了守卫。** `agent/request-error` 原先在无法确定当前 key 时会退化成归咎
+    `keyValues[0]`；现在只标记它真能指名的那把。
   - **卸载会还原原始 `resolve`**（经 `ctx.effect`），并带身份校验，绝不覆盖「在我们之后安装的」包装层——
     热重载/fiber 重建不再层层叠加、留下持有过期 service 的闭包。
-  - **重发仍归 DSH 管**：轮换处理只改池的当前 ref，并且仍然调用 `next()`，由 `dsh-llm-retry` 继续决定是否/
-    重发几次。实测：每条轮换路径都调用了 `next()`。
-  - **验证方式**（全部实测，无推断）：在进程内用真实的官方 `@deepseek-ai/dsh-llm-pi-ai` 适配器 +
-    真实 `LocalCredentialProvider` + 本地 mock 上游，从**真实出站 HTTP `Authorization` 头**里抓 key ——
-    装插件前 `Bearer STORED-ENV-KEY`，预选后 `Bearer KEY-ONE-111`，`RATE_LIMIT` 轮换后
-    `Bearer KEY-TWO-222`，`dispose()` 后回到 `STORED-ENV-KEY`。另有两套边界用例（`enabled:false`、空池、
-    env 解析不到、`useKeyRef` 锁定、HTTP 上 `activeRef`/`currentRef` 一致、`dispose` 幂等、不匹配的错误码）
-    ——14/14 与 9/9 全绿。
+- **未改动**：重发仍归 DSH 管。轮换处理只改池的当前 ref，并且仍然调用 `next()`，由 `dsh-llm-retry`
+  继续决定是否/重发几次。实测：每条轮换路径都调用了 `next()`。
+- **验证方式**（全部实测，无推断）：在进程内用真实的官方 `@deepseek-ai/dsh-llm-pi-ai` 适配器 +
+  真实 `LocalCredentialProvider` + 本地 mock 上游，从**真实出站 HTTP `Authorization` 头**里抓 key ——
+  装插件前 `Bearer STORED-ENV-KEY`，预选后 `Bearer KEY-ONE-111`，`RATE_LIMIT` 轮换后
+  `Bearer KEY-TWO-222`，`dispose()` 后回到 `STORED-ENV-KEY`。另有两套边界用例（`enabled:false`、空池、
+  env 解析不到、`useKeyRef` 锁定、HTTP 上 `activeRef`/`currentRef` 一致、`dispose` 幂等、不匹配的错误码）
+  ——14/14 与 9/9 全绿。实机时间线见上方 v3.3.1。
 
 ## v3.2.4 新增
 
@@ -167,7 +181,7 @@
 ## 轮换语义
 
 - **key 到底怎么被用上**：DSH 的凭证接缝是 `credentials.resolve(ref)`。每个模型适配器都经它取 key（`dsh-llm-pi-ai`、`dsh-llm-deepseek-api-key`，以及任何解析凭证引用的插件），且**每次请求都会调用一次**。本插件包装的就是这一个方法：当解析的 ref 属于已配置的池时，包装层返回池的当前 key，而不是存储里的值。所以"换 key"就是改池的当前 ref —— 下一次请求立刻生效，无需重启。
-  - 写 `process.env` **不管用**：凭证 provider 读的是 DSH 启动时冻结的「启动环境快照」（`dsh-app-boot` 里的 `{...process.env}`，由 `dsh-launch-environment` 拷进 `Map`），启动之后再改 `process.env` 对它不可见。DSH 自己在 provider 条目上的注释也写着 managed document "is never materialized into the process environment"。
+  - 写 `process.env` **不管用**：凭证 provider 读的是 DSH 启动时冻结的「启动环境快照」（`dsh-app-boot` 里的 `{...process.env}`，由 `dsh-launch-environment` 拷进 `Map`），启动之后再改 `process.env` 对它不可见。DSH 自己在 provider 条目上的注释也写着 managed document "is never materialized into the process environment"。**历史说明**：3.2.4 及之前插件**也**会写 `process.env[<池 env>]`，但它始终与上面的包装**并存**——那个写入是冗余的，**不是**机制本身，所以轮换一直照常工作。v3.3.0 出于整洁删掉了这些写入。若你看到旧笔记声称轮换「从未生效」，那是错的，见 v3.3.1 一节。
 - **pick**（`agent/request`，预选）：先尊重 `useKeyRef` 锁定（但冷却中的锁定 key 会跳过，避免池在某把坏 key 上死锁），否则按游标在 live key 上轮询。选中的 ref 成为池的当前 ref —— 也就是凭证接缝下一次 resolve 交给适配器的那把。
 - **fail**（`agent/request-error`，注册 `prepend` 保证先于 `dsh-llm-retry` 看到错误）：仅当错误匹配本池 `rotateOn` 时才处理——按 `failure.code`（精确）、按 HTTP 状态映射（`429→RATE_LIMIT`、`401/403→AUTH`、`402→QUOTA`、`5xx→SERVER`）、或按消息关键字。把失败 key 标记为固定 `cooldownMs`（默认 30 s），然后切到 `nextRef`（若配置）否则下一把 live key。
 - **re-send** 完全交给 DSH 的 `dsh-llm-retry` 与用户自己的 per-provider 重试策略。两者独立互补：重试插件决定"同一把 key 重发几次"（`retryPolicy.retryableCodes` 默认 `EMPTY_RESPONSE/RATE_LIMIT/SERVER/TIMEOUT/TRANSPORT`——注意**不含 AUTH/QUOTA**）；本插件决定"换下一把 key"。例如 `AUTH` 失败（重试本来也不会重发，重发也白搭）仍会轮换到下一把——下一次请求就会用新 key 鉴权。

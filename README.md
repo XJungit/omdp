@@ -71,7 +71,7 @@ One settings tab (**Connector**) that manages three things from the DSH Web UI:
 "dependencies": { "@omdp/dsh-connector": "^0.3.7" }
 ```
 
-#### `@omdp/dsh-key-fallback` — multi-key API key pool with rotation (`v3.3.0`)
+#### `@omdp/dsh-key-fallback` — multi-key API key pool with rotation (`v3.3.1`)
 
 Hooks DSH's credential seam `credentials.resolve`: each time an adapter asks for a key, if that ref belongs to a configured pool the wrapper returns the pool's current key; on a configured trigger error it marks the failed key cooling and advances to the next key — **re-sending is left entirely to DSH's own `dsh-llm-retry`**. Ships an always-visible settings page (**Settings → API Key 回退**) with a redesigned UI:
 
@@ -84,10 +84,11 @@ Hooks DSH's credential seam `credentials.resolve`: each time an adapter asks for
 - **Declared DSH support (v3.2.2)** — new `@deepseek-ai/dsh` peer (`0.1.7-rc.1`, enumerated per version), making the supported runtime an explicit, machine-checked contract (see the connector entry above for the gate's semantics).
 - **DSH `0.1.7-rc.2` added to all four dsh peer enumerations (v3.2.3)** — zero code changes; verified by tarball diff (credentials `lib/` byte-identical, llm additive-only), gate execution on rc.2, and a live scratch-profile regression.
 - **DSH `0.2.0-rc.1` added to all four dsh peer enumerations (v3.2.4)** — zero code changes; verified by a full `lib/` SHA1 diff (credentials/llm/settings/shell/tools/mcp-client/web/agent all byte-identical — the entire surface this plugin touches), gate execution on 0.2.0-rc.1, and a live sandbox assembly.
-- **Rotation now actually reaches the provider (v3.3.0)** — fixes a real bug: the old mechanism wrote `process.env[<pool env>]`, which the credential layer never reads (DSH freezes `{...process.env}` into a launch-environment snapshot at boot), so the pool rotated in memory while every request kept authenticating with the boot-time key. Now hooks `credentials.resolve` (the per-request seam all adapters use), removes all 5 env writes plus 2 env-derived current-key lookups, makes `currentRef` the single source of truth (`/pools` reports `activeRef === currentRef`), and restores the original `resolve` on uninstall. Proven end-to-end against the real `dsh-llm-pi-ai` adapter by capturing the key from the outbound HTTP `Authorization` header.
+- **Correction to the v3.3.0 notes (v3.3.1)** — the v3.3.0 entry below originally claimed that key switching had *never* reached the provider. **That was wrong.** The `credentials.resolve` wrapper that supplies the key has existed since **v3.0.0** (`75ea76a`), and the published `3.2.4` tarball already contains it (`lib/index.js:298`) along with its `pool-hit` diagnostic (`:305`) — verified by downloading the tarball from the registry. Rotation was already working; the `process.env` writes were redundant code sitting next to a working wrapper, not the mechanism. The v3.3.0 entry is retained below with its claim corrected.
+- **Four real fixes (v3.3.0)** — (1) `/pools` `activeRef` no longer misreports the current key: it used to reverse-look-up `process.env[<pool env>]` and could highlight the wrong member (measured live: `activeRef=SENSENOVA_API_KEY` while `currentRef=key_fallback_sensenova_key1`); it is now just `currentRef`. (2) The 5 `process.env` writes are gone — verified invisible to the credential layer (DSH freezes `{...process.env}` into a launch-environment snapshot at boot), so they were dead weight for auth; dropping them also stops the plugin mutating the host env. (3) `agent/request-error` no longer falls back to blaming `keyValues[0]`. (4) Uninstall restores the original `resolve` via `ctx.effect` with an identity guard, so hot reloads stop stacking wrappers. Re-send stays DSH's job — every rotation path still calls `next()`.
 
 ```jsonc
-"dependencies": { "@omdp/dsh-key-fallback": "^3.3.0" }
+"dependencies": { "@omdp/dsh-key-fallback": "^3.3.1" }
 ```
 
 #### `@omdp/dsh-vision-bridge` — vision for text-only models (`v0.1.12`)
@@ -277,7 +278,7 @@ omdp/
 "dependencies": { "@omdp/dsh-connector": "^0.3.7" }
 ```
 
-#### `@omdp/dsh-key-fallback` — 多 key API 池 + 轮换（`v3.3.0`）
+#### `@omdp/dsh-key-fallback` — 多 key API 池 + 轮换（`v3.3.1`）
 
 挂在 DSH 的凭证接缝 `credentials.resolve` 上：每次适配器取 key 时，若该 ref 属于已配置的池，就返回池的当前 key；遇配置的触发错误时，把失败 key 标记为冷却并切到下一把——**重发完全交给 DSH 自带的 `dsh-llm-retry`**。带一个常驻可见的设置页（**设置 → API Key 回退**）与全新 UI：
 
@@ -290,10 +291,11 @@ omdp/
 - **声明 DSH 版本支持（v3.2.2）** —— 新增 `@deepseek-ai/dsh` peer（`0.1.7-rc.1`，逐版本枚举），把「支持的运行时」变成显式且机器可校验的契约（门禁语义见上方 connector 条目）。
 - **四条 dsh peer 枚举同步追加 `0.1.7-rc.2`（v3.2.3）** —— 代码零改动；依据：tarball diff（credentials 的 `lib/` 逐字节一致、llm 纯新增）+ rc.2 门禁放行 + scratch profile 真机回归。
 - **四条 dsh peer 枚举同步追加 `0.2.0-rc.1`（v3.2.4）** —— 代码零改动；依据：全量 `lib/` SHA1 diff（credentials/llm/settings/shell/tools/mcp-client/web/agent 逐字节一致——本插件用到的整个调用面）+ 0.2.0-rc.1 门禁放行 + 沙箱真机装配入树。
-- **轮换现在真的能到 provider 了（v3.3.0）** —— 修真 bug：旧机制写 `process.env[<池 env>]`，而凭证层根本不读它（DSH 启动时把 `{...process.env}` 冻结成启动环境快照），于是池只在内存里轮换、每个请求仍用启动时那把旧 key 鉴权。现改为挂接 `credentials.resolve`（所有适配器每次请求都走的接缝），删掉全部 5 处 env 写入与 2 处 env 反推，`currentRef` 成为唯一权威（`/pools` 报 `activeRef === currentRef`），卸载时还原原始 `resolve`。用真实 `dsh-llm-pi-ai` 适配器、从出站 HTTP `Authorization` 头抓 key 完成端到端实证。
+- **对 v3.3.0 说明的更正（v3.3.1）** —— 下方 v3.3.0 条目原先声称「换 key 从来没到达 provider」。**那是错的。** 真正供 key 的 `credentials.resolve` 包装自 **v3.0.0** 就存在（`75ea76a`），已发布的 `3.2.4` tarball 里就有它（`lib/index.js:298`）及配套 `pool-hit` 诊断（`:305`）——从 registry 下载 tarball 核对过。轮换一直在生效；那些 `process.env` 写入是与可用包装**并存**的冗余代码，而不是机制本身。下方 v3.3.0 条目保留，但其中错误断言已改正。
+- **四项真实修复（v3.3.0）** —— ① `/pools` 的 `activeRef` 不再报错当前 key：原先用 `process.env[<池 env>]` 反查、可能高亮错误的成员（实机测得 `activeRef=SENSENOVA_API_KEY` 而 `currentRef=key_fallback_sensenova_key1`），现在直接等于 `currentRef`。② 删除 5 处 `process.env` 写入——已证实启动快照冻结、凭证层读不到，对鉴权是死代码；删掉同时避免插件改写宿主环境。③ `agent/request-error` 不再退化成归咎 `keyValues[0]`。④ 卸载经 `ctx.effect` 还原原始 `resolve`（带身份校验），热重载不再叠加包装层。重发仍归 DSH 管——每条轮换路径都仍调用 `next()`。
 
 ```jsonc
-"dependencies": { "@omdp/dsh-key-fallback": "^3.3.0" }
+"dependencies": { "@omdp/dsh-key-fallback": "^3.3.1" }
 ```
 
 #### `@omdp/dsh-vision-bridge` — 给纯文本模型的视觉（`v0.1.12`）

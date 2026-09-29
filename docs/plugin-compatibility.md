@@ -3,7 +3,7 @@
 > ⚠️ **本文档为演进记录**：`@omdp/dsh-gitbash-win` 与 `@omdp/dsh-resume-stream`
 > 已于 2026-08-25 归档（源码移至 `archive/`，不再维护或发布）。下方对 gitbash
 > 的评估保留作为历史架构参考；当前活跃插件版本见各节标题（connector `0.3.7` /
-> vision-bridge `0.1.12` / key-fallback `3.3.0` / archived-sessions `0.3.8`）。
+> vision-bridge `0.1.12` / key-fallback `3.3.1` / archived-sessions `0.3.8`）。
 >
 > 评估内容：各插件对 DSH（DeepSeek Harness）更新的抗崩溃能力。
 > 核心问题：DSH 更新后，插件会不会导致 DSH 崩溃？
@@ -14,7 +14,9 @@
 **DSH `v0.2.0-rc.1`（桌面端，2026-09-28）适配结论**：connector / key-fallback /
 archived-sessions 三个插件**源码零改动兼容**，唯一动作是把 `0.2.0-rc.1` 追加进
 peer 枚举（分别升 `0.3.7` / `3.2.4` / `0.3.8`；vision-bridge 无 dsh peer，不动作）。
-（`key-fallback` 后续于 2026-09-29 因修复「换 key 未真正生效」升 `3.3.0`，见第 4 节。）
+（`key-fallback` 于 2026-09-29 升 `3.3.0`——去掉冗余的 `process.env` 写入、修 `/pools` 的 `activeRef` 误报、
+加卸载还原；随后 `3.3.1` 为**文档更正**：v3.3.0 曾误称「换 key 从未生效」，实为包装自 v3.0.0 起一直有效。
+见第 4 节。）
 ⚠️ **本轮现象是「被门禁跳过」而非崩溃**——升级到 0.2.0 后设置页里三个插件整项消失、
 路由 404/405，根因是 `0.1.7-rc.2 → 0.2.0-rc.1` 的**门禁第二次生效**（声明里不含新运行时版本）。
 逐项核查（详见下方「DSH 0.2.0 兼容性专项」）：
@@ -234,12 +236,12 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 
 ---
 
-## 4. @omdp/dsh-key-fallback（v3.3.0）【活跃插件】
+## 4. @omdp/dsh-key-fallback（v3.3.1）【活跃插件】
 
 ### 架构
 
 - **ESM bundle**：`lib/index.js` 为 `type: module`（`main`/`exports` → `./lib/index.js`），静态 import `@deepseek-ai/dsh-credentials`（只用 reference 半边 `credentialRef`/`resolve`/`describe`/`set`/`unset`；`isCredentialRefName` 本地实现兜底）、`@deepseek-ai/schemastery`（仅用于 `Config`）与 `node:*` 内置。
-- **Host**: `inject: ['llm','settings','webServer','credentials']`。**v3.3.0 起**：包装 `ctx.credentials.resolve` 作为唯一的 key 切换接缝（返回池的当前 key；`describe` 不动，仍报存储真值），`ctx.effect` 在卸载时按身份校验还原原始 `resolve`；`agent/request` 只预选（写内存池 `currentRef`）；`agent/request-error` 注册 `prepend: true` 先于 `dsh-llm-retry` 看到错误，按池 `rotateOn` 判定后只改 `currentRef` 并 `next()`，**重发交还 llm-retry**。`webServer` 用 `ctx.get('webServer')` 可选获取（不硬 inject 缺失不崩）。
+- **Host**: `inject: ['llm','settings','webServer','credentials']`。**v3.0.0 起**：包装 `ctx.credentials.resolve` 作为 key 切换接缝（返回池的当前 key；`describe` 不动，仍报存储真值）；**v3.3.0 起**加 `ctx.effect` 卸载时按身份校验还原原始 `resolve`；`agent/request` 只预选（写内存池 `currentRef`）；`agent/request-error` 注册 `prepend: true` 先于 `dsh-llm-retry` 看到错误，按池 `rotateOn` 判定后只改 `currentRef` 并 `next()`，**重发交还 llm-retry**。`webServer` 用 `ctx.get('webServer')` 可选获取（不硬 inject 缺失不崩）。
 - **client**: 独立设置页 `Settings → API Key 回退`，经 `slots.inject('settings.section')` + `slots.register` 注册（`id: 'key-fallback'`, `order: 62`），不再依赖 `installSettingsSection`/`settings.plugin.item` 双路渲染。
 - **能力**：多 key 池按 `rotateOn`（失败码/状态/关键字）判定轮换；固定 `cooldownMs` 冷却；`useKeyRef` 锁定/`nextRef` 链；短 ref 自动命名 + 旧长 ref 一次性幂等迁移；`GET /keys/plain` 明文揭示（仅池内 key/env）；env key 可编辑（describe 只读拒绝）。
 - **配置双后端（v3.2.0 新增，为兼容 DSH 0.1.7 而改造）**：启动时判别后端 ——
@@ -247,21 +249,33 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
   - **`0.1.7`+**：`.volatile()` 可用 ⇒ 导出 `Config = z.object({ providers: <dict>.volatile() })`；配置由 DSH 从 settings.yaml 迁移进 profile 补丁（`profiles/<p>/cordis.patch.yml`）中该条目的 `config`，插件经注入的 `config.providers`（活 volatile ref）读取、经 `ctx.settings.replace()` 写入。
   - 因 `config.providers` 被 DSH **深冻结**，`readSettings()` 返回可变深拷贝；写入先乐观更新内存副本再异步落盘（未决写入计数避免读到旧树）。
   - **关键前提**：不声明 volatile `Config` 会导致 `0.1.7` 的迁移调用 `settings.update()` 抛错、仅打印 `settings: section ... was not imported`，**配置静默丢失**（这正是 v3.1.7 在 `0.1.7` 上被 `dsh: skipping profile bundle` 跳过的原因之一）；而 `.volatile()` 在 schemastery `3.18.2`（rc.3）上不存在，故导出必须做 `typeof field.volatile === 'function'` 守卫。
-- **key 切换接缝（v3.3.0 修复）**：旧实现（≤ v3.2.4）靠 `process.env[pool.cfg.env] = <key>` 切换 key，
-  **从来没有到达凭证层**——DSH 在启动时把 `{...process.env}` 冻结成「启动环境快照」
+- **key 切换接缝（v3.0.0 起生效；v3.3.0 去冗余；v3.3.1 更正叙述）**：真正供 key 的是包装
+  `credentials.resolve`——**自 v3.0.0（`75ea76a`）就存在**，不是 v3.3.0 才加的。
+  ⚠️ **更正**：本文档与 v3.3.0 发布说明曾断言「≤ v3.2.4 靠写 `process.env` 切换 key，因此换 key 从未生效」，
+  **该断言错误**。从 registry 下载已发布 `3.2.4` tarball 核对：`lib/index.js:298` 即
+  `credSvc.resolve = async (ref) => {…}`、`:305` 为其 `pool-hit` 诊断——包装与 `process.env` 写入
+  **同时存在**，真正交付 key 的一直是包装。**轮换在 3.2.4 就已生效。**
+  那几处 `process.env` 写入（3.2.4 的 `:489/:532/:561/:711/:808`）确为死代码，理由是：DSH 启动时把
+  `{...process.env}` 冻结成「启动环境快照」
   （`dsh-app-boot` 的 `loadLayeredEnv()` → `dsh-launch-environment.createLaunchEnvironmentSnapshot()`
   拷进 `Map` → `profile-boot` `hostCtx.provide(DSH_LAUNCH_ENVIRONMENT_KEY, …)`），而
-  `dsh-credentials-local.inherited()` 只读这个快照。启动后写 `process.env` 对它**不可见**。
-  实机证据（0.2.0-rc.1）：`GET /pools` 报 `activeRef=SENSENOVA_API_KEY`（说明写确实落在真实
-  `process.env` 上）而池当前 key 是 `key_fallback_sensenova_key1`，同一响应又报 `envSource=file`
-  （说明 `inherited()` 走的是文件分支，没看见 env 写）。⇒ 轮换只改内存、请求仍用启动时那把旧 key。
-  v3.3.0 改为包装 `credentials.resolve`：`dsh-llm-pi-ai:2563`、`dsh-llm-deepseek-api-key:44`、
+  `dsh-credentials-local.inherited()` 只读这个快照——启动后写 `process.env` 对它**不可见**。
+  实机旁证（0.2.0-rc.1）：同一 `/pools` 响应里 `envSource=file`（`inherited()` 走了文件分支）
+  而 `activeRef=SENSENOVA_API_KEY`（写确实落在真实 `process.env` 上），两者并存即证明写不生效。
+  ⇒ 结论：写入是**冗余**（删之有理，但不影响鉴权），而非「轮换的机制失效」。
+  `credentials.resolve` 之所以够用：`dsh-llm-pi-ai:2563`、`dsh-llm-deepseek-api-key:44`、
   `dsh-web-search-deepseek:313`、`dsh-webhook-github:121` 以及 vision-bridge / cost-meter 的兜底路径
   **全部**经它取 key，且**每次请求调用一次**，故包一处覆盖全部 provider；`dsh-credentials-local`
   README 亦明示 `resolve`/`describe` 按调用实时读快照，无需重启。
-- **`currentRef` 是唯一权威（v3.3.0）**：删除了 2 处「用 `process.env` 值反查 key」的逻辑
-  （`agent/request-error` 与 `GET /pools` 的 `activeRef`）——那是 `currentRef` 的劣化投影，只会返回
-  启动时那把。`currentRef` 能跨 `readPools()`/`resolvePoolKeys()` 重建保留（`readPools` 只对新建
+  **实机轮换证据**（v3.3.0 在 0.2.0-rc.1 上，`/diag` 200 条）：池中两把 key 分别被用 26 次 / 25 次并逐次交替——
+  `PICK key_fallback_sensenova_key1` → `RATE_LIMIT` → `marked key_fallback_sensenova_key1` →
+  `PICK SENSENOVA_API_KEY` → `pool-hit SENSENOVA_API_KEY -> key_fallback_sensenova_key1`（57 条 `pool-hit`
+  各自写明当时生效的那把）。
+- **`currentRef` 是唯一权威（v3.3.0 真修的项）**：删除了 2 处「用 `process.env` 值反查 key」的逻辑
+  （`agent/request-error` 与 `GET /pools` 的 `activeRef`）。**这是 v3.3.0 里唯一影响可见行为的修复**——
+  `GET /pools` 原先先拿 `process.env[pool.cfg.env]` 的值去池里反查成员、只在没匹配到时才回退 `currentRef`，
+  所以**可能高亮错误的那把**（实机测得 `activeRef=SENSENOVA_API_KEY` 而 `currentRef=key_fallback_sensenova_key1`）。
+  `currentRef` 能跨 `readPools()`/`resolvePoolKeys()` 重建保留（`readPools` 只对新建
   provider 置空、`resolvePoolKeys` 全程不碰它）。可见变化：`/pools` 现在 `activeRef === currentRef`。
 - **遗留池救援（v3.2.1 新增）**：0.1.7 的迁移是「改名 `settings.yaml` → 逐段导入」的**全有或全无**动作——
   v3.2.0 之前（或 `Config` 声明缺失时）导入失败只留日志，配置整体残留在 `<DSH_HOME>/settings.yaml.imported`，
@@ -276,8 +290,8 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 
 | 接口 | 说明 | 变更风险 |
 |---|---|---|
-| `ctx.credentials`（`inject` 硬依赖） | **v3.3.0 起包装 `resolve`**（每次请求的 key 接缝）+ `set`/`unset`/`describe`/`credentialRef`（reference 半边，rc.6 起稳定） | 低–中（record 半边 rc.8 新增，插件未用；`resolve` 签名跨枚举版本未变） |
-| DSH 启动环境快照（`launchEnvironment`，**不再依赖**） | v3.3.0 前误以为写 `process.env` 能切换 key，实测无效（快照启动时冻结） | —（已移除该依赖） |
+| `ctx.credentials`（`inject` 硬依赖） | **v3.0.0 起包装 `resolve`**（每次请求的 key 接缝；v3.3.0 加卸载还原）+ `set`/`unset`/`describe`/`credentialRef`（reference 半边，rc.6 起稳定） | 低–中（record 半边 rc.8 新增，插件未用；`resolve` 签名跨枚举版本未变） |
+| DSH 启动环境快照（`launchEnvironment`，**不再依赖**） | 曾误以为写 `process.env` 即可切换 key；实测无效（快照启动时冻结）。注意：这只说明该**写入冗余**，不代表轮换失效——轮换一直由 `credentials.resolve` 包装承担 | —（已移除该冗余依赖） |
 | `ctx.llm`（`inject` 硬依赖） | `agent/request` + `agent/request-error` waterfall 换 key 链 | 中（事件名/载荷若变需适配） |
 | `ctx.settings`（`inject` 硬依赖） | **`0.1.7`+**：`describe`/`replace`（读写 profile entry config）。⚠️ rc.x 的 `get`/`register`/`installSection` 在 `0.1.7` 上**已移除**（实测 `get=undefined installSection=undefined`） | **高**（0.1.7 破坏性变更，v3.2.0 已适配） |
 | `config.providers`（`apply(ctx, config)` 第 2 参） | **`0.1.7`+**：volatile ref（`.get()` 热更新）；首次 apply 时为 `{}`（迁移在 `loader.await()` 之后） | **高**（新机制，v3.2.0 已适配） |
@@ -303,7 +317,7 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 | DSH 大版本 | ✅ DSH 不崩；`agent/*` 事件载荷或 `webServer` 若变，轮换/设置页需适配 |
 | DSH `0.2.0-rc.1` | ✅ 不崩：v3.2.4 追加 peer 枚举 `0.2.0-rc.1`（dsh/credentials/llm/settings 四条同步，代码零改动）。依据：`dsh-credentials`/`dsh-llm`/`dsh-settings` 的 `lib/` 在 `0.1.7-rc.2 → 0.2.0-rc.1` **逐字节零变化**（`ctx.credentials` 的 `resolve`/`describe`/`set`/`unset`、`agent/request(-error)` 事件、`settings.describe/replace` 全保留）；门禁对旧声明判拦截、新声明判放行；沙箱真机装配入树 |
 | `dsh-credentials` 版本漂移 | ✅ reference 半边自 rc.6 稳定，低风险 |
-| key 轮换**实际生效**（DSH `0.2.0-rc.1`） | ✅ 修好：v3.3.0 换用 `credentials.resolve` 包装。端到端实测（进程内真实 `@deepseek-ai/dsh-llm-pi-ai` 适配器 + 真实 `LocalCredentialProvider` + 本地 mock 上游，从**出站 HTTP `Authorization` 头**取值）：未装插件 `Bearer STORED-ENV-KEY` → 预选 `Bearer KEY-ONE-111` → `RATE_LIMIT` 轮换 `Bearer KEY-TWO-222` → `dispose()` 回 `Bearer STORED-ENV-KEY`。另测边界 14/14 与 9/9 全绿（`enabled:false`、空池、env 解析不到、`useKeyRef` 锁定、`activeRef`/`currentRef` 一致、`dispose` 幂等、非 rotateOn 码不换 key、无关 provider 不干预） |
+| key 轮换**实际生效**（DSH `0.2.0-rc.1`） | ✅ 生效（非 v3.3.0 新增——`credentials.resolve` 包装自 v3.0.0 即在；v3.3.0 只是去掉冗余 env 写入并修 `activeRef` 显示）。**两路证据**：① 实机 `/diag` 200 条，池中两把 key 各被用 26/25 次并逐次交替，57 条 `pool-hit` 写明当时生效的那把；② 端到端实测（进程内真实 `@deepseek-ai/dsh-llm-pi-ai` 适配器 + 真实 `LocalCredentialProvider` + 本地 mock 上游，从**出站 HTTP `Authorization` 头**取值）：未装插件 `Bearer STORED-ENV-KEY` → 预选 `Bearer KEY-ONE-111` → `RATE_LIMIT` 轮换 `Bearer KEY-TWO-222` → `dispose()` 回 `Bearer STORED-ENV-KEY`。另测边界 14/14 与 9/9 全绿（`enabled:false`、空池、env 解析不到、`useKeyRef` 锁定、`activeRef`/`currentRef` 一致、`dispose` 幂等、非 rotateOn 码不换 key、无关 provider 不干预） |
 | 服务缺失 | ✅ 设置页不显示/轮换降级，不崩溃 |
 
 ---
@@ -375,7 +389,7 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 | dsh-gitbash-win（归档） | 0.1.6 | 无（动态加载 5 个 @deepseek-ai/*） | `tools`/`subprocess`/`systemPrompt`/`shellEnv` | 顶层零依赖 + 动态加载 + 失败隔离 | `dsh-sandbox`（Windows ACL 上游 bug） |
 | dsh-connector | 0.3.7 | `yaml`（+ `jsdom` 懒加载；peer `schemastery` 仅 Config 声明用、`@deepseek-ai/dsh` 供版本门禁 `0.1.7-rc.1 \|\| 0.1.7-rc.2 \|\| 0.2.0-rc.1`） | `webServer`（`settings`/`tools.guard`/`systemPrompt`/`profileContext` 可选） | 顶层零第三方 static import + try/catch + 可选服务失败隔离 + **遗留 `toolFilters` 一次性救援** + **CRLF 解析容错** | `ctx.webServer` API 变化 / 内置模块子路径解析崩溃（`punycode/`，0.3.3 懒加载缓解）/ 0.1.7 配置迁移漏段（0.3.4 救援）/ 补丁文件换行被外部工具改成 CRLF（0.3.6） |
 | dsh-vision-bridge | 0.1.12 | 无 | `tools`/`attachments`/`llm`/`credentials` | 纯静态 + 零 @deepseek-ai + 防御性编码 | `ctx.llm` API 变化 / composer 输入层变化 / Agent 路由载荷变化（`requestHeader().config`） |
-| dsh-key-fallback | 3.3.0 | `schemastery`（仅 `Config` 声明用） | `credentials`/`llm`/`settings`（`webServer`/`slots` 可选） | ESM import + `agent/*` 事件 + **包装 `credentials.resolve` 切换 key（v3.3.0；旧的 `process.env` 写入实测无效，已全部移除）** + **配置双后端自动判别** + **遗留池一次性救援** + **DSH peer 版本门禁** + 防御性编码 | `agent/request-error` 载荷 / `credentials.resolve` 签名 / `0.1.7` 配置迁移机制 / `webServer` API 变化 |
+| dsh-key-fallback | 3.3.1 | `schemastery`（仅 `Config` 声明用） | `credentials`/`llm`/`settings`（`webServer`/`slots` 可选） | ESM import + `agent/*` 事件 + **包装 `credentials.resolve` 切换 key（v3.0.0 起）** + **配置双后端自动判别** + **遗留池一次性救援** + **DSH peer 版本门禁** + 防御性编码 | `agent/request-error` 载荷 / `credentials.resolve` 签名 / `0.1.7` 配置迁移机制 / `webServer` API 变化 |
 | dsh-archived-sessions | 0.3.8 | 无（jsonl 后端可选 import + 内置编码 fallback） | `webServer`（`sessionPersistence`/`workspaceRegistry`/`sessionQuery`/`fs`/`shell` 可选） | 路径自解析（root 由 `DSH_HOME` 推导）+ 删除目录名校验 + **`ctx.shell` 双时代能力探测** + **DSH peer 版本门禁** + try/catch + 可选服务失败隔离 | `sessionPersistence` 路径布局 / `workspaceRegistry` 字段变化 / `ctx.shell` 抽象方法**改名**（0.3.6 双时代探测）/ 宿主同槽位撞 slot id（0.3.4 起用 `omdp-` 前缀免疫） |
 
 ## DSH 0.1.7 兼容性专项（2026-09-24）
@@ -392,7 +406,7 @@ DSH `0.1.7` 引入多处**破坏性变更**，本仓库插件已按"优先双版
 
 | 插件 | 门禁影响 | 处理 |
 |---|---|---|
-| dsh-key-fallback | **原 v3.1.7 被跳过**（3/3 peer 不含 `0.1.7-rc.1`） | v3.2.0 追加 `0.1.7-rc.1`（credentials/llm/settings）与 cordis `4.0.4`、schemastery `3.18.4`；v3.2.1 追加遗留池救援；v3.2.2 追加 `@deepseek-ai/dsh` peer `0.1.7-rc.1`；v3.2.3 追加 rc.2（dsh/credentials/llm/settings 四条枚举同步扩充）；v3.2.4 追加 `0.2.0-rc.1`（同四条）；v3.3.0 修「换 key 未真正生效」（改用 `credentials.resolve` 包装） |
+| dsh-key-fallback | **原 v3.1.7 被跳过**（3/3 peer 不含 `0.1.7-rc.1`） | v3.2.0 追加 `0.1.7-rc.1`（credentials/llm/settings）与 cordis `4.0.4`、schemastery `3.18.4`；v3.2.1 追加遗留池救援；v3.2.2 追加 `@deepseek-ai/dsh` peer `0.1.7-rc.1`；v3.2.3 追加 rc.2（dsh/credentials/llm/settings 四条枚举同步扩充）；v3.2.4 追加 `0.2.0-rc.1`（同四条）；v3.3.0 删冗余 `process.env` 写入 + 修 `activeRef` 显示 + 加卸载还原；v3.3.1 文档更正（v3.3.0 曾误称「换 key 从未生效」，实为 `credentials.resolve` 包装自 v3.0.0 起一直有效） |
 | dsh-connector | **原不受门禁**（peer 只有 schemastery，非 `dsh-*`） | import 期崩溃需修 ⇒ v0.3.3；v0.3.4 **主动纳入门禁**（新增 `@deepseek-ai/dsh` peer）；v0.3.5 追加 rc.2；v0.3.6 修 CRLF 解析 + `profileContext` 补丁路径；v0.3.7 追加 `0.2.0-rc.1` |
 | dsh-archived-sessions | **原不受门禁**（peer 只有 cordis） | `ctx.shell.run()` 移除导致删除失效 ⇒ v0.3.5（追加 cordis `4.0.4` 枚举）、v0.3.6 双时代自适应 + **主动纳入门禁**；v0.3.7 追加 rc.2；v0.3.8 追加 `0.2.0-rc.1` |
 | dsh-vision-bridge | **不受门禁**（无 dsh peer） | 无需改动 |
@@ -760,7 +774,7 @@ specifier 对齐（`github:` 类用解析出的版本号）。
 3. **相互隔离**：任一插件失效，不影响其他插件和 DSH 本体。
 4. **建议**：DSH 大版本升级后，逐个验证活跃插件（connector API、vision-bridge 识图、key-fallback），
    有问题就更新对应插件版本。
-5. **本仓库现状**：`0.1.7-rc.1` / `0.1.7-rc.2` / `0.2.0-rc.1` 适配已全部落地——`key-fallback` v3.3.0（双后端 + 遗留池救援 + 声明 DSH peer + **`credentials.resolve` 包装修好换 key 实际生效**）、
+5. **本仓库现状**：`0.1.7-rc.1` / `0.1.7-rc.2` / `0.2.0-rc.1` 适配已全部落地——`key-fallback` v3.3.1（双后端 + 遗留池救援 + 声明 DSH peer + **`credentials.resolve` 包装切换 key，自 v3.0.0 生效，实机 200 条 diag 佐证**）、
    `connector` v0.3.7（jsdom 懒加载修 import 崩溃 + 工具过滤迁 volatile `Config` + 遗留过滤救援 + 声明 DSH peer +
    CRLF 解析与 `profileContext` 补丁路径修复）、
    `archived-sessions` v0.3.8（`ctx.shell` 契约**双时代自适应**修删除失效 + 声明 DSH peer）；

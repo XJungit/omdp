@@ -4,43 +4,61 @@
 
 **Multi-key API key pool with automatic rotation for [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness)** — hooks DSH's credential seam `credentials.resolve`: each time an adapter asks for a key, if that ref belongs to a configured pool the wrapper returns the pool's current key; when a configured trigger error occurs it marks the failed key cooling (fixed `cooldownMs`, no exponential backoff) and advances to the next key. **Re-sending is left entirely to DSH's own `dsh-llm-retry`** — this plugin never re-sends on its own; it only switches the key and lets the retry policy decide.
 
-Current version: **v3.3.0** (`v7` UI generation).
+Current version: **v3.3.1** (`v7` UI generation).
+
+## What v3.3.1 offers
+
+- **Documentation correction — no code change** (2026-09-29). The v3.3.0 release notes asserted that the plugin
+  had never actually switched keys, because the `process.env` write never reached the credential layer. **That
+  assertion was wrong and is retracted here.** The `credentials.resolve` wrapper that supplies the key has
+  existed since **v3.0.0** (`git log -S 'credSvc.resolve =' -- dsh-key-fallback/lib/index.js` → `75ea76a`), and
+  the **published 3.2.4 tarball** already contains both that wrapper and its `pool-hit` diagnostic (verified by
+  downloading `@omdp/dsh-key-fallback@3.2.4` from the registry and reading `lib/index.js:298` / `:305`).
+  Rotation was already reaching the provider; the redundant `process.env` writes sat *alongside* the working
+  wrapper rather than being the mechanism. v3.3.0's real content is the smaller, accurate list in the section
+  below.
+- **Live production evidence that rotation works** — captured on the real desktop install (DSH `0.2.0-rc.1`,
+  plugin v3.3.0) while a chat was routed through a pooled provider, from `GET /dsh-key-fallback/diag`:
+  200 entries (`resolve` 57 / `agent/request` 51 / `request-error` 90), with the pool's two keys used
+  **26 and 25 times** and alternating on each failure:
+  `PICK key_fallback_sensenova_key1` → `RATE_LIMIT` → `marked key_fallback_sensenova_key1` →
+  `PICK SENSENOVA_API_KEY` → … → `pool-hit SENSENOVA_API_KEY -> key_fallback_sensenova_key1`.
+  Each `pool-hit` line names the key that was current at that instant, which is exactly what the adapter
+  received on the wire.
 
 ## What v3.3.0 offers
 
-- **The key switch now actually reaches the provider** (2026-09-29) — a real bug fix, not a refactor for
-  tidiness. Until 3.2.4 this plugin switched keys by writing `process.env[<pool env>] = <key value>`, which
-  **never reached the credential layer**. DSH freezes `{ ...process.env }` into a *launch environment snapshot*
-  at boot (`dsh-app-boot`), `dsh-launch-environment` copies that into a `Map`, and
-  `dsh-credentials-local.inherited()` reads only that snapshot — so a post-startup `process.env` write is
-  invisible. Measured on a live 0.2.0-rc.1 install: `GET /dsh-key-fallback/pools` reported
-  `activeRef=SENSENOVA_API_KEY` while the pool's current key was `key_fallback_sensenova_key1`, and the same
-  response reported `envSource=file` — proof the write did land on `process.env` yet the provider still saw the
-  stored value. In effect the pool rotated in memory while every request kept authenticating with the old key.
-  - **The fix**: the plugin now hooks the one seam that is consulted **per request** —
-    `credentials.resolve(ref)`. `dsh-llm-pi-ai` (`:2563`), `dsh-llm-deepseek-api-key` (`:44`) and every other
-    credential consumer resolve their key through it, so wrapping that single method covers all providers. If
-    the resolved ref belongs to a pool, the wrapper returns the pool's current key; `describe()` is deliberately
-    left untouched so it still reports the *stored* truth.
-  - **All five `process.env` writes removed**, plus the two places that reverse-engineered the current key by
-    string-matching `process.env` (a degraded projection that returned the *boot-time* key). `currentRef` is now
-    the single source of truth — it survives `readPools()`/`resolvePoolKeys()` rebuilds, which the env write
-    never did.
-  - **Visible behaviour change**: `/pools` now reports `activeRef === currentRef`. Previously the two could
-    disagree (and `activeRef` showed the stale boot-time value).
+- **Four real fixes** (2026-09-29). **Note**: the original v3.3.0 notes claimed this release made key switching
+  "actually reach the provider" for the first time. That was wrong — see the v3.3.1 correction above. What
+  v3.3.0 really changed:
+  - **`activeRef` no longer misreports the current key.** `/pools` used to derive `activeRef` by matching the
+    value of `process.env[<pool env>]` against the pool's members and falling back to `currentRef` only when no
+    member matched — so it could highlight **the wrong key**. On a live 0.2.0-rc.1 install it reported
+    `activeRef=SENSENOVA_API_KEY` while `currentRef` was `key_fallback_sensenova_key1`. `activeRef` is now
+    simply `currentRef`, so the two always agree.
+  - **Five redundant `process.env` writes removed.** DSH freezes `{ ...process.env }` into a *launch
+    environment snapshot* at boot (`dsh-app-boot`), `dsh-launch-environment` copies that into a `Map`, and
+    `dsh-credentials-local.inherited()` reads only that snapshot — so a post-boot `process.env` write is
+    invisible to the credential layer. The writes were therefore dead weight for authentication (the `resolve`
+    wrapper is what supplies the key). Removing them also stops the plugin from mutating the host process
+    environment. **Behaviour note**: a tool that spawns a subprocess inheriting `process.env` now sees the
+    launch-time value rather than the rotated one — no credential consumer depends on it, because every one of
+    them resolves through `credentials.resolve`, which the wrapper intercepts.
+  - **Failure attribution is guarded.** `agent/request-error` used to fall back to blaming `keyValues[0]` when
+    the current key could not be identified; it now only marks a key it can actually name.
   - **Uninstall restores the original `resolve`** via `ctx.effect`, guarded by an identity check so it never
     clobbers a wrapper installed after ours — a hot reload or fiber rebuild no longer stacks wrappers whose
     closures hold expired services.
-  - **Re-send is still DSH's job.** The rotation handler only changes the pool's current ref and still calls
-    `next()`, so `dsh-llm-retry` keeps deciding whether/how often to re-send. Verified: `next()` is called on
-    every rotation path.
-  - **Verification** (all measured, no inference): the real official `@deepseek-ai/dsh-llm-pi-ai` adapter was
-    applied in-process with a real `LocalCredentialProvider` and a local mock upstream; the API key was captured
-    from the **actual outbound HTTP `Authorization` header** — `Bearer STORED-ENV-KEY` before the plugin,
-    `Bearer KEY-ONE-111` after pre-selection, `Bearer KEY-TWO-222` after a `RATE_LIMIT` rotation, back to
-    `STORED-ENV-KEY` after `dispose()`. Two further suites cover the edge cases (`enabled:false`, empty pool,
-    unresolvable env, `useKeyRef` lock, `activeRef`/`currentRef` agreement over HTTP, `dispose` idempotence,
-    non-matching error codes) — 14/14 and 9/9 pass.
+- **Unchanged**: re-send remains DSH's job. The rotation handler only changes the pool's current ref and still
+  calls `next()`, so `dsh-llm-retry` keeps deciding whether and how often to re-send. Verified: `next()` is
+  called on every rotation path.
+- **Verification** (all measured, no inference): the real official `@deepseek-ai/dsh-llm-pi-ai` adapter was
+  applied in-process with a real `LocalCredentialProvider` and a local mock upstream; the API key was captured
+  from the **actual outbound HTTP `Authorization` header** — `Bearer STORED-ENV-KEY` before the plugin,
+  `Bearer KEY-ONE-111` after pre-selection, `Bearer KEY-TWO-222` after a `RATE_LIMIT` rotation, back to
+  `STORED-ENV-KEY` after `dispose()`. Two further suites cover the edge cases (`enabled:false`, empty pool,
+  unresolvable env, `useKeyRef` lock, `activeRef`/`currentRef` agreement over HTTP, `dispose` idempotence,
+  non-matching error codes) — 14/14 and 9/9 pass. The live production timeline is in v3.3.1 above.
 
 ## What v3.2.4 offers
 
@@ -182,7 +200,7 @@ with live env-key values), create/update/delete (POST/DELETE round-trip, persist
 ## Rotation semantics
 
 - **How a key actually gets used**: DSH's credential seam is `credentials.resolve(ref)`. Every model adapter reads its key through it (`dsh-llm-pi-ai`, `dsh-llm-deepseek-api-key`, and any plugin that resolves a credential ref), and it is called **per request**. This plugin wraps that one method: when the resolved ref belongs to a configured pool, the wrapper returns the pool's current key instead of the stored value. Switching the key is therefore just changing the pool's current ref — the next request picks it up with no restart.
-  - Writing to `process.env` would **not** work: the credential provider reads the *launch environment snapshot* that DSH froze at boot (`{...process.env}` in `dsh-app-boot`, copied into a `Map` by `dsh-launch-environment`), so anything written to `process.env` after startup is invisible to it. DSH's own comment on the provider entry says the managed document "is never materialized into the process environment".
+  - Writing to `process.env` would **not** work: the credential provider reads the *launch environment snapshot* that DSH froze at boot (`{...process.env}` in `dsh-app-boot`, copied into a `Map` by `dsh-launch-environment`), so anything written to `process.env` after startup is invisible to it. DSH's own comment on the provider entry says the managed document "is never materialized into the process environment". **History**: up to 3.2.4 the plugin *also* wrote `process.env[<pool env>]`, but always **alongside** the wrapper above — that write was redundant rather than the mechanism, so rotation worked regardless. The writes were removed in v3.3.0 for hygiene. If you are reading an older note claiming rotation "never worked", it is wrong; see the v3.3.1 section.
 - **pick** (`agent/request`, pre-select): respects `useKeyRef` lock first (but a cooling locked key is skipped so the pool never deadlocks on a bad key), otherwise cursor round-robin over live keys. The chosen ref becomes the pool's current ref, which is what the credential seam hands to the adapter on the next resolve.
 - **fail** (`agent/request-error`, registered `prepend` so it runs before `dsh-llm-retry`): only when the error matches the pool's `rotateOn` — by `failure.code` (exact), by HTTP status mapping (`429→RATE_LIMIT`, `401/403→AUTH`, `402→QUOTA`, `5xx→SERVER`), or by message keyword. Marks the failed key with a fixed `cooldownMs` (default 30 s), then switches to `nextRef` if configured, else the next live key.
 - **re-send** is left entirely to DSH's `dsh-llm-retry` with the user's own per-provider retry policy. The two are independent and complementary: the retry plugin decides "retry the same key N times" (`retryPolicy.retryableCodes`, default `EMPTY_RESPONSE/RATE_LIMIT/SERVER/TIMEOUT/TRANSPORT` — which notably excludes `AUTH`/`QUOTA`); this plugin decides "switch to the next key". So e.g. an `AUTH` failure (which retry would not re-send anyway) still rotates to the next key — that next request will authenticate with the fresh key.
