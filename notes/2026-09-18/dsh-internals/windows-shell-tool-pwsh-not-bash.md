@@ -2,7 +2,7 @@
 
 ## 背景 / 问题
 
-在给 9router 的 OpenCode Zen 免费层打补丁时，Zen 的门禁要求请求体
+一个上游模型服务的门禁要求请求体
 `tools` 里必须**声明** `read` 和 `bash` 两个工具名。而 DSH 在 Windows 上
 暴露给模型的 shell 工具叫 **`pwsh`**，没有 `bash`。于是产生两个必须分清的问题：
 
@@ -74,32 +74,6 @@ Get-Command bash        # -> C:\Windows\System32\bash.exe   ← WSL 桩，无发
 （单实现约束）。再加 `dsh-bash-sandbox` 自带 POSIX 假设、沙箱语义在 Windows
 上不成立。净效果是**牺牲 Windows 原生 shell 体验去换一个 Git Bash**，不划算。
 
-## 对 9router Zen 补丁的含义
-
-Zen 门禁要求 `tools` 里**声明** `bash`。补丁注入的 `bash` 是**纯指纹声明**
-（空 `parameters`、无实现），**不需要本机真的有 bash，也不该被真正调用**。
-这个「不该被调用」是**实测**过的，不是想当然：
-
-`tools/9router-fix/probes/probe-injected-tool-vs-real.cjs` 三种场景对比：
-
-| 场景 | 模型选中空壳/别名 `bash` 的次数 |
-|---|---|
-| **A. 真实 DSH 工具集 + 空壳 `bash`**（生产情形） | **0/4**（全选有真实 schema 的 `pwsh` / `glob`） |
-| B. 真实工具集 + 空壳 `read` 与 `bash`（手工造重名） | 0/4，但整批 **400**：重名被上游拒 |
-| C. 真实工具集 + 把 `pwsh` **别名为** `bash`（真实 schema） | 2/4 选 `bash` |
-
-- **A 行是生产情形**：真实调用方（DSH 等）永远会带上自己的工具集，
-  模型在"有真实 schema 的 `pwsh`"与"空壳 `bash`"之间**一致地选前者**，
-  所以空壳基本不会被选中，回传未知工具调用的风险极低。
-- **反例警示**：`probe-injected-tool-usage.cjs` 里**只**给空壳 read/bash 时，
-  模型 **3/3** 会调用它们。所以"空壳安全"这个结论**只在真实工具集在场时成立**，
-  不能推广到"调用方不带工具"的路径。幸运的是调用方不带工具时，
-  调用方自己也拿不到工具调用（它没声明过工具），影响面小。
-- **B 行暴露了一个真实失败模式**：**重复工具名上游返回 400**（不是 403）。
-  所以补丁的去重逻辑必须同时识别 nested（chat）和 flat（responses）
-  两种工具形状，否则会追加出第二份 `read`/`bash` 而整批失败。
-  已固化进 `verify-opencode-freetier.cjs` 的 B 层断言。
-
 ## 可复用要点
 
 - **"某工具在平台 A 上不可用"要先分清是三层里的哪一层**：
@@ -120,4 +94,3 @@ Zen 门禁要求 `tools` 里**声明** `bash`。补丁注入的 `bash` 是**纯�
   - `...\@deepseek-ai\dsh-shell\lib\index.js` L50-70
   - `...\@deepseek-ai\dsh-tool-bash\lib\index.js`（`toolName: "bash"` / `name: "bash"`，无平台门禁）
   - `...\@deepseek-ai\dsh-bash-local\lib\index.js`（`bash -c` 显式 argv）
-- 相关笔记：`notes/2026-09-18/debug/9router-opencode-freetier-403-tool-pair.md`
