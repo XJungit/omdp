@@ -776,12 +776,39 @@ patchedDependencies:
   '@wxg-prc-cpg/browser-skill-dsh-plugin@^0.3.1': …                       # +5 条
 ```
 
-⚠️ **key 必须用 range**：`patchedDependencies` 的 key 匹配不到实际解析版本时，
-pnpm **直接报错中止安装**（`Either remove them from "patchedDependencies" or update
-them to match packages in your dependencies.`）。实测教训：`dsh-cost-meter` 声明 `^1.7.41`
-但 registry 已到 `1.7.43`，用精确 key 时**全新解析的安装直接失败**；改成
-`dsh-cost-meter@^1.7.41` 后既装得上又仍然生效。因此 key 应与 `dependencies` 的
-specifier 对齐（`github:` 类用解析出的版本号）。
+⚠️ **key 用 range 还是精确版本，各有各的炸法**（两种都实测过，别只记住一半）：
+
+- **精确 key**：匹配不到实际解析版本时，pnpm **直接报错中止安装**
+  （`ERR_PNPM_UNUSED_PATCH` / `Either remove them from "patchedDependencies" or update
+  them to match packages in your dependencies.`）。实测教训：`dsh-cost-meter` 声明 `^1.7.41`
+  但 registry 已到 `1.7.43`，用精确 key 时**全新解析的安装直接失败**；改成
+  `dsh-cost-meter@^1.7.41` 后既装得上又仍然生效。因此 key 应与 `dependencies` 的
+  specifier 对齐（`github:` 类用解析出的版本号）。
+- 🔴 **range key 的隐患**：它能跟上版本漂移，于是会**悄悄把补丁套到它从没写过的版本上**
+  ⇒ 升级时 `ERR_PNPM_PATCH_FAILED`（补丁上下文对不上新版本的文件）。2026-09-30
+  `browser-skill-dsh-plugin` **0.3.1 → 0.3.2 正是此因**：key 是 `^0.3.1`，匹配了 0.3.2，
+  pnpm 拿 0.3.1 的旧上下文去套 0.3.2 的新文件，**安装直接失败、用户点「更新」无反应**。
+  同一份档案在 `%TEMP%` 的新建目录里复现一致（`Packages: +76` → `PATCH_FAILED` exit=1），
+  删条目后同一命令 exit=0。
+
+⇒ **根本对策只有一条：上游一发新版就「升级 + 删补丁」，绝不长期挂补丁。**
+补丁只应存在到上游原生修好声明为止（见下文「第三方插件」节的最终处置）。
+
+🔴 **删条目必须同时清 `pnpm-lock.yaml`**：lockfile 里也记着 `patchedDependencies`，
+只删 `pnpm-workspace.yaml` 而不动 lockfile，pnpm 会报
+
+```
+ERR_PNPM_LOCKFILE_CONFIG_MISMATCH  Cannot proceed with the frozen installation.
+The current "patchedDependencies" configuration doesn't match the value found in the lockfile
+```
+
+**这一条必须修**：`dsh-plugin-manager` 的门禁回滚修复跑的正是
+`install --frozen-lockfile`（`dsh-plugin-manager/lib/index.js:649`，触发条件见
+`notes/2026-09-30/dsh-compat/补丁改不了安装门禁-两道门禁与升级顺序.md`），
+且 `dshmarket` 恒以 `CI=true` 调 pnpm（`dsh-cli.js:384`）——冻结语义一直在生效。
+修法：`pnpm install --no-frozen-lockfile` 让 pnpm 自己重写 lockfile。
+实测该命令只改补丁相关的 3 处（条目、`patch_hash=…` 后缀、snapshot key），
+其余 10 个依赖的 specifier/version **逐字节不变**。
 
 **验证方式**：`desktop` 是 Electron 保留 profile，CLI 装配自检会拒绝
 （`profile "desktop" is managed exclusively by the Electron application`）。
@@ -876,7 +903,7 @@ key-fallback `3.3.2` **全部 ✅ 放行**。
 | ❌ | `@omdp/dsh-key-fallback@3.3.1` | 四条枚举止于 rc.1 |
 | ❌ | `@omdp/dsh-archived-sessions@0.3.8` | 枚举止于 rc.1 |
 | ❌ | `dsh-client-auto-continue@0.11.9` | **补丁写的 `…\|\| 0.2.0-rc.1` 已失效** |
-| ❌ | `@wxg-prc-cpg/browser-skill-dsh-plugin@0.3.1` | **同上，补丁失效** |
+| ❌→✅ | `@wxg-prc-cpg/browser-skill-dsh-plugin@0.3.1` | **补丁失效 + range key 反噬**；上游 `0.3.2` 已原生声明 `^0.1.5-rc.3 \|\| ^0.2.0-rc.1`，抬钉版 + 删补丁后 ✅ |
 | ❌ | `dsh-watcher@0.6.1` | `>=0.1.7-rc.1 <0.1.8`（该补丁上轮已移除，等上游 0.7.0） |
 | ✅ | `@omdp/dsh-vision-bridge` | 零 peer |
 | ✅ | `dsh-preset-craft-bot` | 零 peer |
@@ -900,11 +927,16 @@ key-fallback `3.3.2` **全部 ✅ 放行**。
    （connector `0.3.7→0.3.8`、archived-sessions `0.3.8→0.3.9`、key-fallback `3.3.1→3.3.2`；
    key-fallback 要同步四条：dsh / credentials / llm / settings），发版并抬高 desktop profile 钉版。
    ⚠️ 不采用「枚举追加 `|| 0.2.0-rc.2`」——那只是把下一次 rc 的故障推迟，本轮已是第三次。
-2. **两个失效补丁**：内容改为 `>=0.2.0-rc.1 <0.2.1-0`（一劳永逸覆盖同三元组后续 rc）。
-   ⚠️ **上界必须带 `-0`**：写 `<0.2.1` 会漏放行 `0.2.1-rc.1`
-   （`satisfies("0.2.1-rc.1", ">=0.2.0-rc.1 <0.2.1")` 实测为 **true**）。
-3. `dsh-watcher`：等上游 `0.7.0`（已原生声明 `>=0.2.0-rc.1 <0.2.1`）后抬钉版即可，无需补丁。
-4. `dsh-cost-meter` / `dshmarket` / `vision-bridge` / `craft-bot`：**无需动作**。
+2. ~~**两个失效补丁**：内容改为 `>=0.2.0-rc.1 <0.2.1-0`~~
+   🔴 **此路已否**（2026-09-30 复查）：上游发了新版就该**抬钉版 + 删补丁条目**，而不是抢救补丁。
+   `browser-skill-dsh-plugin@0.3.2` 已原生声明，正解是删补丁（见上文 range key 小节：
+   补丁挂越久越容易反噬，删时还要连 lockfile 一起清）。
+   （`-0` 上界规则本身仍成立：写 `<0.2.1` 会漏放行 `0.2.1-rc.1`，
+   `satisfies("0.2.1-rc.1", ">=0.2.0-rc.1 <0.2.1")` 实测为 **true**。）
+3. `dsh-watcher`：等上游 `0.7.0`（已原生声明 `>=0.2.0-rc.1 <0.2.1`）后抬钉版即可，无需补丁。**已照此办理**。
+4. `dsh-cost-meter` / `dshmarket` / `vision-bridge` / `craft-bot`：**声明本身无需动作**。
+   ⚠️ 但 `dsh-cost-meter` 仍需**抬钉版**（`^1.7.45 → ^1.7.46`）——不是为了它自己，
+   而是档里只要还留着坏掉的 `browser-skill@0.3.1`，**任何**依赖更新都会被「装后门禁」一并驳回。
 
 ### 处理结果（2026-09-30）
 
@@ -917,8 +949,20 @@ key-fallback `3.3.2` **全部 ✅ 放行**。
 | `@omdp/dsh-key-fallback` | `3.3.2` | 四条 dsh peer 均为 `>=0.2.0-rc.1 <0.2.1-0` |
 
 `@omdp/dsh-vision-bridge` 无 dsh peer ⇒ 不受门禁影响，无需改动。
+
 三个第三方插件（`dsh-client-auto-continue` / `dsh-watcher` / `browser-skill-dsh-plugin`）
-由用户自行处理（补丁方案见下文「第三方插件」节）。
+**最终处置（同日二次复查）**：全部改为「抬钉版 + 删补丁」，不再挂任何补丁。
+
+| 插件 | 实盘钉版 | 补丁 | 结果 |
+|---|---|---|---|
+| `@wxg-prc-cpg/browser-skill-dsh-plugin` | `^0.3.1` → **`^0.3.2`** | **已删**（`patches-removed/`） | ✅ 0.3.2 原生声明 `^0.1.5-rc.3 \|\| ^0.2.0-rc.1` |
+| `dsh-cost-meter` | `^1.7.45` → **`^1.7.46`** | 无 | ✅ 连带受害者，抬钉版即愈 |
+| `dsh-watcher` | `github:…#main` | 条目早已移除 | ✅ 解析到 0.7.0，原生声明 |
+| `dsh-client-auto-continue` | **已卸载** | 无 | 若恢复须用 `0.12.1`（唯一双通过版本） |
+
+⇒ **本机 desktop profile 已不再有任何 `patchedDependencies` 条目**
+（`pnpm-workspace.yaml` 只剩说明性注释，`pnpm-lock.yaml` 中
+`patch_hash` / `patchedDependencies` 均 0 命中），门禁异常项 0。
 
 ### 可复用要点
 
@@ -928,6 +972,13 @@ key-fallback `3.3.2` **全部 ✅ 放行**。
    本仓库自 2026-09-30 起统一改用三元组区间（`AGENTS.md` 规范 3），上界必须带 `-0`。
 3. **每次升 DSH 都要复查 pnpm patch 的内容**，不只是它是否还在。
 4. **优先等上游原生修复**（范围声明），补丁只作临时手段。
+   🔴 **上游一发新版就「抬钉版 + 删补丁」，别挂**：补丁挂在档里会导致
+   **与之无关的插件也更新失败**（`pnpm add` 是整档操作 + 装后门禁扫全档）。
+   本次 `browser-skill` 0.3.1→0.3.2 撞 `ERR_PNPM_PATCH_FAILED`（range key 把旧补丁套到新版本）
+   把 `dsh-cost-meter` 一起拖死，**症状完全不像同一个原因**。
+   删条目后**必须**让 pnpm 重写 lockfile，否则冻结安装报 `LOCKFILE_CONFIG_MISMATCH`
+   （而 manager 的修复路径与 dshmarket 都走冻结语义）。详见
+   `notes/2026-09-30/dsh-compat/range-key补丁反噬-升级先删补丁再清lockfile.md`。
 5. **`dsh-client-runtime` 这个包不存在**，别在依赖里引用它。
 6. 自检仍用**隔离 `DSH_HOME` 的副本 profile**（`desktop` 是保留名，rc.2 起 npm CLI
    连 plugin-management 都拒绝）。
