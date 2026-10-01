@@ -102,20 +102,21 @@ A zero-dependency plugin that gives **text-only models** vision: it auto-detects
 "dependencies": { "@omdp/dsh-vision-bridge": "^0.1.12" }
 ```
 
-#### `@omdp/dsh-archived-sessions` — archived-session manager (`v0.3.9`)
+#### `@omdp/dsh-archived-sessions` — archived-session manager (`v0.3.10`)
 
 Fork of [`@muwinds/dsh-archived-sessions`](https://github.com/MuWinds/dsh-archived-sessions) 0.2.0, adapted for **DSH 0.2.0-rc.1 / 0.2.0-rc.2** (since 0.3.9 via the triple range; the earlier **0.1.5-rc.1 → 0.1.7-rc.2** line was supported through 0.3.8 but is no longer declared) — upstream is unmaintained and broken on 0.1.5+ (`sessionPersistence.list()` returns snapshots, `locate()` was removed). Adds **Settings → 归档会话管理**, coexisting with the native archived-sessions page introduced in DSH 0.1.6:
 
 - List archived sessions with title / ID / workspace / disk usage / running state;
 - **Release** (释放): move a session out of the archive set (no data deleted);
-- **Delete** (删除): delete the session directory + prune the archive id (two-step confirm);
+- **Delete** (删除): delete the session directory + **broadcast `api-session/removed`** + prune the archive id + release the workspace accounting slot (two-step confirm);
 - **Tree delete**: deleting a main session also deletes its `parentSession` subtree (fixes upstream issue #2 — orphan subagents);
-- **Orphan sweep**: scan and clean leftover subagent dirs whose parent session is already gone;
+- **Orphan sweep**: scan and clean leftover subagent dirs whose parent session is already gone (same 4-step teardown as Delete since 0.3.10);
 - Deletion safety: refuses to delete any path whose directory name is not a session dir (`session-<uuid>` or bare UUID); deletion is **dual-era** since 0.3.6 — it prefers `ctx.shell.resolve()` → `execute()` → `await result()` on DSH 0.1.7+, and falls back to `resolve()` → `run()` on ≤0.1.6, so one build deletes across the whole line. (0.3.5 only called `execute()` — which fixed 0.1.7 but silently broke rc.x, where `run()` is the only method; 0.3.4 had the mirror-image bug. Verified by unpacking each `@deepseek-ai/dsh-shell` tarball's `lib/types/index.d.ts`.)
+- **0.3.10 — deleted archived sessions reappeared in the chat list**: archiving is only a **visibility mask** in DSH (it never filters the host list; `dsh-session-query` has zero `archiv*` references), so the client row survives in `manager.summaries` and merely gets *hidden*. The old code only removed the archive id — lifting the mask made the surviving row visible again (and clicking it failed with `session/not-found`), because the only removal notice it ever emitted came incidentally from `entry.detach()`'s `session/disposed → api-session/removed`, which **only fires for a live session**. 0.3.10 emits `api-session/removed` explicitly on every delete path (wrapped in try/catch — cordis `emit` is synchronous and uncontained, so a throwing third-party listener must not abort a completed delete), releases the workspace `sessionIds` accounting slot via `entity.detachSession()` (DSH keeps archived ids accounted **by design**, and never forgets them), and stops ignoring `location.found === false` (the old code `rm -rf`'d a guessed path, which always failed and left the archive id stuck forever). Client side: the component never received `ctx` (it read free variables and swallowed the `ReferenceError` in a silent `try/catch`), so its refresh was **dead code**. Verified with an A/B run on a scratch `DSH_HOME` against a **non-live** archived session: old = **0** removal events + accounting leaked; new = **1** event + accounting released.
 - Declared DSH support (0.3.6), then **switched to a triple range in 0.3.9** — the `@deepseek-ai/dsh` peer is now `>=0.2.0-rc.1 <0.2.1-0`, so `0.2.0-rc.2` / later rc builds / the stable `0.2.0` all pass without a republish. Earlier: (0.3.7) rc.2 added to the enumeration — zero code changes, verified by the byte-identical `dsh-shell` diff and a live end-to-end delete test on a scratch `dsh@0.1.7-rc.2` profile; (0.3.8) **0.2.0-rc.1** added — verified by a full `lib/` SHA1 diff (`dsh-shell` byte-identical; `dsh-session`'s changes additive-only, new `ToolCallRecovery` exports, no removals), gate execution on 0.2.0-rc.1, and a live sandbox assembly. ⚠️ The `0.1.7` line is no longer declared as of 0.3.9 — install **0.3.8** if you need it there.
 
 ```jsonc
-"dependencies": { "@omdp/dsh-archived-sessions": "^0.3.9" }
+"dependencies": { "@omdp/dsh-archived-sessions": "^0.3.10" }
 ```
 
 ### Installing from npm (recommended)
@@ -128,7 +129,7 @@ All four plugins are published to **npm** automatically by GitHub Actions on eve
   "@omdp/dsh-connector": "^0.3.8",
   "@omdp/dsh-vision-bridge": "^0.1.12",
   "@omdp/dsh-key-fallback": "^3.3.2",
-  "@omdp/dsh-archived-sessions": "^0.3.9"
+  "@omdp/dsh-archived-sessions": "^0.3.10"
 }
 ```
 
@@ -312,20 +313,21 @@ omdp/
 "dependencies": { "@omdp/dsh-vision-bridge": "^0.1.12" }
 ```
 
-#### `@omdp/dsh-archived-sessions` — 归档会话管理（`v0.3.9`）
+#### `@omdp/dsh-archived-sessions` — 归档会话管理（`v0.3.10`）
 
 fork 自 [`@muwinds/dsh-archived-sessions`](https://github.com/MuWinds/dsh-archived-sessions) 0.2.0，适配 **DSH 0.2.0-rc.1 / 0.2.0-rc.2**（0.3.9 起用三元组区间声明；更早的 **0.1.5-rc.1 → 0.1.7-rc.2** 线支持到 0.3.8，现已不再声明）（上游已不维护，且在 0.1.5+ 下损坏：`sessionPersistence.list()` 返回快照、`locate()` 被移除）。新增 **设置 → 归档会话管理**，与 DSH 0.1.6 起内置的原生「已归档会话」页共存：
 
 - 列表显示归档会话的标题 / ID / 工作区 / 磁盘占用 / 运行状态；
 - **释放**：把会话移出归档集合（不删数据）；
-- **删除**：删会话目录 + 移除归档标记（两步确认）；
+- **删除**：删会话目录 + **广播 `api-session/removed`** + 移除归档标记 + 释放工作区记账槽（两步确认）；
 - **按树删除**：删主会话时连同其 `parentSession` 子树一起删（修复上游 issue #2——孤儿子代理）；
-- **孤儿清理**：扫描并清理「父会话已删除、自己还在盘上」的残留子会话目录；
+- **孤儿清理**：扫描并清理「父会话已删除、自己还在盘上」的残留子会话目录（自 0.3.10 起与删除走同一套四步收尾）；
 - 删除安全：目录名不是会话目录（`session-<uuid>` 或裸 UUID）一律拒绝删除；删除自 0.3.6 起**双时代自适应**——DSH 0.1.7+ 走 `ctx.shell.resolve()` → `execute()` → `await result()`，`≤0.1.6` 回退 `resolve()` → `run()`，一份构建覆盖整条版本线。（0.3.5 只调 `execute()`：修好了 0.1.7 却让 rc.x **静默失效**——那里只有 `run()`；0.3.4 则恰好相反。依据：逐版解包 `@deepseek-ai/dsh-shell` 的 `lib/types/index.d.ts`。）
+- **0.3.10——「删掉的归档会话又回到对话列表」**：归档在 DSH 里**只是可见性遮罩**（从不参与列表过滤，`dsh-session-query` 全库 0 处 `archiv*`），客户端行一直留在 `manager.summaries` 里、**只是被遮住**。旧代码删除时只摘归档 id——遮罩一撤，幸存的行立刻重新可见（点进去报 `session/not-found`）；它唯一的客户端通知来自 `entry.detach()` 顺带触发的 `session/disposed → api-session/removed`，而这条链**只在会话仍 live 时存在**。0.3.10 在每条删除路径上**显式**广播 `api-session/removed`（包 try/catch——cordis 的 `emit` 同步且不隔离，第三方监听器抛错不能把已完成的删除变成报错），并经 `entity.detachSession()` 释放工作区 `sessionIds` 记账（DSH **故意**保留归档会话的记账，且从不遗忘），同时不再忽略 `location.found === false`（旧代码拿猜测路径去 `rm -rf`，必然失败且让归档 id 永久卡住）。客户端侧：组件原本拿不到 `ctx`（读的是自由变量，`ReferenceError` 被静默 `try/catch` 吞掉），刷新逻辑一直是**死代码**。验证方式是在 scratch `DSH_HOME` 上对**非 live 的归档会话**做 A/B：旧代码 **0** 个移除事件 + 记账泄漏；新代码 **1** 个事件 + 记账已释放。
 - 声明 DSH 版本支持（0.3.6），**0.3.9 起改用三元组区间**——`@deepseek-ai/dsh` peer 现为 `>=0.2.0-rc.1 <0.2.1-0`，`0.2.0-rc.2` / 后续同三元组 rc / 正式版 `0.2.0` 都不必重发包即可通过。（0.3.7）追加 `0.1.7-rc.2`——代码零改动，依据 `dsh-shell` 逐字节零变化 diff + scratch `dsh@0.1.7-rc.2` profile **真机删除全链路实测**；（0.3.8）追加 `0.2.0-rc.1`——依据全量 `lib/` SHA1 diff（`dsh-shell` 逐字节一致；`dsh-session` 的 5 个变化文件为**附加式**新增 `ToolCallRecovery` 等导出、既有导出零删除）+ 0.2.0-rc.1 门禁放行 + 沙箱真机装配入树。⚠️ `0.1.7` 线自 0.3.9 起不再声明，需要它请装 **0.3.8**。
 
 ```jsonc
-"dependencies": { "@omdp/dsh-archived-sessions": "^0.3.9" }
+"dependencies": { "@omdp/dsh-archived-sessions": "^0.3.10" }
 ```
 
 ### 从 npm 安装（推荐）
@@ -338,7 +340,7 @@ fork 自 [`@muwinds/dsh-archived-sessions`](https://github.com/MuWinds/dsh-archi
   "@omdp/dsh-connector": "^0.3.8",
   "@omdp/dsh-vision-bridge": "^0.1.12",
   "@omdp/dsh-key-fallback": "^3.3.2",
-  "@omdp/dsh-archived-sessions": "^0.3.9"
+  "@omdp/dsh-archived-sessions": "^0.3.10"
 }
 ```
 

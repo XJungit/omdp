@@ -16,9 +16,9 @@ DSH 的会话可以归档（移到「归档云店」），本插件在设置页�
 
 - **列表**：标题、会话 ID、所属工作区、磁盘占用、创建时间、是否运行中；
 - **释放**：把会话从归档集合移回活动列表（不删数据）；
-- **删除**：从硬盘删除会话目录 + 从归档集合移除（两步确认）；
+- **删除**：从硬盘删除会话目录 + **广播 `api-session/removed`（让对话列表立刻移除该行）** + 从归档集合移除 + 释放工作区记账（两步确认）；
 - **按树删除**：删除主会话时，其下的 subagent 子会话（`parentSession` 链）一并删除，不再留孤儿（修复上游 issue #2）；
-- **孤儿清理**：一键扫描并清理「父会话已删除、自己还在盘上」的残留子会话目录；
+- **孤儿清理**：一键扫描并清理「父会话已删除、自己还在盘上」的残留子会话目录（自 0.3.10 起与删除共用同一套收尾，不再只删目录）；
 - **详情**：展开查看会话内容（前 100 条消息）。
 
 ### 为什么有这个 fork
@@ -331,12 +331,44 @@ archive set emptied + `list` returning `{items:[]}` (the test session was restor
 | --- | --- | --- |
 | `POST /dsh-archived/list` | `{}` | `{ items, totalBytes }` |
 | `POST /dsh-archived/unarchive` | `{ sessionId }` | `{ ok, changed, archivedSessionIds }` |
-| `POST /dsh-archived/delete` | `{ sessionId }` | `{ ok, deleted, sessionId, alsoDeleted[], reason? }` |
+| `POST /dsh-archived/delete` | `{ sessionId }` | `{ ok, deleted, sessionId, alsoDeleted[], sizeBytes, warnings[]?, reason? }` |
 | `POST /dsh-archived/detail` | `{ sessionId }` | `{ id, createdAt, cwd, parentSession, totalEvents, messageCount, truncated, messages }` |
 | `POST /dsh-archived/orphans` | `{}` | `{ items, totalBytes }` |
-| `POST /dsh-archived/sweep` | `{}` | `{ removed, freedBytes, items }` |
+| `POST /dsh-archived/sweep` | `{}` | `{ removed, freedBytes, items, warnings[]? }` |
+
+After a successful delete (or sweep) the host broadcasts `api-session/removed`, so DSH's own session
+list drops the row **immediately**; it also releases the archive-set entry and the workspace
+`sessionIds` accounting slot, and deletes the directory from disk. If a cleanup sub-step fails the
+delete itself still completes — the reason is reported in `warnings[]` (so a disk deletion is never
+misreported as a failure).
 
 ### Changelog
+
+- **0.3.10** (2026-10-01): **fixes "deleted archived sessions reappear in the chat list"** (clicking one produced `session "…" not found (session/not-found)`; a restart was the only cure).
+
+  Root cause — a **stale client-side row**, not a host-side delete failure. In DSH archiving is only a **visibility mask**: it never filters the host list (`dsh-session-query` has **zero** `archiv*` matches; the `ArchivedSessionGate` merely rejects on `agent/pre-step`). The client row lives on in `manager.summaries` and is **only hidden** by the archive set. The old delete path merely removed the id from `archivedSessionIds` — lifting the mask made the surviving row visible again, which the user sees as "the archived session came back". Its **only** client-side notification was the incidental `session/disposed → api-session/removed` triggered by `entry.detach()`, and that chain **exists only while the session is still live**; an archived, unopened session usually is not ⇒ **no event at all**, and the row survived until restart.
+
+  Fixes — host (`lib/index.js`):
+  1. **`announceSessionRemoved()`**: every successful delete path now emits `api-session/removed` explicitly — the same pattern DSH itself uses on `session/disposed`. The event is on `dsh-api-remotes`' `API_REMOTE_FORWARDED_EVENTS` allowlist, so the client's `handleSessionRemoved` → `recordMutation({kind:'remove'})` actually drops the row. Because cordis `emit` is **synchronous and uncontained** (one throwing listener would abort the rest), the emit is wrapped in try/catch and a throw degrades to `warnings[]` — it can never roll back a completed delete.
+  2. All four delete branches (no header / no path / `found:false` / disk removal succeeded) funnel through `finishRemoval()`, so **archive set + workspace accounting + memory residency + client notice** are never partially applied.
+  3. **Stopped ignoring `location.found`**: `resolveSessionLocation` returns a *guessed* `path` even when no root matched (`found:false`). The old code checked only that `path` was non-empty, so it `rm -rf`'d a non-existent path — always failing, reporting "删除失败", and leaving the archive id stuck forever.
+  4. **`pruneWorkspaceAccounting()`**: `dsh-workspace` documents that archiving **deliberately** leaves `sessionIds` accounting alone ("Archiving never touches workspace accounting"), so a delete must release it itself — otherwise the registry accounts forever for an id whose directory is gone and whose header can no longer be read (`bootstrap` simply `continue`s over ids missing from `sessionPaths`, so only hand-editing `workspace.json` could clear it). It goes through `registry.list()` → `entity.detachSession()`, the **race-free** official path: membership is decided inside the domain write chain, a no-op is aborted by an internal sentinel (no write, no change event), and `sessionIds` is re-filtered by the canonical-cwd header index — exactly the uniqueness `validateStoredState` requires.
+  5. `sweep` funnels through the same teardown: it used to delete directories while **never** clearing the archive set and **never** notifying clients, manufacturing the very same ghost row.
+
+  Fixes — client (`lib/client.js`): `ArchivedSessionsPage()` originally took **no parameters**, so the `ctx.workspaces` / `ctx.sessions` / `ctx.timer` it referenced were **free variables** ⇒ `ReferenceError`, swallowed by a silent `try/catch` with the promise discarded. Its `refreshViews()` therefore **never ran**, and neither did the 5-second confirm auto-cancel. `apply()` now passes `ctx` into the component through slot props (matching how DSH's own client plugins inject `t` / `renderSlot` via props); `refreshViews()` genuinely **awaits** `ctx.sessions.refresh()` and `console.warn`s on failure instead of swallowing it; and the client-side call to the **non-existent** `ctx.workspaces.refresh()` is gone. It complements the host event: `refreshList()`'s `mergeOrderedBaseline` **drops ids absent from the baseline**, and mutations recorded during a pull are replayed afterwards, so the backstop can never resurrect a deleted row.
+
+  Also: `package.json`'s `dsh.client.inject` no longer lists `@deepseek-ai/dsh-client-runtime` — **that package does not exist in DSH** (no such directory among the 289 `@deepseek-ai/*` packages; only `dsh-invariants`' README mentions the name in prose). Per the official docs the field is only activation-order/prefetch metadata and does not participate in cordis injection, so keeping an unresolvable name only misleads.
+
+  Verification (scratch isolated `DSH_HOME`, real `dsh scratchweb`, **non-live** archived session = the reported case):
+
+  | | old 0.3.9 | new 0.3.10 |
+  |---|---|---|
+  | `api-session/removed` sent to clients | **0** (row survives = the bug) | **1** |
+  | archive set | cleared | cleared |
+  | workspace accounting (re-read from `workspace.json`) | **still accounts the deleted id** | **released** |
+  | directory on disk | deleted | deleted |
+
+  The two client-side mechanisms were also checked against the real `mergeOrderedBaseline`: both the `remove` event and the awaited refresh drop the row, and a `remove` arriving during an in-flight pull is **not** undone by the baseline.
 
 - **0.3.9** (2026-09-30): **peer declaration switched to the triple range `>=0.2.0-rc.1 <0.2.1-0`** (zero code changes). Background: after `0.2.0-rc.2` shipped, the gate blocked 0.3.8 the same way it had blocked 0.3.7 on `0.2.0-rc.1` — the **third consecutive round** of the same failure (settings item gone, `POST /dsh-archived/list` → 405). The root cause was never incompatibility but per-version enumeration going stale on every rc. Verification: full 20-package file-by-file SHA256 diff `0.2.0-rc.1 → rc.2` — `dsh-shell` / `dsh-session` / `dsh-session-persistence-jsonl` / `dsh-session-query` / `dsh-workspace` are all **byte-identical** (only `package.json` version strings changed); the real gate over the full matrix gives `0.2.0-rc.1` / `rc.2` / `rc.3` / `rc.9` / stable `0.2.0` all **PASS** and `0.2.1-rc.1` / `0.3.0-rc.1` all **BLOCK**. ⚠️ **This narrows support**: the `0.1.7` line is **no longer declared** — install **0.3.8** if you need it there.
 

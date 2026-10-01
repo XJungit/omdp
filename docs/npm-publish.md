@@ -1,7 +1,8 @@
 # 发布到 npm（GitHub Actions 自动发包）
 
 本仓库的活动插件（`@omdp/dsh-connector`、`@omdp/dsh-vision-bridge`、
-`@omdp/dsh-key-fallback`）通过 **GitHub Actions 在 push tag 时自动发布到 npm**。
+`@omdp/dsh-key-fallback`、`@omdp/dsh-archived-sessions`）通过 **GitHub Actions 在 push tag
+时自动发布到 npm**。
 `@omdp/dsh-gitbash-win` 与 `@omdp/dsh-resume-stream` 已归档，不再由本仓库维护或发布。
 本机不需要 npm 登录。
 
@@ -192,3 +193,19 @@ pnpm install
   `E409 Cannot publish over previously staged version`），但在审核/处理完成前
   `npm view <pkg>@<ver>` 仍可能 404。所以**上传成功 ≠ 立刻可安装**，查不到时先等几分钟
   再重查，别急着重复发（重复发反而会被 409 拦下）。
+- 🔴 **`npm view` 会吃本地缓存，复核请直连 registry API**（2026-10-01 实测）：
+  `@omdp/dsh-archived-sessions@0.3.10` 已在 `08:38:44` 由 CI 成功发布（日志有
+  `+ @omdp/dsh-archived-sessions@0.3.10` + 签名 provenance），且 registry 记录的
+  `time["0.3.10"] = 08:41:54`；但本地 `npm view '@omdp/dsh-archived-sessions@0.3.10' version`
+  **连续 8 次（约 3 分钟）仍报 E404**，因为 `npm view` 读的是本地 packument 缓存。
+  直连 API 立刻拿到正确结果：
+
+  ```sh
+  curl -s https://registry.npmjs.org/@omdp%2Fdsh-archived-sessions \
+    | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const j=JSON.parse(s);console.log(j['dist-tags'],Object.keys(j.versions))})"
+  ```
+
+  注意名称里的 `/` 要编码成 `%2F`；`/pkg/version` 路径对 scoped 包**不能**直接拼。
+  **结论：复核以 registry API 为准**（`npm view` 只作辅助，遇到 404 先怀疑缓存）。
+  另外 registry 返回的 `dist.integrity` 可与本地 `npm pack` 产物比对，用于确认发出的
+  确实是你验证过的那份 tarball。
