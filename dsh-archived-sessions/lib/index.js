@@ -209,6 +209,97 @@ async function removeFromArchiveSet(ctx, sessionId) {
   return true;
 }
 
+/**
+ * Tell every connected client that one session id is gone.
+ *
+ * The archive set is a *visibility* layer, not a list filter: the Client keeps a
+ * row in `manager.summaries` until `api-session/removed` arrives, and archiving
+ * only hides rows through `sessionVisible()`. Pruning `archivedSessionIds` alone
+ * therefore *un-hides* stale rows, which is the "deleted archived conversations
+ * come back" report. DSH's own controller emits exactly this event on
+ * `session/disposed` (dsh-api-session-controller lib/index.js), and
+ * `api-session/removed` is on the forwarded-Host-event allowlist
+ * (dsh-api-remotes lib/types/remote-events.js), so emitting it here reaches the
+ * Client's `handleSessionRemoved` → `recordMutation({ kind: 'remove' })`.
+ *
+ * Only fired after the id is durably gone, never before: a premature emit would
+ * drop a row the Host still lists, and the next baseline pull would restore it.
+ *
+ * `ctx.emit` is synchronous and uncontained in Cordis, so one throwing listener
+ * must not abort the sweep that follows; the delete itself has already
+ * succeeded by this point. Mirror Cordis' own `emitPluginDisposed` containment.
+ */
+function announceSessionRemoved(ctx, sessionId, warnings) {
+  try {
+    ctx.emit("api-session/removed", sessionId);
+    return;
+  } catch (e) {
+    const detail = String((e && e.message) || e);
+    if (Array.isArray(warnings)) warnings.push("removal notice for '" + sessionId + "' failed: " + detail);
+  }
+}
+
+/**
+ * Release the workspace `sessionIds` accounting slot for one deleted id.
+ *
+ * `dsh-workspace` deliberately keeps that slot when archiving — "Archiving never
+ * touches workspace accounting — an archived session keeps its `sessionIds` slot
+ * so unarchiving restores its position" (dsh-workspace lib/index.js). So a
+ * *delete* has to release it, or the registry keeps accounting an id whose
+ * artifact is gone and whose header can never be read again: `bootstrap` skips
+ * ids missing from the `sessionPaths` index, so the entry becomes permanent
+ * dead weight that only a manual `workspace.json` edit can clear.
+ *
+ * `entity.detachSession` is the supported race-free path: it decides membership
+ * on the domain write chain and aborts the slot through an internal sentinel
+ * when nothing changed, so a no-op neither rewrites the medium nor emits a
+ * change. It also re-filters `sessionIds` by the canonical-cwd header index,
+ * which is exactly the consistency `validateStoredState` requires (an id may not
+ * be accounted by two workspaces).
+ *
+ * The public `sessionIds` getter filters by that same index, so an id whose
+ * header is already unreadable can be invisible there while still sitting in the
+ * durable record; when the getter does not list it we consult the raw record so
+ * a delete does not leave precisely the leak this helper exists to prevent.
+ */
+async function pruneWorkspaceAccounting(ctx, sessionId, warnings) {
+  const registry = ctx.get("workspaceRegistry");
+  if (!registry || typeof registry.list !== "function") return 0;
+  let entities;
+  try {
+    entities = registry.list();
+  } catch (e) {
+    if (Array.isArray(warnings)) {
+      warnings.push("workspace accounting lookup for '" + sessionId + "' failed: " + String((e && e.message) || e));
+    }
+    return 0;
+  }
+  if (!Array.isArray(entities)) return 0;
+  let pruned = 0;
+  for (const entity of entities) {
+    if (!entity || typeof entity.detachSession !== "function") continue;
+    let accounted = false;
+    try {
+      accounted = Array.isArray(entity.sessionIds) && entity.sessionIds.includes(sessionId);
+    } catch (e) {
+      accounted = false;
+    }
+    if (!accounted) {
+      const raw = entity.record && Array.isArray(entity.record.sessionIds) ? entity.record.sessionIds : null;
+      if (!raw || !raw.includes(sessionId)) continue;
+    }
+    try {
+      await entity.detachSession(sessionId);
+      pruned++;
+    } catch (e) {
+      if (Array.isArray(warnings)) {
+        warnings.push("workspace accounting prune for '" + sessionId + "' failed: " + String((e && e.message) || e));
+      }
+    }
+  }
+  return pruned;
+}
+
 /** A session is deletable unless its agent is actively running a turn. */
 function sessionRunning(ctx, sessionId) {
   const agents = ctx.get("agents");
@@ -525,46 +616,56 @@ async function handleDelete(ctx, args) {
 
   const deletedIds = [];
   const failedIds = [];
-  for (const id of [sessionId, ...subtree]) {
-    const header = headers.get(id);
-    if (!header) {
-      // Already gone from persistence: just prune the archive id.
-      if (registry.archivedSessionIds.includes(id)) {
-        await removeFromArchiveSet(ctx, id);
-      }
-      deletedIds.push(id);
-      continue;
-    }
-    let location = null;
-    try {
-      location = await resolveSessionLocation(ctx, header);
-    } catch (e) {
-      location = null;
-    }
-    if (!location || typeof location.path !== "string" || location.path.length === 0) {
-      if (registry.archivedSessionIds.includes(id)) {
-        await removeFromArchiveSet(ctx, id);
-      }
-      deletedIds.push(id);
-      continue;
-    }
-    const dirPath = location.path;
-    const fsSvc = ctx.get("fs");
-    let sizeBytes = 0;
-    if (fsSvc) {
-      const size = await dirSizeBytes(fsSvc, dirPath, 0);
-      sizeBytes = size === null ? 0 : size;
-    }
-    try {
-      await removeDir(ctx, dirPath);
-    } catch (e) {
-      failedIds.push(id);
-      continue;
-    }
+  const warnings = [];
+  let sizeBytes = 0;
+
+  /**
+   * Finish one id's removal: archive entry, workspace accounting, resident
+   * instance, and the Client row. Every terminal branch funnels through here so
+   * no path can leave one of the four behind.
+   */
+  const finishRemoval = async (id) => {
     if (registry.archivedSessionIds.includes(id)) {
       await removeFromArchiveSet(ctx, id);
     }
+    await pruneWorkspaceAccounting(ctx, id, warnings);
+    evictSessionFromMemory(ctx, id);
+    announceSessionRemoved(ctx, id, warnings);
     deletedIds.push(id);
+  };
+
+  for (const id of [sessionId, ...subtree]) {
+    const header = headers.get(id);
+    let dirPath = null;
+    if (header) {
+      let location = null;
+      try {
+        location = await resolveSessionLocation(ctx, header);
+      } catch (e) {
+        location = null;
+      }
+      if (location && typeof location.path === "string" && location.path.length > 0 && location.found !== false) {
+        dirPath = location.path;
+      }
+      // `found: false` (or no path) means no candidate root holds this session,
+      // so `path` is only a best-effort guess: trying to remove it would fail
+      // every time and strand the id in the archive set forever. Prune and
+      // notify instead — resolveSessionLocation documents that contract.
+    }
+    if (dirPath !== null) {
+      const fsSvc = ctx.get("fs");
+      if (fsSvc) {
+        const size = await dirSizeBytes(fsSvc, dirPath, 0);
+        if (size !== null) sizeBytes += size;
+      }
+      try {
+        await removeDir(ctx, dirPath);
+      } catch (e) {
+        failedIds.push(id);
+        continue;
+      }
+    }
+    await finishRemoval(id);
   }
 
   if (failedIds.length > 0) {
@@ -575,7 +676,8 @@ async function handleDelete(ctx, args) {
     deleted: deletedIds.includes(sessionId),
     sessionId,
     alsoDeleted: subtree.filter((id) => deletedIds.includes(id)),
-    sizeBytes: 0,
+    sizeBytes,
+    warnings: warnings.length > 0 ? warnings : undefined,
     reason: deletedIds.length === 0 ? "no-artifact" : undefined
   };
 }
@@ -698,7 +800,29 @@ async function handleOrphans(ctx) {
 async function handleSweep(ctx) {
   const { items } = await handleOrphans(ctx);
   const removed = [];
+  const warnings = [];
   let freedBytes = 0;
+
+  /**
+   * Release one swept id: archive entry, workspace accounting, resident
+   * instance, and the Client row. A sweep deletes artifacts exactly like a
+   * single delete does, so it must release exactly the same state — otherwise
+   * the swept session keeps a selectable row the Host can no longer serve.
+   */
+  const releaseSwept = async (id) => {
+    const registry = ctx.get("workspaceRegistry");
+    if (registry && Array.isArray(registry.archivedSessionIds) && registry.archivedSessionIds.includes(id)) {
+      try {
+        await removeFromArchiveSet(ctx, id);
+      } catch (e) {
+        warnings.push("archive prune for '" + id + "' failed: " + String((e && e.message) || e));
+      }
+    }
+    await pruneWorkspaceAccounting(ctx, id, warnings);
+    evictSessionFromMemory(ctx, id);
+    announceSessionRemoved(ctx, id, warnings);
+  };
+
   for (const item of items) {
     const persistence = ctx.get("sessionPersistence");
     const snapshots = await persistence.list();
@@ -717,17 +841,23 @@ async function handleSweep(ctx) {
     } catch (e) {
       location = null;
     }
-    if (!location || typeof location.path !== "string" || location.path.length === 0) continue;
-    const dirPath = location.path;
+    const usable = location && typeof location.path === "string" && location.path.length > 0 && location.found !== false;
+    if (!usable) {
+      // Nothing on disk to remove (no candidate root holds it): still release
+      // the stale references so the id cannot resurface as a selectable row.
+      await releaseSwept(item.id);
+      continue;
+    }
     try {
-      await removeDir(ctx, dirPath);
+      await removeDir(ctx, location.path);
     } catch (e) {
       continue;
     }
+    await releaseSwept(item.id);
     freedBytes += item.sizeBytes;
     removed.push(item.id);
   }
-  return { removed, freedBytes, items: removed.length };
+  return { removed, freedBytes, items: removed.length, warnings: warnings.length > 0 ? warnings : undefined };
 }
 
 // ---------- HTTP route ----------

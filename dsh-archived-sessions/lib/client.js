@@ -82,7 +82,21 @@ window.__ModuleLoader__.load({
     }
 
     // ---------- page component ----------
-    function ArchivedSessionsPage() {
+    /**
+     * 归档会话管理页。
+     *
+     * 关键约束：`window.__ModuleLoader__` 的 `factory(require)` **只注入 `require`**，
+     * 不注入 `ctx`（见 dsh-client-modules 的注册/物化路径与官方模板
+     * templates/decoration/client.js）。因此组件内部**不能**直接引用 `ctx`：
+     * 组件不在 `apply(ctx)` 的作用域里，写 `ctx.sessions.refresh()` 会抛
+     * ReferenceError，若再被 try/catch 吞掉就是彻底的死代码（历史 bug：刷新
+     * 从未发生）。
+     *
+     * 传参方式与 DSH 自带客户端插件一致——由 `apply` 通过 props 把上下文交给
+     * 组件（对比 dsh-client-ui-settings-plugins 的 `t` / `renderSlot` / `useTabs`）。
+     */
+    function ArchivedSessionsPage(props) {
+      var ctx = props && props.ctx ? props.ctx : null;
       var _useState = react.useState(true);
       var loading = _useState[0];
       var setLoading = _useState[1];
@@ -166,28 +180,43 @@ window.__ModuleLoader__.load({
         load();
       }, []);
 
+      /**
+       * 删除/归档动作后，让 DSH 界面自己的会话列表重新对齐 Host。
+       *
+       * 历史 bug：这里原本调 `ctx.workspaces.refresh()`（客户端 workspace 服务上
+       * **没有** 这个方法）并把 `ctx.sessions.refresh()` 塞进静默 try/catch、
+       * 拿到 promise 就丢掉。两者叠加的效果是「刷新从未真正发生」，于是删除归档
+       * 会话后，列表行仍留在 `manager.summaries` 里——看起来就是「删掉的归档对话
+       * 又回来了」，点进去还会报 `session/not-found`（Host 端已经没有该会话）。
+       *
+       * 正确的收尾由 Host 侧负责发 `api-session/removed`（见 lib/index.js 的
+       * announceSessionRemoved）；这里再做一次全量 baseline 对齐作为兜底：
+       * `mergeOrderedBaseline` 会丢弃 baseline 中不存在的 id，因此必须 **await**
+       * 才有意义，也必须在失败时把错误浮到界面上，而不是咽掉。
+       */
       function refreshViews() {
+        // 始终返回 promise：调用方（sweepOrphans / runBatch）直接调用它，
+        // 若同步抛错会变成未处理的 rejection。
+        var warn = function (err) {
+          // 兜底对齐失败不该让整个删除流程显示失败（Host 侧事件才是主路径），
+          // 但要留下可见痕迹，避免再次变成静默死代码。
+          try { console.warn("[archived-sessions] sessions.refresh() failed", err); } catch (e) {}
+          return null;
+        };
         try {
-          if (ctx.workspaces && typeof ctx.workspaces.refresh === "function") {
-            var p = ctx.workspaces.refresh();
-            if (p && typeof p.catch === "function") p.catch(function () {});
+          if (!ctx || !ctx.sessions || typeof ctx.sessions.refresh !== "function") {
+            return Promise.resolve(null);
           }
-        } catch (e) {
-          // ignore
-        }
-        try {
-          if (ctx.sessions && typeof ctx.sessions.refresh === "function") {
-            var p2 = ctx.sessions.refresh();
-            if (p2 && typeof p2.catch === "function") p2.catch(function () {});
-          }
-        } catch (e) {
-          // ignore
+          return Promise.resolve(ctx.sessions.refresh()).catch(warn);
+        } catch (err) {
+          return Promise.resolve(warn(err));
         }
       }
 
       function reloadAfterAction() {
-        refreshViews();
-        return api("list", {}).then(applyList);
+        return Promise.resolve(refreshViews())
+          .then(function () { return api("list", {}); })
+          .then(applyList);
       }
 
       // ---- orphan management ----
@@ -232,15 +261,15 @@ window.__ModuleLoader__.load({
       // Single-button two-step delete: 删除 -> 确认 (auto-reverts after 5s).
       function armDelete(id) {
         setConfirmId(id);
-        try {
-          if (ctx.timer && typeof ctx.timer.timeout === "function") {
-            ctx.timer.timeout(function () {
-              setConfirmId(function (cur) { return cur === id ? null : cur; });
-            }, 5000);
-          }
-        } catch (e) {
-          // timer unavailable; stay armed until the user acts
+        // ctx.timer.timeout 是客户端真实服务（ClientTimerService 经 ctx.mixin 暴露
+        // timeout/interval/throttle/debounce）；ctx 现在由 apply 传进来，不再是
+        // 组件内的自由变量。
+        if (ctx && ctx.timer && typeof ctx.timer.timeout === "function") {
+          ctx.timer.timeout(function () {
+            setConfirmId(function (cur) { return cur === id ? null : cur; });
+          }, 5000);
         }
+        // timer 不可用时保持 armed，由用户显式取消/确认。
       }
 
       function doDelete(id) {
@@ -575,7 +604,11 @@ window.__ModuleLoader__.load({
           // id "archived-sessions"（order 25）。同名注册会撞 slot 冲突、整页 Web boot
           // 报「Failed to load plugins」，故本插件用带前缀的 omdp- id 与原生项共存。
           { name: "settings.section", id: "omdp-archived-sessions", order: 30, label: function () { return "归档会话管理"; } },
-          function () { return react.createElement(ArchivedSessionsPage); }
+          // 把插件上下文交给页面组件（组件自身拿不到 ctx，见 ArchivedSessionsPage 注释）；
+          // slot 渲染时传入的 props 原样保留。
+          function (props) {
+            return react.createElement(ArchivedSessionsPage, Object.assign({}, props, { ctx: ctx }));
+          }
         );
       });
     }

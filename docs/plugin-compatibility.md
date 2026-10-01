@@ -359,7 +359,7 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 
 ---
 
-## 5. @omdp/dsh-archived-sessions（v0.3.9）【活跃插件】
+## 5. @omdp/dsh-archived-sessions（v0.3.10）【活跃插件】
 
 > fork 自 `@muwinds/dsh-archived-sessions` 0.2.0。上游在 DSH 0.1.5-rc.1 下损坏（见下方风险点），作者已一个月未维护，2026-09-10 决定 fork 并入 omdp。
 
@@ -427,7 +427,7 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 | dsh-connector | 0.3.8 | `yaml`（+ `jsdom` 懒加载；peer `schemastery` 仅 Config 声明用、`@deepseek-ai/dsh` 供版本门禁，**v0.3.8 起为三元组区间 `>=0.2.0-rc.1 <0.2.1-0`**） | `webServer`（`settings`/`tools.guard`/`systemPrompt`/`profileContext` 可选） | 顶层零第三方 static import + try/catch + 可选服务失败隔离 + **遗留 `toolFilters` 一次性救援** + **CRLF 解析容错** | `ctx.webServer` API 变化 / 内置模块子路径解析崩溃（`punycode/`，0.3.3 懒加载缓解）/ 0.1.7 配置迁移漏段（0.3.4 救援）/ 补丁文件换行被外部工具改成 CRLF（0.3.6） |
 | dsh-vision-bridge | 0.1.12 | 无 | `tools`/`attachments`/`llm`/`credentials` | 纯静态 + 零 @deepseek-ai + 防御性编码 | `ctx.llm` API 变化 / composer 输入层变化 / Agent 路由载荷变化（`requestHeader().config`） |
 | dsh-key-fallback | 3.3.2 | `schemastery`（仅 `Config` 声明用） | `credentials`/`llm`/`settings`（`webServer`/`slots` 可选） | ESM import + `agent/*` 事件 + **包装 `credentials.resolve` 切换 key（v3.0.0 起）** + **配置双后端自动判别** + **遗留池一次性救援** + **DSH peer 版本门禁（v3.3.2 起为三元组区间）** + 防御性编码 | `agent/request-error` 载荷 / `credentials.resolve` 签名 / `0.1.7` 配置迁移机制 / `webServer` API 变化 |
-| dsh-archived-sessions | 0.3.9 | 无（jsonl 后端可选 import + 内置编码 fallback） | `webServer`（`sessionPersistence`/`workspaceRegistry`/`sessionQuery`/`fs`/`shell` 可选） | 路径自解析（root 由 `DSH_HOME` 推导）+ 删除目录名校验 + **`ctx.shell` 双时代能力探测** + **DSH peer 版本门禁（v0.3.9 起为三元组区间）** + try/catch + 可选服务失败隔离 | `sessionPersistence` 路径布局 / `workspaceRegistry` 字段变化 / `ctx.shell` 抽象方法**改名**（0.3.6 双时代探测）/ 宿主同槽位撞 slot id（0.3.4 起用 `omdp-` 前缀免疫） |
+| dsh-archived-sessions | 0.3.10 | 无（jsonl 后端可选 import + 内置编码 fallback） | `webServer`（`sessionPersistence`/`workspaceRegistry`/`sessionQuery`/`fs`/`shell` 可选） | 路径自解析（root 由 `DSH_HOME` 推导）+ 删除目录名校验 + **`ctx.shell` 双时代能力探测** + **DSH peer 版本门禁（v0.3.9 起为三元组区间）** + try/catch + 可选服务失败隔离 + **删除后广播 `api-session/removed`（v0.3.10）** + **工作区记账释放（v0.3.10）** | `sessionPersistence` 路径布局 / `workspaceRegistry` 字段变化 / `ctx.shell` 抽象方法**改名**（0.3.6 双时代探测）/ 宿主同槽位撞 slot id（0.3.4 起用 `omdp-` 前缀免疫） |
 
 ## DSH 0.1.7 兼容性专项（2026-09-24）
 
@@ -945,7 +945,7 @@ key-fallback `3.3.2` **全部 ✅ 放行**。
 | 插件 | 新版本 | 新声明 |
 |---|---|---|
 | `@omdp/dsh-connector` | `0.3.8` | `>=0.2.0-rc.1 <0.2.1-0` |
-| `@omdp/dsh-archived-sessions` | `0.3.9` | `>=0.2.0-rc.1 <0.2.1-0` |
+| `@omdp/dsh-archived-sessions` | `0.3.10` | `>=0.2.0-rc.1 <0.2.1-0` |
 | `@omdp/dsh-key-fallback` | `3.3.2` | 四条 dsh peer 均为 `>=0.2.0-rc.1 <0.2.1-0` |
 
 `@omdp/dsh-vision-bridge` 无 dsh peer ⇒ 不受门禁影响，无需改动。
@@ -1032,3 +1032,48 @@ key-fallback `3.3.2` **全部 ✅ 放行**。
 ⚠️ 需**重启 DSH** 才会重新装配；重启前实测端点：connector `/connector/api/mcp` → 404、
 key-fallback `/dsh-key-fallback/pools` → 404、archived `POST /dsh-archived/list` → 405、
 vision `/vision-bridge/capabilities` → **200**（与"只有视觉插件和预设不异常"的现象完全吻合）。
+
+## archived-sessions 0.3.10（2026-10-01）：删除归档会话后行不消失
+
+**报告**：删除归档会话后，它们**又回到对话列表**且可选，点进去报
+`session "…" not found (session/not-found)`；重启 DSH 后才真正消失。
+
+**根因（客户端陈旧行，非 Host 删除失败）**：归档在 DSH 里只是**可见性标记**——它从未参与
+Host 列表过滤（`dsh-session-query` 全库 **0** 处 `archiv*`；`ArchivedSessionGate` 只在
+`agent/pre-step` 上 reject）。客户端的行留在 `manager.summaries` 里，**只被归档集合遮住**；
+删除时旧代码只摘 `archivedSessionIds` ⇒ 遮罩一撤，行**立刻重新可见**。
+旧代码唯一的客户端通知来自 `evictSessionFromMemory()` → `entry.detach()` 顺带触发的
+`session/disposed → api-session/removed`，**仅在会话仍 live 时存在**；已归档且未打开的会话通常
+非 live ⇒ **零事件**，行残留至重启。
+
+**修复（0.3.10）**：
+
+| # | 侧 | 改动 |
+|---|---|---|
+| 1 | host | 每个删除成功分支显式 `ctx.emit("api-session/removed", id)`（`announceSessionRemoved`），与 DSH 自身在 `session/disposed` 上的转发同型；该事件在 `API_REMOTE_FORWARDED_EVENTS` 白名单内 → 客户端 `recordMutation({kind:'remove'})` 真正删行 |
+| 2 | host | emit 包 try/catch（cordis `emit` **同步且不隔离**，见 `cordis/lib/index.js:280-282`；对照官方 `emitPluginDisposed` 自己就包了）——抛错只进 `warnings[]`，**不回滚已完成的删除** |
+| 3 | host | 四个删除分支统一收口 `finishRemoval()`：归档集合＋工作区记账＋内存驻留＋客户端通知，**四件事不漏** |
+| 4 | host | 修复**忽略 `location.found`** 的 bug（旧代码拿 `found:false` 的猜测路径去 `rm -rf`，必失败 ⇒ 报「删除失败」且 id 永久卡在归档集合） |
+| 5 | host | 新增 `pruneWorkspaceAccounting()`：`dsh-workspace` 明确「归档**故意不碰** `sessionIds`」，删除必须自己释放（走 `entity.detachSession()`——域写链上判成员、无变化用哨兵中止、按 cwd 头索引重滤，满足 `validateStoredState` 的唯一性约束） |
+| 6 | host | `sweep` 同样收口（原实现删目录却**从不清**归档集合、**从不**通知客户端 ⇒ 造出与 #1 完全相同的鬼行） |
+| 7 | client | `ArchivedSessionsPage` 改为由 `apply()` 经 slot props 传入 `ctx`。原组件**不接收任何参数**，函数体里的 `ctx.workspaces/sessions/timer` 全是**自由变量** ⇒ `ReferenceError` 被静默 `try/catch` 吞掉 ⇒ **`refreshViews()` 从未执行过**（连带 5 秒自动取消确认也是死代码）。同时删掉客户端**并不存在**的 `ctx.workspaces.refresh()`，`ctx.sessions.refresh()` 改为**真正 await**、失败 `console.warn` |
+| 8 | pkg | `dsh.client.inject` 移除 `@deepseek-ai/dsh-client-runtime`——**该包在 DSH 里不存在**（289 个 `@deepseek-ai/*` 包无此目录，仅 `dsh-invariants/README.md` 正文提及）。该字段只用于激活顺序/预取，不参与 cordis 注入；真正决定模块图顺序的是 `dsh.client.external` |
+
+**验证**（scratch 独立 `DSH_HOME`，`dsh scratchweb --no-open --port 19400`；
+**必须用「非 live 的归档会话」**——live 会话会走既有 `detach()` 事件链把 bug 遮住）：
+
+| | 旧代码 0.3.9 | 新代码 0.3.10 |
+|---|---|---|
+| 发给客户端的 `api-session/removed` | **0**（行残留＝本 bug） | **1** |
+| 磁盘目录 | 已删 | 已删 |
+| 归档集合 | 已清 | 已清 |
+| 工作区记账（落盘 `workspace.json` 复核） | **仍记账已删 id** | **已释放** |
+
+另以真实 `mergeOrderedBaseline` 做客户端逻辑仿真：`remove` 事件与 `await refresh` 两条腿都能删行，
+且**拉取期间到达的 remove 不会被基线复活**（`refreshList` 有 `removedSincePull` 重放保护）。
+
+**对 DSH 侧的遗留观察**（非本插件可解）：`dsh-workspace` 无「遗忘 id」路径，
+`tables.workspaces[*].sessionIds` 与 `headers`/`sessionPaths` 索引会一直记账已删除 id
+（实测确认），且 `bootstrap` 对 `sessionPaths` 缺失的 id 直接 `continue` ⇒ 只能手改 `workspace.json` 清理；
+另外 `ctx.emit` 在 cordis 中不隔离，宿主自己的 `api-session/*` 转发监听器若抛错会冒泡回插件，
+值得上游加固。

@@ -104,12 +104,79 @@ profile（`dsh@0.1.7-rc.2` + 插件 0.3.6 + 精确版本豁免）上**真机实�
 | --- | --- | --- |
 | `POST /dsh-archived/list` | `{}` | `{ items, totalBytes }` |
 | `POST /dsh-archived/unarchive` | `{ sessionId }` | `{ ok, changed, archivedSessionIds }` |
-| `POST /dsh-archived/delete` | `{ sessionId }` | `{ ok, deleted, sessionId, alsoDeleted[], reason? }` |
+| `POST /dsh-archived/delete` | `{ sessionId }` | `{ ok, deleted, sessionId, alsoDeleted[], sizeBytes, warnings[]?, reason? }` |
 | `POST /dsh-archived/detail` | `{ sessionId }` | `{ id, createdAt, cwd, parentSession, totalEvents, messageCount, truncated, messages }` |
 | `POST /dsh-archived/orphans` | `{}` | `{ items, totalBytes }` |
-| `POST /dsh-archived/sweep` | `{}` | `{ removed, freedBytes, items }` |
+| `POST /dsh-archived/sweep` | `{}` | `{ removed, freedBytes, items, warnings[]? }` |
+
+删除（含 sweep）成功后，Host 会向所有客户端广播 `api-session/removed`，让 DSH 自己的会话列表
+**立刻**丢弃该行；同时释放归档集合与工作区 `sessionIds` 记账，并删除磁盘目录。若某个清理子步骤
+失败，删除本身仍然成功完成，失败原因放在 `warnings[]` 里返回（避免「磁盘已删但报失败」的误判）。
 
 ### 变更记录
+
+- **0.3.10**（2026-10-01）：**修复「删除归档会话后，它们又回到对话列表，点进去报 `session/not-found`」**。
+
+  根因（全链路实测确认）是**客户端陈旧行**，不是 Host 端删除失败：归档在 DSH 里只是
+  **可见性标记**（`archivedSessionIds` + 客户端 `sessionVisible()`），它**从不出现在会话列表的
+  过滤逻辑里**（`dsh-session-query` 全库 0 处 `archiv*`）。客户端 `manager.summaries` 会一直保留
+  该行，只被归档集合**遮住**。删除时旧代码只做「从归档集合移除」——遮罩一撤，**幸存的行立刻重新
+  可见**，于是看起来就是「已删除的归档会话又出现了」；点它去读历史，Host 已无该会话 ⇒
+  `session "…" not found (session/not-found)`。
+  旧代码唯一的客户端通知是 `evictSessionFromMemory()` 里 `entry.detach()` 顺带触发的
+  `session/disposed → api-session/removed`，**只有会话仍驻留内存（live）时才会发生**；
+  已归档且未打开的会话通常非 live ⇒ **一个事件都不发**，行永久残留到重启。
+
+  修复（`lib/index.js`）：
+  1. 新增 `announceSessionRemoved()`，在**每个**删除成功分支显式 `ctx.emit("api-session/removed", id)`
+     ——与 DSH 自己在 `session/disposed` 上做的完全一致（`dsh-api-session-controller` 对
+     `api-session/added`/`removed` 的转发即此模式），该事件在 `dsh-api-remotes` 的
+     `API_REMOTE_FORWARDED_EVENTS` 白名单内，客户端 `handleSessionRemoved` 会走
+     `recordMutation({kind:'remove'})` 真正删行。
+     因 cordis 的 `emit` **同步且不隔离**（一个监听器抛错会打断后续），emit 用 try/catch 包住，
+     抛错只记入 `warnings`，**绝不回滚已完成的删除**。
+  2. 四个删除分支（无 header / 无路径 / `found:false` / 删盘成功）统一收口到 `finishRemoval()`，
+     保证「归档集合 + 工作区记账 + 内存驻留 + 客户端通知」**四件事不漏**。
+  3. **修 `location.found` 被忽略的 bug**：原 `:544` 只判断 `path` 非空，而 `resolveSessionLocation`
+     在**没有任何候选根命中**时返回的仍是拼出来的 `path`（`found:false`，其文档注释已写明此时
+     "deletion then prunes the archive id only"）。旧代码会拿这个猜测路径去 `rm -rf`，必然失败 ⇒
+     报「删除失败」且归档 id 永远卡住。现按 `found` 判定。
+  4. **释放工作区记账**（新增 `pruneWorkspaceAccounting()`）：`dsh-workspace` 明确写着归档
+     **故意不碰** `sessionIds`（"Archiving never touches workspace accounting"），所以删除必须自己
+     释放，否则注册表永久记账一个盘上已无、header 也读不回来的 id（`bootstrap` 对
+     `sessionPaths` 缺失的 id 直接 `continue`，只能手改 `workspace.json` 才能清）。
+     走 `registry.list()` → `entity.detachSession()`，它是**竞态安全**的官方写路径：在域写链上判成员、
+     无变化时用内部哨兵中止（不写盘、不发变更），并按 canonical-cwd 头索引重滤 `sessionIds`
+     ——正是 `validateStoredState` 要求的「一个 id 不得被两个工作区同时记账」。
+  5. **`/dsh-archived/sweep` 同样收口**（原实现删了目录却**从不**清归档集合、也从不通知客户端，
+     会造出与 1 完全相同的鬼行）；返回体新增可选 `warnings[]`。
+
+  修复（`lib/client.js`）：`ArchivedSessionsPage()` 原本**不接收任何参数**，函数体里的
+  `ctx.workspaces` / `ctx.sessions` / `ctx.timer` 全是**自由变量** ⇒ 组件作用域内根本没有 `ctx`
+  ⇒ `ReferenceError`，又被静默 `try/catch` 吞掉、promise 直接丢弃。也就是说
+  **`refreshViews()` 从未真正执行过**（连带 `reloadAfterAction()` 的刷新腿、`armDelete` 的 5 秒
+  自动取消也全是死代码）。现由 `apply()` 通过 slot props 把 `ctx` 传入组件（与 DSH 官方客户端插件
+  把 `t`/`renderSlot` 等按 props 注入的写法一致），`refreshViews()` 改为**真正 `await`
+  `ctx.sessions.refresh()`** 并在失败时 `console.warn`（不再静默），同时删掉客户端**并不存在**的
+  `ctx.workspaces.refresh()` 调用。它作为兜底与 Host 事件互补：`refreshList()` 的
+  `mergeOrderedBaseline` 会**丢弃 baseline 中不存在的 id**，且拉取期间记录的 mutation 会在基线到达后
+  重放（`removedSincePull`），所以补拉**不会**把已删除的行复活。
+
+  其它：`package.json` 的 `dsh.client.inject` 移除了 `@deepseek-ai/dsh-client-runtime`
+  ——该包**在 DSH 里根本不存在**（289 个 `@deepseek-ai/*` 包中无此目录，仅 `dsh-invariants`
+  的 README 正文提到过这个名字）。该字段按官方文档只用于**激活顺序/预取**元数据，不参与
+  cordis 注入；保留无效名只会误导。
+
+  验证（scratch 独立 `DSH_HOME`，真机 `dsh scratchweb`，非 live 的归档会话＝报告场景）：
+  | | 旧代码 | 新代码 |
+  |---|---|---|
+  | 发给客户端的 `api-session/removed` | **0**（行残留，即本 bug） | **1** |
+  | 归档集合 | 已清 | 已清 |
+  | 工作区记账（`workspace.json` 落盘复核） | **仍记账已删 id** | **已释放** |
+  | 磁盘目录 | 已删 | 已删 |
+
+  另用真实 `mergeOrderedBaseline` 跑客户端逻辑仿真，确认「remove 事件」与「await refresh」两条腿
+  都能删掉该行，且**拉取期间到达的 remove 不会被基线覆盖**。
 
 - **0.3.9**（2026-09-30）：**peer 声明改用三元组区间 `>=0.2.0-rc.1 <0.2.1-0`**（代码零改动）。
   背景：`0.2.0-rc.2` 发布后门禁又把只声明到 `0.2.0-rc.1` 的 0.3.8 拦下——**连续第三轮同型故障**
