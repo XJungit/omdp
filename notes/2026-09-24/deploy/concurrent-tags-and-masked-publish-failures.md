@@ -162,3 +162,12 @@ tag 命名沿用 `<version>-<plugin>`。
 - 根 `README.md`：发布章节的 tag 示例改为 `<version>-<plugin>`
 - `docs/plugin-compatibility.md`：总体结论第 6 条（仓库改动不影响在跑的系统 +
   手拷 `node_modules` 会被 `pnpm install` 还原）
+
+---
+
+> 🔁 **后续（2026-10-18）：本文的根因 1 第二次复发**——三个 tag 被一次性推送，
+> 且这次把 `@omdp/dsh-connector@0.3.9` 这个版本号**永久卡死**（暂存条目从未被提升，
+> registry 至今 404）。当时采用的只是**流程约定**（一次只推一个 tag），并未落地本文
+> 自己指出的「更稳的做法：让 workflow 只发布与该 tag 对应的那一个包」。
+> 2026-10-18 已改成后者，流程约定随之取消 —— 复盘见
+> `notes/2026-10-18/deploy/三个tag并发发布再次卡死版本号-改为按tag选包.md`。

@@ -19,33 +19,54 @@ jobs:
           node-version: 22
           registry-url: https://registry.npmjs.org/
 
-      # Publish every ACTIVE package in the repo (`dsh-connector`,
-      # `dsh-key-fallback`, `dsh-archived-sessions`). Archived plugins live
-      # under `archive/` and are never published here: `dsh-vision-bridge`
-      # was retired on 2026-10-18 and its last release is 0.1.12.
-      # A version that is already on the
-      # registry is skipped (so republishing one package does not block the
-      # others), but any OTHER failure fails the job loudly.
+      # 只发布「本 tag 所指名的那一个包」（`v<version>-<plugin>`，例如
+      # `v0.3.10-dsh-connector`）。归档插件在 `archive/` 下，永不在这里发布：
+      # `dsh-vision-bridge` 已于 2026-10-18 停用，最后发行版是 0.1.12。
       #
-      # Why not `npm publish ... || echo "skip"`: that mask made a real
-      # failure look like a success. On 2026-09-24 three tags were pushed at
-      # once, three runs raced to publish the same versions, npm rejected the
-      # duplicates with E409/E403, and every one of those runs still reported
-      # conclusion=success while one package silently never shipped. Ask the
-      # registry first and only swallow "already published".
+      # 为什么改成「一个 run 只发一个包」，而不是遍历全部包：
+      # `on: push: tags` 是每个 tag 一个 run，推 N 个 tag 就起 N 个并发 run。
+      # 每个 run 都遍历全部包时，它们争抢同一批版本；npm 是暂存发布，上传一开始
+      # 版本号就被占用，抢输的 run 拿到
+      # `E409 Cannot publish over previously staged version`
+      # —— 2026-09-24 和 2026-10-18 两次都因此有包始终没发出去，而 run 表面是绿的。
+      # 只发本 tag 指名的包，重叠就彻底消失了。
+      #
+      # 旧的「遍历全部」还带来第二个隐患：`npm view` 探测对**同批并发**是无效的
+      # （对方此刻也还没发布），所以「先探测再发」根本挡不住这个竞态。
+      #
+      # tag 匹配不上任何活跃包时**直接失败**（不再回退成遍历全部）：这正是
+      # 「忘了升 version 就打 tag」的信号，宁可红。
+      #
+      # 另外不用 `npm publish ... || echo "skip"`：那个写法把真实失败伪装成成功
+      # （2026-09-24 的 `@omdp/dsh-key-fallback@3.2.2` 就是这么丢的）。
+      # 跳过与否由「注册表里有没有」决定，其余任何失败都让 job 红。
       - name: Publish packages
         run: |
           set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          target=""
           for dir in dsh-connector dsh-key-fallback dsh-archived-sessions; do
             name=$(node -p "require('./$dir/package.json').name")
             ver=$(node -p "require('./$dir/package.json').version")
-            if npm view "$name@$ver" version >/dev/null 2>&1; then
-              echo "skip: $name@$ver is already published"
-              continue
+            short="${name#@omdp/}"   # @omdp/dsh-connector -> dsh-connector
+            bare="${short#dsh-}"     # -> connector（历史 tag 两种写法都出现过）
+            if [ "$tag" = "v$ver-$short" ] || [ "$tag" = "v$ver-$bare" ]; then
+              target="$dir"
+              echo "tag $tag -> $dir ($name@$ver)"
             fi
-            echo "::group::publish $name@$ver"
-            (cd "$dir" && npm publish --provenance --access public)
-            echo "::endgroup::"
           done
+          if [ -z "$target" ]; then
+            echo "::error::tag '$tag' 未匹配任何活跃包的 <version>-<plugin>；期望形如 v0.3.10-dsh-connector / v3.3.3-key-fallback / v0.3.11-archived-sessions。请先升 package.json 的 version 再打 tag。"
+            exit 1
+          fi
+          name=$(node -p "require('./$target/package.json').name")
+          ver=$(node -p "require('./$target/package.json').version")
+          if npm view "$name@$ver" version >/dev/null 2>&1; then
+            echo "skip: $name@$ver is already published"
+          else
+            echo "::group::publish $name@$ver"
+            (cd "$target" && npm publish --provenance --access public)
+            echo "::endgroup::"
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

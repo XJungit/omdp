@@ -32,19 +32,24 @@
    - Secret: 粘贴刚生成的 token
 3. 保存
 
-### 4. 首次发布：打 tag 触发 workflow
+### 4. 发布：打 tag 触发 workflow
 
-在 omdp 仓库根目录（或 GitHub 网页）打一个版本 tag：
+tag 必须写成 **`v<version>-<plugin>`**，且 version 要与该子目录 `package.json` 里的
+`version` 一致 —— workflow 就是用它来决定发哪个包的：
 
 ```sh
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.3.10-dsh-connector
+git push origin v0.3.10-dsh-connector
 ```
 
-GitHub Actions 自动执行 `publish.yml`，遍历三个包目录依次发布（已存在的版本跳过）：
-- `dsh-connector/` → `@omdp/dsh-connector`
-- `dsh-key-fallback/` → `@omdp/dsh-key-fallback`
-- `dsh-archived-sessions/` → `@omdp/dsh-archived-sessions`
+GitHub Actions 自动执行 `publish.yml`，**只发布这个 tag 指名的那个包**（该版本已在
+registry 上则打印 skip 后成功退出）：
+- `v<version>-dsh-connector`（也接受 `v<version>-connector`）→ `@omdp/dsh-connector`
+- `v<version>-key-fallback`（也接受 `v<version>-dsh-key-fallback`）→ `@omdp/dsh-key-fallback`
+- `v<version>-archived-sessions`（也接受 `v<version>-dsh-archived-sessions`）→ `@omdp/dsh-archived-sessions`
+
+tag 匹配不上任何活跃包（例如忘了先升 `version` 就打 tag）⇒ **job 直接失败**，
+不会误发别的包。
 
 > `dsh-gitbash-win/`、`dsh-resume-stream/` 与 `dsh-vision-bridge/`（2026-10-18 归档）
 > 的发布步骤已随归档移除，不再由本仓库发布。
@@ -124,7 +129,7 @@ dsh plugin add github:XJungit/dsh-connector      # 单独仓库，无 #path:
 ```jsonc
 // ~/.dsh/profiles/web/package.json
 "dependencies": {
-  "@omdp/dsh-connector": "^0.3.9",
+  "@omdp/dsh-connector": "^0.3.10",
   "@omdp/dsh-key-fallback": "^3.3.3",
   "@omdp/dsh-archived-sessions": "^0.3.11"
 }
@@ -147,35 +152,41 @@ pnpm install
 ### 更新流程（之后每次）
 
 1. 改代码 → 提交推送到 GitHub
-2. 升版本（**只升你动过的包**）+ 打 tag，**tag 格式 `<version>-<plugin>`**，且
-   **一次只推一个 tag**：
+2. 升版本（**只升你动过的包**）+ 打 tag，tag 格式 `<version>-<plugin>`（tag 里的
+   version 必须与 `package.json` 一致）：
    ```sh
-   # 改对应子目录 package.json 的 version
+   # 改对应子目录 package.json 的 version，再打同名 tag
    git add -A && git commit -m "release ..."
-   git tag v0.3.4-dsh-connector
-   git push origin master && git push origin v0.3.4-dsh-connector
+   git tag v0.3.10-dsh-connector
+   git push origin master && git push origin v0.3.10-dsh-connector
    ```
-3. Actions 自动发新版本（workflow 会遍历所有包，已存在的版本跳过、其余照发）
+3. Actions **只发这个 tag 指名的包**（已存在则 skip 后成功退出）
 4. 本机更新：
    ```sh
    cd ~/.dsh/profiles/web
    pnpm update @omdp/dsh-connector
    ```
 
-> ⚠️ **一次只推一个 tag**。`on: push: tags` 是**每个 tag 一个 run**，而每个 run 都会
-> 遍历全部包去 publish。同时推 3 个 tag ⇒ 3 个 run 并发争抢同一批版本 ⇒ npm 拒绝重复
-> 提交（`E409 Cannot publish over previously staged version` / `E403 ... cannot publish
-> over the previously published versions`），而每个 run 里**都有某个包侥幸成功**，
-> 于是「看起来都成功、实际各漏一部分」。本轮实测就踩了这个坑。
+> ✅ **2026-10-18 起，一次推多个 tag 也安全了** —— 因为每个 run 只碰自己那个包，
+> 重叠为零。（旧 workflow 每个 run 都遍历全部包，并发时争抢同一批版本 ⇒
+> `E409 Cannot publish over previously staged version` ⇒「看起来都成功、实际各漏一部分」；
+> 2026-09-24 与 2026-10-18 两次事故同一成因。）
+>
+> ⚠️ 顺带纠正一个直觉错误：**「先探测 `npm view` 再发」挡不住这个竞态** ——
+> 同批并发时对方此刻也还没发布，探测必然回答「没发过」。消除竞态只能靠消除**重叠**
+> （按 tag 选包），不能靠探测。
 
 ---
 
 ## 注意事项
 
-- **版本号**：各子目录的 `package.json` 的 `version` 决定 npm 版本。tag 名只是触发
-  条件，不影响包版本。workflow 每次遍历全部包，**已存在的版本会被跳过**，未发布的照发。
-- **tag 名**：必须匹配 `v*`（workflow 触发条件）；本仓库约定 `<version>-<plugin>`
-  （如 `v0.3.4-dsh-connector`、`v3.2.2-key-fallback`），便于回溯是哪个包哪一版。
+- **版本号**：各子目录的 `package.json` 的 `version` 决定 npm 版本。tag 名不再只是触发
+  条件 —— workflow 用它**选包**，所以 tag 里的 version 必须与 `package.json` 一致
+  （不一致 ⇒ 匹配失败 ⇒ job 红）。另外**一个版本号一旦被 npm 暂存占用就不能再用**，
+  只能顺延到下一个 patch（见下方「暂存发布」）。
+- **tag 名**：必须匹配 `v*`（workflow 触发条件），并写成 `<version>-<plugin>`
+  （如 `v0.3.10-dsh-connector`、`v3.3.3-key-fallback`、`v0.3.11-archived-sessions`）；
+  插件名带不带 `dsh-` 前缀都接受（历史 tag 两种写法都出现过）。
 - **重复发布与真实失败必须区分开**：workflow 现在先 `npm view "$name@$ver"` 探测，
   只有「确实已发布」才跳过；**任何其他失败都会让 job 明确失败**。
   > 历史教训：旧写法是 `npm publish ... || echo "skip: version already published"`，
@@ -188,13 +199,18 @@ pnpm install
   `id-token: write` 权限（已配置）。若你的 npm 账号不支持 provenance，可去掉
   `--provenance` 参数。
 - **根 package.json**：仓库根的 `package.json` 是裸镜像（名字是
-  `@omdp/dsh-connector`），**不要发布它**——workflow 只在四个子目录里 publish。
+  `@omdp/dsh-connector`），**不要发布它**——workflow 只在三个子目录里 publish。
 - **npm 新版是「暂存发布」（staged publishing）**：`npm publish` 可能先把 tarball 放进
   暂存队列并提示 `Your package is being processed and may take a few minutes to become
   available`，**版本号会被立即占用**（此时重复发布同一版本会报
   `E409 Cannot publish over previously staged version`），但在审核/处理完成前
   `npm view <pkg>@<ver>` 仍可能 404。所以**上传成功 ≠ 立刻可安装**，查不到时先等几分钟
   再重查，别急着重复发（重复发反而会被 409 拦下）。
+  🔴 **但暂存条目不保证会被提升**（2026-10-18 实测）：`@omdp/dsh-connector@0.3.9`
+  的暂存条目被**两个并发 run 同时撞击**后始终没被提升 —— registry 上一直 404，
+  packument 的 `modified` 也从未变动（停在 2026-09-29），多次重跑只复现同一个 `E409`。
+  此时**不要再重试**，顺延到下一个 patch 版本号（npm 社区对该错误的常规处置也是
+  「改用下一个可用版本」）。事故复盘见 `notes/2026-10-18/deploy/`。
 - 🔴 **`npm view` 会吃本地缓存，复核请直连 registry API**（2026-10-01 实测）：
   `@omdp/dsh-archived-sessions@0.3.10` 已在 `08:38:44` 由 CI 成功发布（日志有
   `+ @omdp/dsh-archived-sessions@0.3.10` + 签名 provenance），且 registry 记录的

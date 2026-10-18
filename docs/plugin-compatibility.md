@@ -4,7 +4,7 @@
 > 已于 2026-08-25 归档，`@omdp/dsh-vision-bridge` 于 **2026-10-18 归档**
 > （源码移至 `archive/dsh-vision-bridge-0.1.12-2026-10-18T18-06-04/`，不再维护或发布）。
 > 下方对 gitbash / vision-bridge 的评估保留作为历史架构参考；
-> 当前活跃插件版本见各节标题（connector `0.3.9` / key-fallback `3.3.3` /
+> 当前活跃插件版本见各节标题（connector `0.3.10` / key-fallback `3.3.3` /
 > archived-sessions `0.3.11`）。
 >
 > 评估内容：各插件对 DSH（DeepSeek Harness）更新的抗崩溃能力。
@@ -159,13 +159,13 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 
 ---
 
-## 2. @omdp/dsh-connector（v0.3.9）【活跃插件】
+## 2. @omdp/dsh-connector（v0.3.10）【活跃插件】
 
 ### 架构
 
 - **顶层零第三方 import**：模块顶层只有 `node:*` + `yaml`（版本 `^2.9.0`）；`jsdom`（`^24.1.3`）**改为在 WAF 挑战求解处动态 `await import()`**（0.3.3 起，见下方 0.1.7 专项「变更 4」——顶层静态引入会在 0.1.7 上让整个插件 import 失败）
 - **零 `@deepseek-ai/*` 硬依赖**（`@deepseek-ai/schemastery` 仅 peer 声明，供工具过滤的 `Config` 声明用；
-  0.3.4 起另声明 `@deepseek-ai/dsh` peer；**0.3.9 起该 peer 为两段三元组区间
+  0.3.4 起另声明 `@deepseek-ai/dsh` peer；**0.3.10 起该 peer 为两段三元组区间
   `>=0.2.0-rc.1 <0.2.1-0 || >=0.2.1-rc.1 <0.2.2-0`**（0.3.8 起为单段），
   此前为逐版本枚举——见 0.2.0-rc.2 专项与 `AGENTS.md` 规范 3）
 - **profile 补丁路径取自 `ctx.get('profileContext').patchPath`**（0.3.6 起；0.1.7+ 由 dsh 启动器提供，见 0.1.7 专项「变更 6」），无该服务时回退历史硬编码路径
@@ -432,7 +432,7 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 | 插件 | 版本 | 第三方依赖 | DSH 硬依赖 | 抗崩溃设计 | 最大风险点 |
 |---|---|---|---|---|---|
 | dsh-gitbash-win（归档） | 0.1.6 | 无（动态加载 5 个 @deepseek-ai/*） | `tools`/`subprocess`/`systemPrompt`/`shellEnv` | 顶层零依赖 + 动态加载 + 失败隔离 | `dsh-sandbox`（Windows ACL 上游 bug） |
-| dsh-connector | 0.3.9 | `yaml`（+ `jsdom` 懒加载；peer `schemastery` 仅 Config 声明用、`@deepseek-ai/dsh` 供版本门禁，**v0.3.9 起为两段三元组区间 `>=0.2.0-rc.1 <0.2.1-0 || >=0.2.1-rc.1 <0.2.2-0`**） | `webServer`（`settings`/`tools.guard`/`systemPrompt`/`profileContext` 可选） | 顶层零第三方 static import + try/catch + 可选服务失败隔离 + **遗留 `toolFilters` 一次性救援** + **CRLF 解析容错** | `ctx.webServer` API 变化 / 内置模块子路径解析崩溃（`punycode/`，0.3.3 懒加载缓解）/ 0.1.7 配置迁移漏段（0.3.4 救援）/ 补丁文件换行被外部工具改成 CRLF（0.3.6） |
+| dsh-connector | 0.3.10 | `yaml`（+ `jsdom` 懒加载；peer `schemastery` 仅 Config 声明用、`@deepseek-ai/dsh` 供版本门禁，**v0.3.10 起为两段三元组区间 `>=0.2.0-rc.1 <0.2.1-0 || >=0.2.1-rc.1 <0.2.2-0`**） | `webServer`（`settings`/`tools.guard`/`systemPrompt`/`profileContext` 可选） | 顶层零第三方 static import + try/catch + 可选服务失败隔离 + **遗留 `toolFilters` 一次性救援** + **CRLF 解析容错** | `ctx.webServer` API 变化 / 内置模块子路径解析崩溃（`punycode/`，0.3.3 懒加载缓解）/ 0.1.7 配置迁移漏段（0.3.4 救援）/ 补丁文件换行被外部工具改成 CRLF（0.3.6） |
 | dsh-vision-bridge（**归档**） | 0.1.12 | 无 | `tools`/`attachments`/`llm`/`credentials` | 纯静态 + 零 @deepseek-ai + 防御性编码 | `ctx.llm` API 变化 / composer 输入层变化 / Agent 路由载荷变化（`requestHeader().config`） |
 | dsh-key-fallback | 3.3.3 | `schemastery`（仅 `Config` 声明用） | `credentials`/`llm`/`settings`（`webServer`/`slots` 可选） | ESM import + `agent/*` 事件 + **包装 `credentials.resolve` 切换 key（v3.0.0 起）** + **配置双后端自动判别** + **遗留池一次性救援** + **DSH peer 版本门禁（v3.3.3 起为两段三元组区间）** + 防御性编码 | `agent/request-error` 载荷 / `credentials.resolve` 签名 / `0.1.7` 配置迁移机制 / `webServer` API 变化 |
 | dsh-archived-sessions | 0.3.11 | 无（jsonl 后端可选 import + 内置编码 fallback） | `webServer`（`sessionPersistence`/`workspaceRegistry`/`sessionQuery`/`fs`/`shell` 可选） | 路径自解析（root 由 `DSH_HOME` 推导）+ 删除目录名校验 + **`ctx.shell` 双时代能力探测** + **DSH peer 版本门禁（v0.3.11 起为两段三元组区间）** + try/catch + 可选服务失败隔离 + **删除后广播 `api-session/removed`（v0.3.10）** + **工作区记账释放（v0.3.10）** | `sessionPersistence` 路径布局 / `workspaceRegistry` 字段变化 / `ctx.shell` 抽象方法**改名**（0.3.6 双时代探测）/ 宿主同槽位撞 slot id（0.3.4 起用 `omdp-` 前缀免疫） |
@@ -1001,7 +1001,7 @@ key-fallback `3.3.2` **全部 ✅ 放行**。
 5. **本仓库现状**：`0.2.0` 线与 `0.2.1` 线适配均已落地，三个插件**声明为两段三元组区间**
    `>=0.2.0-rc.1 <0.2.1-0 || >=0.2.1-rc.1 <0.2.2-0` —— 同三元组后续 rc 与正式版
    **不再需要改声明/重发包**：
-   `connector` **v0.3.9**、`key-fallback` **v3.3.3**、`archived-sessions` **v0.3.11**
+   `connector` **v0.3.10**、`key-fallback` **v3.3.3**、`archived-sessions` **v0.3.11**
    （三者 2026-10-18 本轮**源码零改动**，仅改声明 + 追加 `cordis` `4.0.5` / `schemastery` `3.18.5`
    枚举；详见下方「DSH 0.2.1 兼容性专项」）。
    ⚠️ 累计共识：三个插件**只承诺 `0.2.0` 与 `0.2.1` 线**，`0.1.7` 线不再声明——
@@ -1141,9 +1141,12 @@ DSH `0.2.1-rc.2` 是本轮目标版本。按 `AGENTS.md` 规范 3，跨到新三
 在**同一个** `0.2.1-rc.2` 运行时上跑 `--dump-config`：
 
 ```
-dsh: skipping profile bundle "@omdp/dsh-connector-old": Error: Plugin @omdp/dsh-connector@0.3.9
+dsh: skipping profile bundle "@omdp/dsh-connector-old": Error: Plugin @omdp/dsh-connector-old@0.3.10
 is incompatible with dsh 0.2.1-rc.2: requirements {"@deepseek-ai/dsh":">=0.2.0-rc.1 <0.2.1-0"}.
-Running it may cause crashes or data loss. … Exact-version exemption: not active.
+Running it may cause crashes or data loss. Update the plugin or install a plugin version compatible
+with this dsh runtime. To accept this risk explicitly, grant the exact-version exemption for
+@omdp/dsh-connector-old@0.3.10 on dsh 0.2.1-rc.2 with `dsh plugin allow-version` or the plugin
+manager, then retry the installation or restart dsh. Exact-version exemption: not active.
 ```
 
 而同一次运行里、用**新声明**的 `archived-sessions` 照常组合进树（输出含 `- id: archived-sessions`），
@@ -1154,7 +1157,7 @@ Running it may cause crashes or data loss. … Exact-version exemption: not acti
 
 | 插件 | 版本 | 声明变化 |
 |---|---|---|
-| `@omdp/dsh-connector` | `0.3.8` → **`0.3.9`** | `@deepseek-ai/dsh` 追加第二段区间；`schemastery` 追加 `3.18.5` |
+| `@omdp/dsh-connector` | `0.3.8` → **`0.3.10`**（`0.3.9` 未发行） | `@deepseek-ai/dsh` 追加第二段区间；`schemastery` 追加 `3.18.5` |
 | `@omdp/dsh-key-fallback` | `3.3.2` → **`3.3.3`** | 四条 dsh peer 追加第二段区间；`cordis` 追加 `4.0.5`；`schemastery` 追加 `3.18.5` |
 | `@omdp/dsh-archived-sessions` | `0.3.10` → **`0.3.11`** | `@deepseek-ai/dsh` 追加第二段区间；`cordis` 追加 `4.0.5` |
 

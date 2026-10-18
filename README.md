@@ -47,7 +47,7 @@ omdp/
 
 ### Plugins
 
-#### `@omdp/dsh-connector` — MCP + Skills manager (`v0.3.9`)
+#### `@omdp/dsh-connector` — MCP + Skills manager (`v0.3.10`)
 
 One settings tab (**Connector**) that manages three things from the DSH Web UI:
 
@@ -64,10 +64,10 @@ One settings tab (**Connector**) that manages three things from the DSH Web UI:
 
 - **Peer declaration switched to the triple range (v0.3.8)** — zero code changes. The `@deepseek-ai/dsh` peer moved from per-version enumeration to `>=0.2.0-rc.1 <0.2.1-0`. When `0.2.0-rc.2` shipped, the gate blocked the old declaration for the **third** time (Connector tab gone, `/connector/api/*` → 404); the root cause was never incompatibility but enumeration going stale on every rc. Verified by a full 20-package file-by-file SHA256 diff `0.2.0-rc.1 → rc.2` (everything this plugin touches changes **only in `package.json` version strings**; the `dsh` main package's changes are entirely `desktop`-profile support) and by running the real gate over the whole matrix — `0.2.0-rc.1`/`rc.2`/`rc.3`/`rc.9`/stable `0.2.0` all pass, `0.2.1-rc.1`/`0.3.0-rc.1` all blocked. ⚠️ **This narrows support**: the `0.1.7` line is no longer declared — install **0.3.7** if you need it there.
 
-- **DSH `0.2.1` support (v0.3.9)** — the `@deepseek-ai/dsh` peer gained a **second triple segment**: `>=0.2.0-rc.1 <0.2.1-0 || >=0.2.1-rc.1 <0.2.2-0` (`schemastery` also gained `3.18.5`, pinned by `0.2.1-rc.2`). **Zero code changes.** Verified in four layers: a per-file SHA256 diff of the whole `@deepseek-ai/*` tree (`0.2.0-rc.2` → `0.2.1-rc.2`: 288 → 305 packages, 177 with real `.js` churn), a real ESM import/export-set diff of the 9 packages we consume (the only removals are unused, in `dsh-app-boot`), a method-level existence check of all 37 symbols we call, and a **real `0.2.1-rc.2` CLI assembly** with an isolated `DSH_HOME` (`--dump-config` composes all three plugins, zero skips).
+- **DSH `0.2.1` support (v0.3.10)** — the `@deepseek-ai/dsh` peer gained a **second triple segment**: `>=0.2.0-rc.1 <0.2.1-0 || >=0.2.1-rc.1 <0.2.2-0` (`schemastery` also gained `3.18.5`, pinned by `0.2.1-rc.2`). **Zero code changes.** Verified in four layers: a per-file SHA256 diff of the whole `@deepseek-ai/*` tree (`0.2.0-rc.2` → `0.2.1-rc.2`: 288 → 305 packages, 177 with real `.js` churn), a real ESM import/export-set diff of the 9 packages we consume (the only removals are unused, in `dsh-app-boot`), a method-level existence check of all 37 symbols we call, and a **real `0.2.1-rc.2` CLI assembly** with an isolated `DSH_HOME` (`--dump-config` composes all three plugins, zero skips).
 
 ```jsonc
-"dependencies": { "@omdp/dsh-connector": "^0.3.9" }
+"dependencies": { "@omdp/dsh-connector": "^0.3.10" }
 ```
 
 #### `@omdp/dsh-key-fallback` — multi-key API key pool with rotation (`v3.3.3`)
@@ -119,7 +119,7 @@ All three plugins are published to **npm** automatically by GitHub Actions on ev
 ```jsonc
 // ~/.dsh/profiles/<name>/package.json — you can use one or mix-and-match
 "dependencies": {
-  "@omdp/dsh-connector": "^0.3.9",
+  "@omdp/dsh-connector": "^0.3.10",
   "@omdp/dsh-key-fallback": "^3.3.3",
   "@omdp/dsh-archived-sessions": "^0.3.11"
 }
@@ -167,12 +167,13 @@ The same monorepo layout is used by other DSH plugin collections, e.g. [zhu10900
 ### Releasing a new version (GitHub Actions)
 
 1. Bump `version` in the subdirectory's `package.json` (only the one(s) you touched).
-2. Commit, then tag and push — one tag per released package, `<version>-<plugin>`:
+2. Commit, then tag and push — the tag **selects which package is published**, so it must be
+   `<version>-<plugin>` with the version you just bumped:
    ```sh
-   git tag v0.3.4-dsh-connector
-   git push origin master && git push origin v0.3.4-dsh-connector
+   git tag v0.3.10-dsh-connector
+   git push origin master && git push origin v0.3.10-dsh-connector
    ```
-3. `.github/workflows/publish.yml` publishes the touched packages to npm with provenance (re-publishing an already-published version is a no-op — skip message is printed).
+3. `.github/workflows/publish.yml` publishes **that one package** to npm with provenance (an already-published version is a no-op — a skip message is printed). A tag that matches no active package fails the job rather than publishing something else.
 4. Update your profile: `pnpm update @omdp/<plugin>`.
 
 See [`docs/npm-publish.md`](docs/npm-publish.md) for the full setup (npm token, GitHub Secret, troubleshooting) and [`docs/plugin-compatibility.md`](docs/plugin-compatibility.md) for the crash-resistance matrix.
@@ -248,7 +249,7 @@ omdp/
 
 ### 插件
 
-#### `@omdp/dsh-connector` — MCP + Skills 管理器（`v0.3.9`）
+#### `@omdp/dsh-connector` — MCP + Skills 管理器（`v0.3.10`）
 
 一个设置页（**Connector**），从 DSH Web UI 管理三件事：
 
@@ -265,10 +266,10 @@ omdp/
 
 - **peer 声明改用三元组区间（v0.3.8）** —— `@deepseek-ai/dsh` 由逐版本枚举改为 `>=0.2.0-rc.1 <0.2.1-0`；代码零改动。`0.2.0-rc.2` 发布后门禁第三次把旧声明拦下（Connector 标签消失、`/connector/api/*` → 404），根因不是不兼容而是枚举在每次 rc 迭代下必然过时。依据：rc.1→rc.2 全量 20 包逐文件 SHA256（本插件依赖面**只有 `package.json` 版本号变化**）+ 真门禁全矩阵（`0.2.0-rc.1`/`rc.2`/`rc.3`/`rc.9`/正式版 `0.2.0` 全放行；`0.2.1-rc.1`/`0.3.0-rc.1` 全拦截）。⚠️ **同时收窄支持面**：`0.1.7` 线不再声明，需要它请装 **0.3.7**。
 
-- **支持 DSH `0.2.1`（v0.3.9）** —— `@deepseek-ai/dsh` peer 新增**第二段三元组区间**：`>=0.2.0-rc.1 <0.2.1-0 || >=0.2.1-rc.1 <0.2.2-0`（`schemastery` 同步追加 `3.18.5`，为 `0.2.1-rc.2` 的钉版）。**代码零改动。** 四层核查：全量 `@deepseek-ai/*` 逐文件 SHA256（`0.2.0-rc.2` → `0.2.1-rc.2`：288 → 305 个包，177 个有真实 `.js` 改动）、我们消费的 9 个包真实 ESM 导出面比对（移除项均未使用，在 `dsh-app-boot`）、调用到的 37 个符号逐个存在性复核、以及**真实 `0.2.1-rc.2` CLI 装配**（隔离 `DSH_HOME`，`--dump-config` 三个插件全部进树、零跳过）。
+- **支持 DSH `0.2.1`（v0.3.10）** —— `@deepseek-ai/dsh` peer 新增**第二段三元组区间**：`>=0.2.0-rc.1 <0.2.1-0 || >=0.2.1-rc.1 <0.2.2-0`（`schemastery` 同步追加 `3.18.5`，为 `0.2.1-rc.2` 的钉版）。**代码零改动。** 四层核查：全量 `@deepseek-ai/*` 逐文件 SHA256（`0.2.0-rc.2` → `0.2.1-rc.2`：288 → 305 个包，177 个有真实 `.js` 改动）、我们消费的 9 个包真实 ESM 导出面比对（移除项均未使用，在 `dsh-app-boot`）、调用到的 37 个符号逐个存在性复核、以及**真实 `0.2.1-rc.2` CLI 装配**（隔离 `DSH_HOME`，`--dump-config` 三个插件全部进树、零跳过）。
 
 ```jsonc
-"dependencies": { "@omdp/dsh-connector": "^0.3.9" }
+"dependencies": { "@omdp/dsh-connector": "^0.3.10" }
 ```
 
 #### `@omdp/dsh-key-fallback` — 多 key API 池 + 轮换（`v3.3.3`）
@@ -320,7 +321,7 @@ fork 自 [`@muwinds/dsh-archived-sessions`](https://github.com/MuWinds/dsh-archi
 ```jsonc
 // ~/.dsh/profiles/<name>/package.json —— 可用其一或自由组合
 "dependencies": {
-  "@omdp/dsh-connector": "^0.3.9",
+  "@omdp/dsh-connector": "^0.3.10",
   "@omdp/dsh-key-fallback": "^3.3.3",
   "@omdp/dsh-archived-sessions": "^0.3.11"
 }
@@ -368,12 +369,13 @@ allowBuilds:
 ### 发布新版本（GitHub Actions）
 
 1. 在子目录的 `package.json` 里 bump `version`（只 bump 你动过的）。
-2. 提交，然后打 tag 并推送——每个待发包一个 tag，格式 `<version>-<plugin>`：
+2. 提交，然后打 tag 并推送——**tag 决定发哪个包**，所以要写成 `<version>-<plugin>`，
+   且 version 就是刚 bump 的那个：
    ```sh
-   git tag v0.3.4-dsh-connector
-   git push origin master && git push origin v0.3.4-dsh-connector
+   git tag v0.3.10-dsh-connector
+   git push origin master && git push origin v0.3.10-dsh-connector
    ```
-3. `.github/workflows/publish.yml` 把动过的包发布到 npm（带 provenance；已发布的版本重复发布是 no-op，会打印 skip 信息）。
+3. `.github/workflows/publish.yml` **只发布该 tag 指名的那个包**到 npm（带 provenance；已发布的版本重复发布是 no-op，会打印 skip 信息）。tag 匹配不上任何活跃包时 job 直接失败，不会误发别的包。
 4. 更新你的 profile：`pnpm update @omdp/<plugin>`。
 
 完整配置（npm token、GitHub Secret、排障）见 [`docs/npm-publish.md`](docs/npm-publish.md)；抗崩溃矩阵见 [`docs/plugin-compatibility.md`](docs/plugin-compatibility.md)。
