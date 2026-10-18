@@ -55,6 +55,35 @@ git mv dsh-vision-bridge archive/dsh-vision-bridge-0.1.12-2026-10-18T18-06-04
 - npm 上已发布的版本 —— 保留可安装，只是不再发新版；
 - 被 gitignore 的日志/构建产物。
 
+### 5. 消费端（live profile）清理 —— 最容易漏的一环
+
+归档只做了「仓库侧」，只要还有人装它，插件依旧会被加载。**2026-10-18 实测踩到的坑：
+仓库里 `dsh-vision-bridge/` 已经搬进 `archive/`，但 `C:\Users\xj\.dsh\profiles\desktop`
+仍在装它、仍在 `bundles` 里列它 ⇒ DSH 照常加载。** 退场必须同步清理消费端：
+
+| 文件 | 要改什么 |
+|---|---|
+| `package.json` | ① `dependencies` 删掉该插件那行；② `dsh.profile.bundles` 删掉对应条目 |
+| `cordis.patch.yml` | 删掉该插件的 `- id: <entry>` 段（含上面解释它的注释） |
+| `pnpm-workspace.yaml` | 删掉 `allowBuilds:` 里的 `'@scope/name': true` 条目 |
+| `pnpm-lock.yaml` | **不要手改** —— 交给 `pnpm install` 重写 |
+| `node_modules/` | 同上，`pnpm install` 会摘掉，**不要手删** |
+
+顺序与纪律：
+
+1. **改前先备份**：`Copy-Item` 到 `*.bak-<yyyyMMdd-HHmmss>`。profile 目录**不是 git 仓库**，
+   没有 `git checkout` 可退。
+2. 只改**文本配置**；`pnpm install` 与**重启 DSH** 交给用户（install 期间 DSH 正在跑，
+   并发改 `node_modules` 有风险；重启更是会掐断用户会话）。
+3. 改完**逐个验证**：`JSON.parse` / `yaml.parse` / 确认条目已消失 / 与 `.bak` 做 `git diff --no-index`
+   确认只动了预期的那几行。
+4. 复核时**排除 `*.bak` 与 `pnpm-lock.yaml`**，否则会把备份里的旧引用误报成「没清干净」。
+5. `allowBuilds` 里留着已卸载的包**不会报错**（这点与 `patchedDependencies` 不同 —— 后者
+   会报 `ERR_PNPM_UNUSED_PATCH` 并**回滚整个安装**）；但仍应清掉，避免下次误读。
+
+> 💡 SOP 的完整定义是「**仓库 + 消费端**两侧都退场」。只做仓库侧，等于归档了一个
+> 仍然在运行的插件。
+
 ## 判据：哪些引用该改、哪些该留
 
 | 引用性质 | 处置 |
