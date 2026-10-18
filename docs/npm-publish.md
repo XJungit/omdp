@@ -206,11 +206,14 @@ pnpm install
   `E409 Cannot publish over previously staged version`），但在审核/处理完成前
   `npm view <pkg>@<ver>` 仍可能 404。所以**上传成功 ≠ 立刻可安装**，查不到时先等几分钟
   再重查，别急着重复发（重复发反而会被 409 拦下）。
-  🔴 **但暂存条目不保证会被提升**（2026-10-18 实测）：`@omdp/dsh-connector@0.3.9`
-  的暂存条目被**两个并发 run 同时撞击**后始终没被提升 —— registry 上一直 404，
-  packument 的 `modified` 也从未变动（停在 2026-09-29），多次重跑只复现同一个 `E409`。
-  此时**不要再重试**，顺延到下一个 patch 版本号（npm 社区对该错误的常规处置也是
-  「改用下一个可用版本」）。事故复盘见 `notes/2026-10-18/deploy/`。
+  ⏳ **提升延迟可能远超「几分钟」**（2026-10-18 实测）：`@omdp/dsh-connector@0.3.9` 的暂存
+  条目被两个并发 run 同时撞击后，直到**上传后约 8 分钟**（10:28:58 → 10:37:09）才被提升发布。
+  这期间 `npm view` 一直 404、packument 的 `modified` 纹丝不动、重跑仍报 `E409`，
+  **看起来非常像「这个版本号废了」，其实没有**。
+  ⇒ `E409 Cannot publish over previously staged version` 的含义是「有人正在处理，别挤」，
+  **不是**「坏了」。补救顺序：**先等**（≥15 分钟、间隔多次复查 registry），
+  确认长时间仍未提升才顺延到下一个 patch 版本号。
+  事故复盘（含一次据此下错结论的经过）见 `notes/2026-10-18/deploy/`。
 - 🔴 **`npm view` 会吃本地缓存，复核请直连 registry API**（2026-10-01 实测）：
   `@omdp/dsh-archived-sessions@0.3.10` 已在 `08:38:44` 由 CI 成功发布（日志有
   `+ @omdp/dsh-archived-sessions@0.3.10` + 签名 provenance），且 registry 记录的

@@ -1157,7 +1157,7 @@ manager, then retry the installation or restart dsh. Exact-version exemption: no
 
 | 插件 | 版本 | 声明变化 |
 |---|---|---|
-| `@omdp/dsh-connector` | `0.3.8` → **`0.3.10`**（`0.3.9` 未发行） | `@deepseek-ai/dsh` 追加第二段区间；`schemastery` 追加 `3.18.5` |
+| `@omdp/dsh-connector` | `0.3.8` → **`0.3.10`**（`0.3.9` 亦已发行，两者代码等价） | `@deepseek-ai/dsh` 追加第二段区间；`schemastery` 追加 `3.18.5` |
 | `@omdp/dsh-key-fallback` | `3.3.2` → **`3.3.3`** | 四条 dsh peer 追加第二段区间；`cordis` 追加 `4.0.5`；`schemastery` 追加 `3.18.5` |
 | `@omdp/dsh-archived-sessions` | `0.3.10` → **`0.3.11`** | `@deepseek-ai/dsh` 追加第二段区间；`cordis` 追加 `4.0.5` |
 
