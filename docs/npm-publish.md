@@ -1,9 +1,10 @@
 # 发布到 npm（GitHub Actions 自动发包）
 
-本仓库的活动插件（`@omdp/dsh-connector`、`@omdp/dsh-vision-bridge`、
-`@omdp/dsh-key-fallback`、`@omdp/dsh-archived-sessions`）通过 **GitHub Actions 在 push tag
+本仓库的活动插件（`@omdp/dsh-connector`、`@omdp/dsh-key-fallback`、
+`@omdp/dsh-archived-sessions`）通过 **GitHub Actions 在 push tag
 时自动发布到 npm**。
-`@omdp/dsh-gitbash-win` 与 `@omdp/dsh-resume-stream` 已归档，不再由本仓库维护或发布。
+`@omdp/dsh-gitbash-win`、`@omdp/dsh-resume-stream` 与 `@omdp/dsh-vision-bridge`
+（**2026-10-18 归档**）已归档，不再由本仓库维护或发布。
 本机不需要 npm 登录。
 
 ---
@@ -40,13 +41,13 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-GitHub Actions 自动执行 `publish.yml`，遍历四个包目录依次发布（已存在的版本跳过）：
+GitHub Actions 自动执行 `publish.yml`，遍历三个包目录依次发布（已存在的版本跳过）：
 - `dsh-connector/` → `@omdp/dsh-connector`
-- `dsh-vision-bridge/` → `@omdp/dsh-vision-bridge`
 - `dsh-key-fallback/` → `@omdp/dsh-key-fallback`
 - `dsh-archived-sessions/` → `@omdp/dsh-archived-sessions`
 
-> `dsh-gitbash-win/` 与 `dsh-resume-stream/` 的发布步骤已随归档移除，不再由本仓库发布。
+> `dsh-gitbash-win/`、`dsh-resume-stream/` 与 `dsh-vision-bridge/`（2026-10-18 归档）
+> 的发布步骤已随归档移除，不再由本仓库发布。
 
 到 https://github.com/XJungit/omdp/actions 看运行结果，绿色 = 发布成功。
 ⚠️ **但绿色不等于真的发出去了**——务必再用 registry 复核（见下方「注意事项」）。
@@ -61,8 +62,8 @@ GitHub Actions 自动执行 `publish.yml`，遍历四个包目录依次发布（
 ```sh
 # 必须用 #path: 指定子目录（因为 3 个包在同一个仓库）
 dsh plugin --profile web add github:XJungit/omdp#path:dsh-connector
-dsh plugin --profile web add github:XJungit/omdp#path:dsh-vision-bridge
-# （dsh-gitbash-win 已归档，不再提供远程安装命令）
+dsh plugin --profile web add github:XJungit/omdp#path:dsh-key-fallback
+# （dsh-gitbash-win / dsh-vision-bridge 已归档，不再提供远程安装命令）
 ```
 
 **这不是简单的"命令长一点"——它埋着三个致命坑：**
@@ -123,8 +124,9 @@ dsh plugin add github:XJungit/dsh-connector      # 单独仓库，无 #path:
 ```jsonc
 // ~/.dsh/profiles/web/package.json
 "dependencies": {
-  "@omdp/dsh-connector": "^0.1.0",
-  "@omdp/dsh-vision-bridge": "^0.1.0"
+  "@omdp/dsh-connector": "^0.3.9",
+  "@omdp/dsh-key-fallback": "^3.3.3",
+  "@omdp/dsh-archived-sessions": "^0.3.11"
 }
 ```
 
@@ -137,7 +139,7 @@ pnpm install
 
 **为什么这更好**：
 - npm 依赖是**普通依赖**，pnpm 不会做 git `#path:` 规范化——彻底告别"串包/嵌套"问题
-- 更新 = `pnpm update @omdp/dsh-connector @omdp/dsh-vision-bridge`（标准 npm 语义）
+- 更新 = `pnpm update @omdp/dsh-connector @omdp/dsh-key-fallback @omdp/dsh-archived-sessions`（标准 npm 语义）
 - **不再需要 update-omdp.ps1 脚本**（它是为 git 安装的 #path: 自愈设计的）
 - 不再有 `ERR_PNPM_IGNORED_BUILDS`（npm 装的是已打包产物，无 build 脚本）
 - `allowBuilds` 也不用配了

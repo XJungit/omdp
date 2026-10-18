@@ -4,6 +4,12 @@
 
 按时间线（旧 → 新）：
 
+## dsh-vision-bridge-0.1.12-2026-10-18T18-06-04/
+`@omdp/dsh-vision-bridge` v0.1.12 源码快照（最后一个发布版本，npm 上仍可安装）。
+**2026-10-18 主动停用**：使用方不再需要该桥接，故移出活跃插件列表
+（不再随 tag 发布、不再出现在 `README.md` 的插件矩阵）。
+保留原因：其中的「多模态/文本模型自动分流」与「文本模型代看端点」实现仍有参考价值。
+
 ## dsh-gitbash-win/
 Windows GitBash 兼容插件（开源参考实现，来自 `buhuikongpan/dsh-win-gitbash`）；
 作为「DSH 插件真实实现」的研读样例保留。

@@ -202,10 +202,10 @@ ctx.tools.register({
 
 ## 六、作者实践：omdp 仓库怎么做的
 
-作者维护的 [omdp](https://github.com/XJungit/omdp) monorepo 里有两个插件，完全按上面的原则落地：
+作者维护的 [omdp](https://github.com/XJungit/omdp) monorepo 里有三个活跃插件（另有一个视觉插件已于 2026-10-18 停用归档），都按上面的原则落地：
 
 - **`@omdp/dsh-connector`**：MCP + Skills 管理插件。纯 JS、仅依赖 `yaml`；写 `cordis.patch.yml` 前做完整校验（transport/serverName/url/command），并原子写入，保证"坏配置到不了下次启动"。
-- **`@omdp/dsh-vision-bridge`**：视觉桥插件（给文本模型加"眼睛"）。**零依赖**、只 import Node 内置模块；工具 `parameters` 用完整 JSON Schema（修掉了 `type: null` 400）；`inject` 显式声明（修掉了 `cannot get property "credentials" without inject`）；工具重名做 fallback；粘贴路由做 magic-byte 校验 + 25MB 上限 + TTL 清理。
+- **`@omdp/dsh-vision-bridge`**（**已于 2026-10-18 归档**，源码移至 `archive/`；下述实践仍具参考价值）：视觉桥插件（给文本模型加"眼睛"）。**零依赖**、只 import Node 内置模块；工具 `parameters` 用完整 JSON Schema（修掉了 `type: null` 400）；`inject` 显式声明（修掉了 `cannot get property "credentials" without inject`）；工具重名做 fallback；粘贴路由做 magic-byte 校验 + 25MB 上限 + TTL 清理。
 
 这些修复过程本身就是"AI 写插件踩坑"的活案例——建议直接参考仓库里的实现。
 

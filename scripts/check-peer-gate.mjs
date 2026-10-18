@@ -32,7 +32,8 @@ const scriptsDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(scriptsDir, "..");
 
 // ── 期望矩阵 ────────────────────────────────────────────────────────────────
-// 当前策略：三个插件只承诺 0.2.0 线（>=0.2.0-rc.1 <0.2.1-0）。
+// 当前策略：三个插件承诺 0.2.0 线与 0.2.1 线两段
+//   （>=0.2.0-rc.1 <0.2.1-0 || >=0.2.1-rc.1 <0.2.2-0）。
 // 收窄或放宽支持面时，**必须同步修改这里**，否则本脚本会报出「回归」。
 const EXPECTED = {
   // 同三元组：实测 rc.1 ⇒ rc.2 / 后续 rc / 正式版全部放行
@@ -42,10 +43,17 @@ const EXPECTED = {
     "0.2.0-rc.3", // 未实测但同三元组 ⇒ 自动放行（这正是三元组区间的价值）
     "0.2.0-rc.9",
     "0.2.0", // 正式版
+    "0.2.1-rc.1", // 实测版本（新三元组下界，2026-10-18 核查通过）
+    "0.2.1-rc.2", // 实测版本（当前 latest）
+    "0.2.1-rc.3", // 未实测但同三元组 ⇒ 自动放行
+    "0.2.1", // 正式版
   ],
   // 跨三元组 / 已收窄的旧线：必须拦截
   block: [
-    "0.2.1-rc.1", // 下一个 patch 的预发布 —— `-0` 上界存在的唯一理由
+    "0.2.1-alpha.1", // 早于实测下界 rc.1 ⇒ 未核查，不放行
+    "0.2.1-alpha.5",
+    "0.2.2-rc.1", // 下一个 patch 的预发布 —— `-0` 上界存在的唯一理由
+    "0.2.2-0",
     "0.3.0-rc.1",
     "0.1.7-rc.1", // 2026-09-30 起不再声明 0.1.7 线（需要请装旧版）
     "0.1.7-rc.2",
@@ -151,6 +159,14 @@ const isDshPeer = (name) => name === "@deepseek-ai/dsh" || name.startsWith("@dee
 /** 回退实现：与 dsh-app-boot 中 evaluatePluginCompatibility 的谓词保持一致。
  *  签名刻意与真函数对齐 `(manifest, exemptions, runtimeVersion)`，避免调用点分叉。 */
 function fallbackGate(manifest, _exemptions, runtime) {
+  // 自 0.2.1-rc.2 起真门禁有 engines.dsh 优先级：声明了它就**独占决定**，
+  // 完全跳过 peerDependencies 检查。此处对齐，避免回退模式与真函数分叉。
+  const enginesDsh = manifest.engines?.dsh;
+  if (typeof enginesDsh === "string") {
+    return semverMod.satisfies(runtime, enginesDsh, { includePrerelease: true })
+      ? undefined
+      : { "engines.dsh": enginesDsh };
+  }
   const peers = manifest.peerDependencies;
   if (!peers) return undefined; // 零 peer ⇒ 永不检查
   const bad = {};

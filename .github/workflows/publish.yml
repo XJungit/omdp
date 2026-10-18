@@ -19,7 +19,11 @@ jobs:
           node-version: 22
           registry-url: https://registry.npmjs.org/
 
-      # Publish every package in the repo. A version that is already on the
+      # Publish every ACTIVE package in the repo (`dsh-connector`,
+      # `dsh-key-fallback`, `dsh-archived-sessions`). Archived plugins live
+      # under `archive/` and are never published here: `dsh-vision-bridge`
+      # was retired on 2026-10-18 and its last release is 0.1.12.
+      # A version that is already on the
       # registry is skipped (so republishing one package does not block the
       # others), but any OTHER failure fails the job loudly.
       #
@@ -32,7 +36,7 @@ jobs:
       - name: Publish packages
         run: |
           set -euo pipefail
-          for dir in dsh-connector dsh-vision-bridge dsh-key-fallback dsh-archived-sessions; do
+          for dir in dsh-connector dsh-key-fallback dsh-archived-sessions; do
             name=$(node -p "require('./$dir/package.json').name")
             ver=$(node -p "require('./$dir/package.json').version")
             if npm view "$name@$ver" version >/dev/null 2>&1; then

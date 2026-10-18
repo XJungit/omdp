@@ -1,9 +1,11 @@
 # OMDP 插件兼容性评估
 
 > ⚠️ **本文档为演进记录**：`@omdp/dsh-gitbash-win` 与 `@omdp/dsh-resume-stream`
-> 已于 2026-08-25 归档（源码移至 `archive/`，不再维护或发布）。下方对 gitbash
-> 的评估保留作为历史架构参考；当前活跃插件版本见各节标题（connector `0.3.8` /
-> vision-bridge `0.1.12` / key-fallback `3.3.2` / archived-sessions `0.3.9`）。
+> 已于 2026-08-25 归档，`@omdp/dsh-vision-bridge` 于 **2026-10-18 归档**
+> （源码移至 `archive/dsh-vision-bridge-0.1.12-2026-10-18T18-06-04/`，不再维护或发布）。
+> 下方对 gitbash / vision-bridge 的评估保留作为历史架构参考；
+> 当前活跃插件版本见各节标题（connector `0.3.9` / key-fallback `3.3.3` /
+> archived-sessions `0.3.11`）。
 >
 > 评估内容：各插件对 DSH（DeepSeek Harness）更新的抗崩溃能力。
 > 核心问题：DSH 更新后，插件会不会导致 DSH 崩溃？
@@ -157,13 +159,14 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 
 ---
 
-## 2. @omdp/dsh-connector（v0.3.8）【活跃插件】
+## 2. @omdp/dsh-connector（v0.3.9）【活跃插件】
 
 ### 架构
 
 - **顶层零第三方 import**：模块顶层只有 `node:*` + `yaml`（版本 `^2.9.0`）；`jsdom`（`^24.1.3`）**改为在 WAF 挑战求解处动态 `await import()`**（0.3.3 起，见下方 0.1.7 专项「变更 4」——顶层静态引入会在 0.1.7 上让整个插件 import 失败）
 - **零 `@deepseek-ai/*` 硬依赖**（`@deepseek-ai/schemastery` 仅 peer 声明，供工具过滤的 `Config` 声明用；
-  0.3.4 起另声明 `@deepseek-ai/dsh` peer；**0.3.8 起该 peer 为三元组区间 `>=0.2.0-rc.1 <0.2.1-0`**，
+  0.3.4 起另声明 `@deepseek-ai/dsh` peer；**0.3.9 起该 peer 为两段三元组区间
+  `>=0.2.0-rc.1 <0.2.1-0 || >=0.2.1-rc.1 <0.2.2-0`**（0.3.8 起为单段），
   此前为逐版本枚举——见 0.2.0-rc.2 专项与 `AGENTS.md` 规范 3）
 - **profile 补丁路径取自 `ctx.get('profileContext').patchPath`**（0.3.6 起；0.1.7+ 由 dsh 启动器提供，见 0.1.7 专项「变更 6」），无该服务时回退历史硬编码路径
 - **Client→Host 走 HTTP API**（`/connector/api/*`），不依赖动态 `host.call`
@@ -219,7 +222,12 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 
 ---
 
-## 3. @omdp/dsh-vision-bridge（v0.1.12）【活跃插件】
+## 3. @omdp/dsh-vision-bridge（v0.1.12）【已归档 2026-10-18】
+
+> 📦 **本节为历史记录**：该插件已于 2026-10-18 主动停用并移入
+> `archive/dsh-vision-bridge-0.1.12-2026-10-18T18-06-04/`（最后一个发布版本 `0.1.12`
+> 仍在 npm 上，但不再随 tag 发布、不再出现在根 `README.md` 的插件矩阵）。
+> 保留本节是因为其中的多模态路由与图片交付设计仍有参考价值。
 
 ### 架构
 
@@ -337,7 +345,7 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 
 ### 风险点
 
-- **peer 声明用三元组区间**（**v3.3.2 起**；此前 2026-08-31 起为逐版本枚举、2026-09-24/25 两次扩充）：四条 dsh peer（`@deepseek-ai/dsh` / `dsh-credentials` / `dsh-llm` / `dsh-settings`）统一为 `>=0.2.0-rc.1 <0.2.1-0`；`cordis` `4.0.1 || 4.0.2 || 4.0.4`、schemastery `3.18.1 || 3.18.2 || 3.18.4` 仍精确枚举（两者不进版本门禁）。上界带 `-0` 是硬要求（写 `<0.2.1` 会漏放行 `0.2.1-rc.1`），见 `AGENTS.md` 规范 3。⚠️ **v3.3.2 同时收窄支持面**：`0.1.7` 线不再声明。
+- **peer 声明用三元组区间**（**v3.3.3 起为两段**；v3.3.2 起为单段，此前 2026-08-31 起为逐版本枚举、2026-09-24/25 两次扩充）：四条 dsh peer（`@deepseek-ai/dsh` / `dsh-credentials` / `dsh-llm` / `dsh-settings`）统一为 `>=0.2.0-rc.1 <0.2.1-0 || >=0.2.1-rc.1 <0.2.2-0`；`cordis` `4.0.1 || 4.0.2 || 4.0.4 || 4.0.5`、schemastery `3.18.1 || 3.18.2 || 3.18.4 || 3.18.5` 仍精确枚举（两者不进版本门禁）。上界带 `-0` 是硬要求（写 `<0.2.1` 会漏放行 `0.2.1-rc.1`），见 `AGENTS.md` 规范 3。⚠️ **v3.3.2 同时收窄支持面**：`0.1.7` 线不再声明。
 - **`0.1.7` 的配置迁移是"全有或全无"**：整个 settings.yaml 被一次性改名 + 逐段导入，任何一段导入失败都只留下日志、配置残留在 `settings.yaml.imported`。插件自身已通过声明 volatile `Config` 保证可导入；但其他未适配的插件仍可能触发该警告。
 - **`.volatile()` API 版本漂移**：schemastery `3.18.2`（rc.3）无此方法、`3.18.4`（0.1.7）有。若未来 rc.x 分支也被回移该方法，需重新评估守卫写法。
 - **`ctx.llm` 事件**是主要变数：`agent/request`/`agent/request-error` 的载荷结构若在 DSH 大版本调整，轮换判定需适配；但所有 handler 都走 `next()` 链，异常不会让 DSH 崩溃。
@@ -424,10 +432,10 @@ ctx 使用：`ctx.tools.register`、`ctx.subprocess.spawn`、`ctx.shellEnv.colle
 | 插件 | 版本 | 第三方依赖 | DSH 硬依赖 | 抗崩溃设计 | 最大风险点 |
 |---|---|---|---|---|---|
 | dsh-gitbash-win（归档） | 0.1.6 | 无（动态加载 5 个 @deepseek-ai/*） | `tools`/`subprocess`/`systemPrompt`/`shellEnv` | 顶层零依赖 + 动态加载 + 失败隔离 | `dsh-sandbox`（Windows ACL 上游 bug） |
-| dsh-connector | 0.3.8 | `yaml`（+ `jsdom` 懒加载；peer `schemastery` 仅 Config 声明用、`@deepseek-ai/dsh` 供版本门禁，**v0.3.8 起为三元组区间 `>=0.2.0-rc.1 <0.2.1-0`**） | `webServer`（`settings`/`tools.guard`/`systemPrompt`/`profileContext` 可选） | 顶层零第三方 static import + try/catch + 可选服务失败隔离 + **遗留 `toolFilters` 一次性救援** + **CRLF 解析容错** | `ctx.webServer` API 变化 / 内置模块子路径解析崩溃（`punycode/`，0.3.3 懒加载缓解）/ 0.1.7 配置迁移漏段（0.3.4 救援）/ 补丁文件换行被外部工具改成 CRLF（0.3.6） |
-| dsh-vision-bridge | 0.1.12 | 无 | `tools`/`attachments`/`llm`/`credentials` | 纯静态 + 零 @deepseek-ai + 防御性编码 | `ctx.llm` API 变化 / composer 输入层变化 / Agent 路由载荷变化（`requestHeader().config`） |
-| dsh-key-fallback | 3.3.2 | `schemastery`（仅 `Config` 声明用） | `credentials`/`llm`/`settings`（`webServer`/`slots` 可选） | ESM import + `agent/*` 事件 + **包装 `credentials.resolve` 切换 key（v3.0.0 起）** + **配置双后端自动判别** + **遗留池一次性救援** + **DSH peer 版本门禁（v3.3.2 起为三元组区间）** + 防御性编码 | `agent/request-error` 载荷 / `credentials.resolve` 签名 / `0.1.7` 配置迁移机制 / `webServer` API 变化 |
-| dsh-archived-sessions | 0.3.10 | 无（jsonl 后端可选 import + 内置编码 fallback） | `webServer`（`sessionPersistence`/`workspaceRegistry`/`sessionQuery`/`fs`/`shell` 可选） | 路径自解析（root 由 `DSH_HOME` 推导）+ 删除目录名校验 + **`ctx.shell` 双时代能力探测** + **DSH peer 版本门禁（v0.3.9 起为三元组区间）** + try/catch + 可选服务失败隔离 + **删除后广播 `api-session/removed`（v0.3.10）** + **工作区记账释放（v0.3.10）** | `sessionPersistence` 路径布局 / `workspaceRegistry` 字段变化 / `ctx.shell` 抽象方法**改名**（0.3.6 双时代探测）/ 宿主同槽位撞 slot id（0.3.4 起用 `omdp-` 前缀免疫） |
+| dsh-connector | 0.3.9 | `yaml`（+ `jsdom` 懒加载；peer `schemastery` 仅 Config 声明用、`@deepseek-ai/dsh` 供版本门禁，**v0.3.9 起为两段三元组区间 `>=0.2.0-rc.1 <0.2.1-0 || >=0.2.1-rc.1 <0.2.2-0`**） | `webServer`（`settings`/`tools.guard`/`systemPrompt`/`profileContext` 可选） | 顶层零第三方 static import + try/catch + 可选服务失败隔离 + **遗留 `toolFilters` 一次性救援** + **CRLF 解析容错** | `ctx.webServer` API 变化 / 内置模块子路径解析崩溃（`punycode/`，0.3.3 懒加载缓解）/ 0.1.7 配置迁移漏段（0.3.4 救援）/ 补丁文件换行被外部工具改成 CRLF（0.3.6） |
+| dsh-vision-bridge（**归档**） | 0.1.12 | 无 | `tools`/`attachments`/`llm`/`credentials` | 纯静态 + 零 @deepseek-ai + 防御性编码 | `ctx.llm` API 变化 / composer 输入层变化 / Agent 路由载荷变化（`requestHeader().config`） |
+| dsh-key-fallback | 3.3.3 | `schemastery`（仅 `Config` 声明用） | `credentials`/`llm`/`settings`（`webServer`/`slots` 可选） | ESM import + `agent/*` 事件 + **包装 `credentials.resolve` 切换 key（v3.0.0 起）** + **配置双后端自动判别** + **遗留池一次性救援** + **DSH peer 版本门禁（v3.3.3 起为两段三元组区间）** + 防御性编码 | `agent/request-error` 载荷 / `credentials.resolve` 签名 / `0.1.7` 配置迁移机制 / `webServer` API 变化 |
+| dsh-archived-sessions | 0.3.11 | 无（jsonl 后端可选 import + 内置编码 fallback） | `webServer`（`sessionPersistence`/`workspaceRegistry`/`sessionQuery`/`fs`/`shell` 可选） | 路径自解析（root 由 `DSH_HOME` 推导）+ 删除目录名校验 + **`ctx.shell` 双时代能力探测** + **DSH peer 版本门禁（v0.3.11 起为两段三元组区间）** + try/catch + 可选服务失败隔离 + **删除后广播 `api-session/removed`（v0.3.10）** + **工作区记账释放（v0.3.10）** | `sessionPersistence` 路径布局 / `workspaceRegistry` 字段变化 / `ctx.shell` 抽象方法**改名**（0.3.6 双时代探测）/ 宿主同槽位撞 slot id（0.3.4 起用 `omdp-` 前缀免疫） |
 
 ## DSH 0.1.7 兼容性专项（2026-09-24）
 
@@ -446,7 +454,7 @@ DSH `0.1.7` 引入多处**破坏性变更**，本仓库插件已按"优先双版
 | dsh-key-fallback | **原 v3.1.7 被跳过**（3/3 peer 不含 `0.1.7-rc.1`） | v3.2.0 追加 `0.1.7-rc.1`（credentials/llm/settings）与 cordis `4.0.4`、schemastery `3.18.4`；v3.2.1 追加遗留池救援；v3.2.2 追加 `@deepseek-ai/dsh` peer `0.1.7-rc.1`；v3.2.3 追加 rc.2（dsh/credentials/llm/settings 四条枚举同步扩充）；v3.2.4 追加 `0.2.0-rc.1`（同四条）；v3.3.0 删冗余 `process.env` 写入 + 修 `activeRef` 显示 + 加卸载还原；v3.3.1 文档更正（v3.3.0 曾误称「换 key 从未生效」，实为 `credentials.resolve` 包装自 v3.0.0 起一直有效）；**v3.3.2 四条 peer 改用三元组区间 `>=0.2.0-rc.1 <0.2.1-0`（同时收窄：不再声明 0.1.7 线）** |
 | dsh-connector | **原不受门禁**（peer 只有 schemastery，非 `dsh-*`） | import 期崩溃需修 ⇒ v0.3.3；v0.3.4 **主动纳入门禁**（新增 `@deepseek-ai/dsh` peer）；v0.3.5 追加 rc.2；v0.3.6 修 CRLF 解析 + `profileContext` 补丁路径；v0.3.7 追加 `0.2.0-rc.1`；**v0.3.8 改用三元组区间（同时收窄：不再声明 0.1.7 线）** |
 | dsh-archived-sessions | **原不受门禁**（peer 只有 cordis） | `ctx.shell.run()` 移除导致删除失效 ⇒ v0.3.5（追加 cordis `4.0.4` 枚举）、v0.3.6 双时代自适应 + **主动纳入门禁**；v0.3.7 追加 rc.2；v0.3.8 追加 `0.2.0-rc.1`；**v0.3.9 改用三元组区间（同时收窄：不再声明 0.1.7 线）** |
-| dsh-vision-bridge | **不受门禁**（无 dsh peer） | 无需改动 |
+| dsh-vision-bridge（归档） | **不受门禁**（无 dsh peer） | 无需改动 |
 
 **门禁的两个易误读点（0.3.4/0.3.6 本轮实证）**：
 
@@ -990,16 +998,15 @@ key-fallback `3.3.2` **全部 ✅ 放行**。
 3. **相互隔离**：任一插件失效，不影响其他插件和 DSH 本体。
 4. **建议**：DSH 大版本升级后，逐个验证活跃插件（connector API、vision-bridge 识图、key-fallback），
    有问题就更新对应插件版本。
-5. **本仓库现状**：`0.2.0` 线（rc.1 → rc.2）适配已全部落地，三个插件**声明改用三元组区间**
-   `>=0.2.0-rc.1 <0.2.1-0` —— 同三元组后续 rc 与正式版 `0.2.0` **不再需要改声明/重发包**：
-   `connector` **v0.3.8**（jsdom 懒加载修 import 崩溃 + 工具过滤迁 volatile `Config` + 遗留过滤救援 +
-   声明 DSH peer + CRLF 解析与 `profileContext` 补丁路径修复）、
-   `key-fallback` **v3.3.2**（双后端 + 遗留池救援 + **`credentials.resolve` 包装切换 key，自 v3.0.0 生效，
-   实机 200 条 diag 佐证**）、
-   `archived-sessions` **v0.3.9**（`ctx.shell` 契约**双时代自适应**修删除失效）；
-   `vision-bridge` v0.1.12 无改动（也无 dsh peer）。
-   ⚠️ 本轮共识（2026-09-30）：三个插件**只承诺 `0.2.0` 线**，`0.1.7` 线不再声明——
+5. **本仓库现状**：`0.2.0` 线与 `0.2.1` 线适配均已落地，三个插件**声明为两段三元组区间**
+   `>=0.2.0-rc.1 <0.2.1-0 || >=0.2.1-rc.1 <0.2.2-0` —— 同三元组后续 rc 与正式版
+   **不再需要改声明/重发包**：
+   `connector` **v0.3.9**、`key-fallback` **v3.3.3**、`archived-sessions` **v0.3.11**
+   （三者 2026-10-18 本轮**源码零改动**，仅改声明 + 追加 `cordis` `4.0.5` / `schemastery` `3.18.5`
+   枚举；详见下方「DSH 0.2.1 兼容性专项」）。
+   ⚠️ 累计共识：三个插件**只承诺 `0.2.0` 与 `0.2.1` 线**，`0.1.7` 线不再声明——
    需要在 0.1.7 上运行请用 connector `0.3.7` / key-fallback `3.3.1` / archived-sessions `0.3.8`。
+   📦 视觉插件 `@omdp/dsh-vision-bridge` 已于 2026-10-18 归档，不再列入活跃插件。
    ⚠️ 注意 cron：**抽象服务的「新增方法」兼容、「移除方法」不兼容**（`ctx.shell` 的 `run`→`execute` 是典型：
    改名而非别名），以及**宿主解析器缺陷会在插件 import 期放大**——这两类都不体现在 `.d.ts` 的
    「删除行」比对里，需靠真实运行时报错定位。另一类盲区是**版本相关的新机制**：`evaluatePluginCompatibility`
@@ -1077,3 +1084,89 @@ Host 列表过滤（`dsh-session-query` 全库 **0** 处 `archiv*`；`ArchivedSe
 （实测确认），且 `bootstrap` 对 `sessionPaths` 缺失的 id 直接 `continue` ⇒ 只能手改 `workspace.json` 清理；
 另外 `ctx.emit` 在 cordis 中不隔离，宿主自己的 `api-session/*` 转发监听器若抛错会冒泡回插件，
 值得上游加固。
+
+---
+
+## DSH 0.2.1 兼容性专项（2026-10-18，跨三元组核查）
+
+DSH `0.2.1-rc.2` 是本轮目标版本。按 `AGENTS.md` 规范 3，跨到新三元组**必须先核查再放行**。
+本轮核查**通过**，三个插件新增第二段区间。**三个插件的源码零改动** —— 只动声明。
+
+### 核查方法（四层，逐步加强）
+
+| 层 | 做法 | 结论 |
+|---|---|---|
+| 1. 包级全量差异 | `0.2.0-rc.2` → `0.2.1-rc.2` 逐文件 SHA256，覆盖全部 `@deepseek-ai/*` | 包数 **288 → 305**；273 个有变化，其中 **177 个有真实 `.js` 改动**，91 个仅版本号噪声，5 个仅 `.d.ts`，4 个逐字节相同；**11 个从 CLI 依赖树消失**（仍有 `0.2.1-*` 版本在 npm 上，属 client/web 侧），**新增 28 个** |
+| 2. 导出面差异 | 对**实际消费的 9 个包**做真实 ESM `import`，比对命名导出集合（含新增**和移除**） | `dsh-credentials`(9) / `dsh-llm`(66) / `dsh-settings`(4) / `dsh-workspace`(12) / `dsh-session-query`(17) / `schemastery`(1) **完全一致**；`dsh-session` 28→30（纯新增）；`dsh-session-persistence-jsonl` 与 `dsh-app-boot` 有移除项（见下，均不影响我们） |
+| 3. 方法级存在性 | 12 个包 / 37 个符号的正则存在性复核 | 我们调用的**全部符号在 `0.2.1-rc.2` 中均存在**，零缺失 |
+| 4. 真机装配（决定性） | 真实 `0.2.1-rc.2` CLI + 隔离 `DSH_HOME` + `link:` 我们的插件，跑 `--dump-config` | 三个插件**全部进入组合树**（`- id: connector` / `key-fallback` / `archived-sessions`），**零 skip / 零不兼容告警** |
+
+### 两处需要解释的移除项（均不影响我们）
+
+1. **`dsh-session-persistence-jsonl`**：根导出由 `{JsonlCompressionSchema, default}`
+   变为 `{Config, JsonlCompressionSchema, apply, name}` —— 该包**从「带 default 导出的后端类」
+   改成了标准 cordis 插件模块**。
+   我们 `dsh-archived-sessions/lib/index.js` 的写法是
+   `const backend = typeof jsonlBackend.sessionDir === 'function' ? jsonlBackend : null`，
+   而 `sessionDir` / `projectDir` 在两版里**都是类方法、从来不是命名导出** ⇒
+   该分支在 `0.2.0-rc.2` 上**本来就没命中过**，一直走插件内置的编码兜底实现。
+   **两版行为完全一致，无回归。**
+   （注：该处代码注释声称"后端路径助手被导出并使用"，与实现不符——属历史遗留描述，
+   本轮未改源码，仅在笔记中记录。）
+2. **`dsh-app-boot`**：移除 `HARNESS_SOURCE_SECTION` / `addHarnessSourceSection`（我们未使用），
+   新增 `readBundlePatches` / `recomposeProfile` / `resolvePluginResource` / `ON_DEMAND_BUNDLES` /
+   `OFFICIAL_ON_DEMAND_CATALOG` / `ProfileRuntimeResolution` / `ResolutionRestartRequired` 共 7 个导出。
+
+### 门禁函数本身的三处演进（已逐条确认对我们无影响）
+
+| 变化 | 内容 | 对我们的影响 |
+|---|---|---|
+| 返回值字段改名 | `peers` → **`requirements`**（改由新函数 `unmetRequirements(fields, runtimeVersion)` 计算） | **无**。`scripts/check-peer-gate.mjs` 只判 `gate(...) === undefined`，不消费返回对象字段 |
+| 新增 `engines.dsh` 优先级 | 插件若声明 `engines.dsh`，该字段**独占决定**结果，完全跳过 `peerDependencies` 检查 | **无**。我们三个插件都没声明 `engines`。脚本里的回退谓词已同步这一优先级以保持等价 |
+| prerelease 判定 | 内联判断改为本地 `satisfies()` 包装 | **无**。仍是 `semver.satisfies(v, range, { includePrerelease: true })`，语义未变 |
+
+### 放行边界（真门禁函数 `evaluatePluginCompatibility` 实测，3 插件 × 19 版本 = 57/57 全对）
+
+- **✅ 放行**：`0.2.0-rc.1` / `rc.2` / `rc.3` / `rc.9` / `0.2.0` 与 `0.2.1-rc.1` / `rc.2` / `rc.3` / `0.2.1`
+- **⛔ 拦截**：`0.2.1-alpha.1` / `alpha.5`（**早于实测下界 `0.2.1-rc.1`**）、
+  `0.2.2-rc.1` / `0.2.2-0`、`0.3.0-rc.1`、`0.1.7-rc.1` / `rc.2` / `alpha.1` / `0.1.8-rc.1` / `0.1.6-alpha.1`
+
+下界取 **`0.2.1-rc.1`**（而非直接取实测的 `rc.2`）的依据：`0.2.1-rc.1` ↔ `rc.2` 之间，
+我们依赖的 22 个包**导出面完全一致**，且**全部差异中只有 `dsh-cordis-client-runner/lib/client.js`
+一个文件有真实代码改动**，其余全是版本号噪声（`schemastery` 甚至逐字节相同）。
+
+### 反事实证明（证明第 4 层装配测试真的能抓到回归）
+
+把 `dsh-connector` 复制一份、peer 改回旧声明 `>=0.2.0-rc.1 <0.2.1-0`，
+在**同一个** `0.2.1-rc.2` 运行时上跑 `--dump-config`：
+
+```
+dsh: skipping profile bundle "@omdp/dsh-connector-old": Error: Plugin @omdp/dsh-connector@0.3.9
+is incompatible with dsh 0.2.1-rc.2: requirements {"@deepseek-ai/dsh":">=0.2.0-rc.1 <0.2.1-0"}.
+Running it may cause crashes or data loss. … Exact-version exemption: not active.
+```
+
+而同一次运行里、用**新声明**的 `archived-sessions` 照常组合进树（输出含 `- id: archived-sessions`），
+且 `dump-config` 退出码 `0`。
+⇒ **测试敏感**（旧声明必被拦截）+ **新声明真有效**（真机放行）。
+
+### 本轮改动
+
+| 插件 | 版本 | 声明变化 |
+|---|---|---|
+| `@omdp/dsh-connector` | `0.3.8` → **`0.3.9`** | `@deepseek-ai/dsh` 追加第二段区间；`schemastery` 追加 `3.18.5` |
+| `@omdp/dsh-key-fallback` | `3.3.2` → **`3.3.3`** | 四条 dsh peer 追加第二段区间；`cordis` 追加 `4.0.5`；`schemastery` 追加 `3.18.5` |
+| `@omdp/dsh-archived-sessions` | `0.3.10` → **`0.3.11`** | `@deepseek-ai/dsh` 追加第二段区间；`cordis` 追加 `4.0.5` |
+
+说明：`0.2.1-rc.2` 钉的是 `cordis ~4.0.5` / `schemastery ~3.18.5`，故追加这两个版本；
+`cordis` `4.0.3` / `schemastery` `3.18.3` **仍不枚举** —— 经查证，**没有任何 DSH 版本钉过它们**。
+`scripts/check-peer-gate.mjs` 的 `EXPECTED` 矩阵已同步扩容（9 放行 / 10 拦截）。
+
+### 同期动作：视觉插件归档
+
+`@omdp/dsh-vision-bridge` 于同日（2026-10-18）**主动停用并归档**（见 §3）。
+它与版本门禁无关：零 dsh peer ⇒ 在**任何** DSH 版本上都不会被跳过，也因此**没有自动保护**。
+归档步骤：源码 `git mv` 至 `archive/dsh-vision-bridge-0.1.12-2026-10-18T18-06-04/`、
+从 `.github/workflows/publish.yml` 的发布循环移除、`AGENTS.md` / 根 `README.md` /
+本文档 / `docs/npm-publish.md` 同步标注。
+npm 上的 `@omdp/dsh-vision-bridge@0.1.12` **保留可安装**，不再发新版本。

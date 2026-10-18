@@ -291,7 +291,7 @@ export function apply(ctx, config) {
   }
   // ── 包装 credentials.resolve：ref 命中池 env 时返回池当前 key ──
   // 这是 DSH 官方唯一的「每次请求都问一次用哪把 key」接缝（dsh-llm-pi-ai:2563、
-  // dsh-llm-deepseek-api-key:44、dsh-vision-bridge:91、dsh-cost-meter:957 等全部经它取值），
+  // dsh-llm-deepseek-api-key:44、dsh-cost-meter:957 等全部经它取值；已归档的 vision-bridge 亦然），
   // 因此拦这一处即可覆盖所有 provider，且语义与「重发归官方、插件只切 key」完全同构。
   const poolsByEnv = new Map()
   const credSvc = ctx.credentials

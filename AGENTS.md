@@ -2,7 +2,8 @@
 
 本文档约束任何在 `D:\WorkSpace\omdp` 仓库内工作的 agent（含后续会话）。
 仓库 = `@omdp/*` 系列 DSH 插件 monorepo（当前活跃：`dsh-connector`、
-`dsh-vision-bridge`、`dsh-key-fallback`；历史归档在 `archive/`）。
+`dsh-key-fallback`、`dsh-archived-sessions`；历史归档在 `archive/`，
+含 2026-10-18 起停用的视觉插件 `dsh-vision-bridge`）。
 
 ## 工作前提（先读再做）
 
@@ -96,9 +97,10 @@ node scripts/check-peer-gate.mjs            # 只报不符项
 node scripts/check-peer-gate.mjs --verbose  # 打印每个运行时版本的判定
 ```
 
-它对本仓库三个插件跑全矩阵（`0.2.0-rc.1`/`rc.2`/`rc.3`/`rc.9`/`0.2.0` 应放行；
-`0.2.1-rc.1`/`0.3.0-rc.1`/`0.1.7-*` 应拦截），**专门用来抓「上界漏写 `-0`」**
-——把声明临时改成 `<0.2.1` 跑一次即可看到它准确报出 `0.2.1-rc.1 期望拦截，实际放行`。
+它对本仓库三个插件跑全矩阵（`0.2.0-rc.1`/`rc.2`/`rc.3`/`rc.9`/`0.2.0` 与
+`0.2.1-rc.1`/`rc.2`/`rc.3`/`0.2.1` 应放行；`0.2.1-alpha.*`/`0.2.2-*`/`0.3.0-rc.1`/
+`0.1.7-*` 应拦截），**专门用来抓「上界漏写 `-0`」**
+——把声明临时改成 `<0.2.2` 跑一次即可看到它准确报出 `0.2.2-rc.1 期望拦截，实际放行`。
 环境里有 `@deepseek-ai/dsh-app-boot` 时脚本会用**真门禁函数**，否则回退到等价的
 semver 谓词（并打印 semver 来源）。改完支持面后**记得同步脚本顶部的 `EXPECTED` 矩阵**，
 否则有意变更会被报成回归。

@@ -1,8 +1,8 @@
 # @omdp/dsh-archived-sessions
 
-> Archived-sessions manager for the DeepSeek Harness web UI — fork of [`@muwinds/dsh-archived-sessions`](https://github.com/MuWinds/dsh-archived-sessions) (0.2.0), adapted for DSH **0.1.5-rc.1** through **0.2.0-rc.1**.
+> Archived-sessions manager for the DeepSeek Harness web UI — fork of [`@muwinds/dsh-archived-sessions`](https://github.com/MuWinds/dsh-archived-sessions) (0.2.0), adapted for DSH **0.2.0-rc.1** through **0.2.1-rc.2**.
 
-DSH 归档会话管理：在 设置 → 归档会话管理 中查看、释放、删除已归档会话（支持按树删除子会话、清理孤儿会话）。自 0.3.4 起与 DSH 0.1.6 内置的「已归档会话」设置页共存、互不冲突。0.3.6 起 `ctx.shell` 双时代自适应（`run()` / `execute()`），**0.1.5-rc.1 → 0.2.0-rc.1 全区间删除可用**（0.3.7 追加 rc.2 声明、0.3.8 追加 0.2.0-rc.1 声明）。
+DSH 归档会话管理：在 设置 → 归档会话管理 中查看、释放、删除已归档会话（支持按树删除子会话、清理孤儿会话）。自 0.3.4 起与 DSH 0.1.6 内置的「已归档会话」设置页共存、互不冲突。0.3.6 起 `ctx.shell` 双时代自适应（`run()` / `execute()`），**0.2.0-rc.1 → 0.2.1-rc.2 全区间删除可用**（0.3.7 追加 rc.2 声明、0.3.8 追加 0.2.0-rc.1 声明、0.3.9 改用三元组区间、0.3.11 追加 0.2.1 段）。
 
 [English](#english) · [中文](#中文)
 
@@ -48,9 +48,9 @@ pnpm add @omdp/dsh-archived-sessions -w
 
 ### 要求 / Requirements
 
-- DeepSeek Harness **0.2.0-rc.1 / 0.2.0-rc.2**（实测版本；0.3.9 起改用三元组区间 `>=0.2.0-rc.1 <0.2.1-0`，自动覆盖同三元组后续 rc 与正式版 `0.2.0`）。更早的 **0.1.5~0.1.7 系列**曾支持（0.3.6 起全兼容），但**自 0.3.9 起不再声明**——需要在 0.1.7 上运行请装 0.3.8 或更早
-- `@deepseek-ai/dsh` `>=0.2.0-rc.1 <0.2.1-0`（peer，三元组区间；0.3.9 起；语义见下方「兼容性门禁」）
-- `@deepseek-ai/cordis` `4.0.1` / `4.0.2` / `4.0.4`（peer，逐版本枚举）
+- DeepSeek Harness **0.2.0-rc.1 / 0.2.0-rc.2 / 0.2.1-rc.2**（实测版本；0.3.9 起改用三元组区间、**0.3.11 起为两段** `>=0.2.0-rc.1 <0.2.1-0 || >=0.2.1-rc.1 <0.2.2-0`，自动覆盖这两个三元组内的后续 rc 与正式版）。更早的 **0.1.5~0.1.7 系列**曾支持（0.3.6 起全兼容），但**自 0.3.9 起不再声明**——需要在 0.1.7 上运行请装 0.3.8 或更早
+- `@deepseek-ai/dsh` `>=0.2.0-rc.1 <0.2.1-0 || >=0.2.1-rc.1 <0.2.2-0`（peer，两段三元组区间；0.3.9 起、0.3.11 起为两段；语义见下方「兼容性门禁」）
+- `@deepseek-ai/cordis` `4.0.1` / `4.0.2` / `4.0.4` / `4.0.5`（peer，逐版本枚举）
 - `@deepseek-ai/dsh-session-persistence-jsonl`（可选，随 DSH 自带；缺失时回退到内置路径编码）
 
 ### `ctx.shell` 双时代自适应（0.3.6）
@@ -71,9 +71,9 @@ pnpm add @omdp/dsh-archived-sessions -w
 0.1.7 全废），0.3.5 只调 `execute()`（0.1.7 可用、rc.x **静默失效**——`typeof shell.run !== "function"`
 守卫直接抛错，被 UI 收敛成红字「删除失败」），两次都是「只赌一边」。
 
-### 兼容性门禁（0.3.6 起声明，0.3.9 起改用三元组区间）
+### 兼容性门禁（0.3.6 起声明，0.3.9 起改用三元组区间，0.3.11 起为两段）
 
-当前声明为 `"@deepseek-ai/dsh": ">=0.2.0-rc.1 <0.2.1-0"`。
+当前声明为 `"@deepseek-ai/dsh": ">=0.2.0-rc.1 <0.2.1-0 || >=0.2.1-rc.1 <0.2.2-0"`。
 该声明由 DSH 自己的
 **`evaluatePluginCompatibility()`**（`dsh-app-boot` 的公开导出）在安装与每次启动时校验：命中未实测
 的新版本时会**整包优雅跳过**（stderr 打 `skipping profile bundle`，DSH 照常启动），命中实测版本
@@ -87,7 +87,13 @@ pnpm add @omdp/dsh-archived-sessions -w
 「设置项消失、路由 405/404」）；而同一 `[major,minor,patch]` 内的 rc 属同一 API 契约迭代
 （实测 rc.1→rc.2 全量 20 包逐文件 SHA256：本插件依赖面**只有 `package.json` 版本号变化**），
 故实测该三元组首个 rc 即可放行其后续 rc 与正式版。**区间最多宽到一个三元组**，跨 patch/minor
-（如 `0.2.1-rc.1`）仍需重新核查后新增区间——见 `AGENTS.md` 规范 3。
+仍需重新核查后新增区间——见 `AGENTS.md` 规范 3。
+
+**0.3.11 追加第二段**：DSH `0.2.1-rc.2` 发布后按规范 3 做跨三元组核查（四层：全量
+`@deepseek-ai/*` 逐文件 SHA256、消费面真实 ESM 导出集比对、调用符号逐个存在性复核、
+真实 CLI + 隔离 `DSH_HOME` 跑 `--dump-config` 装配），通过后新增 `>=0.2.1-rc.1 <0.2.2-0`，
+**代码零改动**。⚠️ 风险观察：`api-session/removed` 链路在 0.2.1 上新增了 `dsh-api-remote-access`
+服务把关，但该服务对 profile owner 直接短路放行（桌面 profile 即 owner）。
 
 > ⚠️ 上界必须写 `<0.2.1-0` 而非 `<0.2.1`：semver 里预发布排在正式版之前，`0.2.1-rc.1 < 0.2.1`
 > 成立，写 `<0.2.1` 会漏放行下一个三元组的 rc。
@@ -115,6 +121,14 @@ profile（`dsh@0.1.7-rc.2` + 插件 0.3.6 + 精确版本豁免）上**真机实�
 
 ### 变更记录
 
+- **0.3.11**（2026-10-18）：**追加 DSH `0.2.1` 支持**（peer 改为两段
+  `>=0.2.0-rc.1 <0.2.1-0 || >=0.2.1-rc.1 <0.2.2-0`，`cordis` 枚举追加 `4.0.5`；**代码零改动**）。
+  核查依据（四层）：① `0.2.0-rc.2 → 0.2.1-rc.2` 全量 `@deepseek-ai/*` 逐文件 SHA256
+  （288 → 305 个包，177 个有真实 `.js` 改动）；② 本插件消费面真实 ESM 导出集比对 —— 唯一
+  移除项在 `dsh-app-boot`（未使用）；`dsh-session-persistence-jsonl` 的 `default` 导出消失，
+  但本插件只 `typeof jsonlBackend.sessionDir`，而 `sessionDir` 在两版里**都从来不是导出**
+  （一直是类方法）⇒ 该分支一直走内置兜底，两版行为一致；③ 调用符号逐个存在性复核，零缺失；
+  ④ 真实 `0.2.1-rc.2` CLI + 隔离 `DSH_HOME` 跑 `--dump-config`，本插件正常进树、零跳过。
 - **0.3.10**（2026-10-01）：**修复「删除归档会话后，它们又回到对话列表，点进去报 `session/not-found`」**。
 
   根因（全链路实测确认）是**客户端陈旧行**，不是 Host 端删除失败：归档在 DSH 里只是
@@ -273,9 +287,9 @@ pnpm add @omdp/dsh-archived-sessions -w
 
 ### Requirements
 
-- DeepSeek Harness **0.2.0-rc.1 / 0.2.0-rc.2** (tested; since 0.3.9 the peer uses the triple range `>=0.2.0-rc.1 <0.2.1-0`, which automatically covers later rc builds in the same triple and the stable `0.2.0`). The earlier **0.1.5–0.1.7 line** was supported (0.3.6+) but is **no longer declared as of 0.3.9** — use 0.3.8 or older if you need it on 0.1.7.
-- `@deepseek-ai/dsh` `>=0.2.0-rc.1 <0.2.1-0` (peer, triple range; since 0.3.9)
-- `@deepseek-ai/cordis` `4.0.1` / `4.0.2` / `4.0.4` (peer, enumerated per version)
+- DeepSeek Harness **0.2.0-rc.1 / 0.2.0-rc.2 / 0.2.1-rc.2** (tested; since 0.3.9 the peer uses a triple range and **since 0.3.11 two segments**, `>=0.2.0-rc.1 <0.2.1-0 || >=0.2.1-rc.1 <0.2.2-0`, which automatically covers later rc builds and the stable release of either triple). The earlier **0.1.5–0.1.7 line** was supported (0.3.6+) but is **no longer declared as of 0.3.9** — use 0.3.8 or older if you need it on 0.1.7.
+- `@deepseek-ai/dsh` `>=0.2.0-rc.1 <0.2.1-0 || >=0.2.1-rc.1 <0.2.2-0` (peer, two triple segments; since 0.3.9, second segment since 0.3.11)
+- `@deepseek-ai/cordis` `4.0.1` / `4.0.2` / `4.0.4` / `4.0.5` (peer, enumerated per version)
 - `@deepseek-ai/dsh-session-persistence-jsonl` (optional, ships with DSH; falls back to the built-in path encoding when absent)
 
 ### Dual-era `ctx.shell` adaptation (0.3.6)
@@ -298,9 +312,9 @@ only `run()` (fine on rc.x, dead on 0.1.7) and 0.3.5 called only `execute()` (fi
 dead** on rc.x, where the `typeof shell.run !== "function"` guard threw immediately and the UI surfaced
 it as the red "删除失败" banner) — both were bets on a single era.
 
-### Compatibility gate (declared since 0.3.6, triple range since 0.3.9)
+### Compatibility gate (declared since 0.3.6, triple range since 0.3.9, two segments since 0.3.11)
 
-The current declaration is `"@deepseek-ai/dsh": ">=0.2.0-rc.1 <0.2.1-0"`. DSH's own
+The current declaration is `"@deepseek-ai/dsh": ">=0.2.0-rc.1 <0.2.1-0 || >=0.2.1-rc.1 <0.2.2-0"`. DSH's own
 **`evaluatePluginCompatibility()`** (a public export of `dsh-app-boot`) checks it at install time and on
 every boot: on an untested newer runtime the **whole bundle is gracefully skipped** (stderr prints
 `skipping profile bundle`; DSH still boots), and on the tested runtime it loads normally.
@@ -312,7 +326,15 @@ gone, route 404/405"), whereas rc builds inside one `[major,minor,patch]` are it
 API contract (verified: rc.1 → rc.2 across 20 packages is **byte-identical** except `package.json`
 version strings for everything this plugin touches). So testing the first rc of a triple clears its
 later rc builds and the stable release. **A range never spans more than one triple** — crossing a
-patch/minor (e.g. `0.2.1-rc.1`) still requires a fresh check and a new segment (`AGENTS.md` rule 3).
+patch/minor still requires a fresh check and a new segment (`AGENTS.md` rule 3).
+
+**0.3.11 adds the second segment**: after DSH `0.2.1-rc.2` shipped, rule 3 required a cross-triple
+review (four layers: a per-file SHA256 diff of the whole `@deepseek-ai/*` tree, a real ESM
+export-set diff of everything this plugin consumes, a symbol-by-symbol existence check, and a real
+CLI assembly under an isolated `DSH_HOME` with `--dump-config`). Passing, `>=0.2.1-rc.1 <0.2.2-0`
+was added with **zero code changes**. ⚠️ Risk noted: on 0.2.1 the `api-session/removed` chain now
+goes through the new `dsh-api-remote-access` service, which short-circuits to ALLOW for the profile
+owner — and the desktop profile is the owner.
 
 > ⚠️ The upper bound must be `<0.2.1-0`, never `<0.2.1`: semver sorts prereleases *before* the stable
 > release, so `0.2.1-rc.1 < 0.2.1` holds and `<0.2.1` would leak the next triple's rc.
@@ -344,6 +366,17 @@ misreported as a failure).
 
 ### Changelog
 
+- **0.3.11** (2026-10-18): **adds DSH `0.2.1` support** (the peer became two segments,
+  `>=0.2.0-rc.1 <0.2.1-0 || >=0.2.1-rc.1 <0.2.2-0`, and `cordis` gained `4.0.5`; **zero code
+  changes**). Evidence, four layers: (1) a per-file SHA256 diff of the whole `@deepseek-ai/*` tree
+  between `0.2.0-rc.2` and `0.2.1-rc.2` (288 → 305 packages, 177 with real `.js` churn); (2) a real
+  ESM export-set diff of everything this plugin consumes — the only removals are in `dsh-app-boot`
+  (unused), and while `dsh-session-persistence-jsonl` lost its `default` export, this plugin only
+  tests `typeof jsonlBackend.sessionDir` and `sessionDir` was *never* an export in either version
+  (it is a class method), so that branch has always fallen through to the built-in fallback and
+  both versions behave identically; (3) a symbol-by-symbol existence check, zero missing; (4) a real
+  `0.2.1-rc.2` CLI assembly under an isolated `DSH_HOME` (`--dump-config` composes the plugin with
+  zero skips).
 - **0.3.10** (2026-10-01): **fixes "deleted archived sessions reappear in the chat list"** (clicking one produced `session "…" not found (session/not-found)`; a restart was the only cure).
 
   Root cause — a **stale client-side row**, not a host-side delete failure. In DSH archiving is only a **visibility mask**: it never filters the host list (`dsh-session-query` has **zero** `archiv*` matches; the `ArchivedSessionGate` merely rejects on `agent/pre-step`). The client row lives on in `manager.summaries` and is **only hidden** by the archive set. The old delete path merely removed the id from `archivedSessionIds` — lifting the mask made the surviving row visible again, which the user sees as "the archived session came back". Its **only** client-side notification was the incidental `session/disposed → api-session/removed` triggered by `entry.detach()`, and that chain **exists only while the session is still live**; an archived, unopened session usually is not ⇒ **no event at all**, and the row survived until restart.

@@ -28,12 +28,6 @@ omdp/
 │   ├── cordis.patch.yml # bundle activation row
 │   ├── package.json
 │   └── README.md
-├── dsh-vision-bridge/   # vision bridge: let text-only models "see" via a configured multimodal endpoint
-│   ├── index.js         # host half
-│   ├── client.js        # client half (paste/drop → temp path)
-│   ├── cordis.patch.yml # bundle activation row
-│   ├── package.json
-│   └── README.md
 ├── dsh-archived-sessions/ # archived-session manager (fork of @muwinds, DSH 0.2.0-rc.1 / 0.2.0-rc.2)
 │   ├── lib/index.js     # host half (ESM)
 │   ├── lib/client.js    # client half (Web UI settings tab)
@@ -44,6 +38,7 @@ omdp/
 │   ├── dsh-gitbash-win/
 │   ├── resume-stream/
 │   ├── key-fallback-*/                  # dsh-key-fallback version snapshots & design drafts
+│   ├── dsh-vision-bridge-*/              # archived 2026-10-18 (was an active vision plugin)
 │   └── README.md
 ├── notes/               # development lessons & notes (三层：notes/<date>/<category>/)
 ├── docs/                # research notes, compatibility matrix, publish guide
@@ -52,7 +47,7 @@ omdp/
 
 ### Plugins
 
-#### `@omdp/dsh-connector` — MCP + Skills manager (`v0.3.8`)
+#### `@omdp/dsh-connector` — MCP + Skills manager (`v0.3.9`)
 
 One settings tab (**Connector**) that manages three things from the DSH Web UI:
 
@@ -69,11 +64,13 @@ One settings tab (**Connector**) that manages three things from the DSH Web UI:
 
 - **Peer declaration switched to the triple range (v0.3.8)** — zero code changes. The `@deepseek-ai/dsh` peer moved from per-version enumeration to `>=0.2.0-rc.1 <0.2.1-0`. When `0.2.0-rc.2` shipped, the gate blocked the old declaration for the **third** time (Connector tab gone, `/connector/api/*` → 404); the root cause was never incompatibility but enumeration going stale on every rc. Verified by a full 20-package file-by-file SHA256 diff `0.2.0-rc.1 → rc.2` (everything this plugin touches changes **only in `package.json` version strings**; the `dsh` main package's changes are entirely `desktop`-profile support) and by running the real gate over the whole matrix — `0.2.0-rc.1`/`rc.2`/`rc.3`/`rc.9`/stable `0.2.0` all pass, `0.2.1-rc.1`/`0.3.0-rc.1` all blocked. ⚠️ **This narrows support**: the `0.1.7` line is no longer declared — install **0.3.7** if you need it there.
 
+- **DSH `0.2.1` support (v0.3.9)** — the `@deepseek-ai/dsh` peer gained a **second triple segment**: `>=0.2.0-rc.1 <0.2.1-0 || >=0.2.1-rc.1 <0.2.2-0` (`schemastery` also gained `3.18.5`, pinned by `0.2.1-rc.2`). **Zero code changes.** Verified in four layers: a per-file SHA256 diff of the whole `@deepseek-ai/*` tree (`0.2.0-rc.2` → `0.2.1-rc.2`: 288 → 305 packages, 177 with real `.js` churn), a real ESM import/export-set diff of the 9 packages we consume (the only removals are unused, in `dsh-app-boot`), a method-level existence check of all 37 symbols we call, and a **real `0.2.1-rc.2` CLI assembly** with an isolated `DSH_HOME` (`--dump-config` composes all three plugins, zero skips).
+
 ```jsonc
-"dependencies": { "@omdp/dsh-connector": "^0.3.8" }
+"dependencies": { "@omdp/dsh-connector": "^0.3.9" }
 ```
 
-#### `@omdp/dsh-key-fallback` — multi-key API key pool with rotation (`v3.3.2`)
+#### `@omdp/dsh-key-fallback` — multi-key API key pool with rotation (`v3.3.3`)
 
 Hooks DSH's credential seam `credentials.resolve`: each time an adapter asks for a key, if that ref belongs to a configured pool the wrapper returns the pool's current key; on a configured trigger error it marks the failed key cooling and advances to the next key — **re-sending is left entirely to DSH's own `dsh-llm-retry`**. Ships an always-visible settings page (**Settings → API Key 回退**) with a redesigned UI:
 
@@ -90,19 +87,13 @@ Hooks DSH's credential seam `credentials.resolve`: each time an adapter asks for
 - **Correction to the v3.3.0 notes (v3.3.1)** — the v3.3.0 entry below originally claimed that key switching had *never* reached the provider. **That was wrong.** The `credentials.resolve` wrapper that supplies the key has existed since **v3.0.0** (`75ea76a`), and the published `3.2.4` tarball already contains it (`lib/index.js:298`) along with its `pool-hit` diagnostic (`:305`) — verified by downloading the tarball from the registry. Rotation was already working; the `process.env` writes were redundant code sitting next to a working wrapper, not the mechanism. The v3.3.0 entry is retained below with its claim corrected.
 - **Four real fixes (v3.3.0)** — (1) `/pools` `activeRef` no longer misreports the current key: it used to reverse-look-up `process.env[<pool env>]` and could highlight the wrong member (measured live: `activeRef=SENSENOVA_API_KEY` while `currentRef=key_fallback_sensenova_key1`); it is now just `currentRef`. (2) The 5 `process.env` writes are gone — verified invisible to the credential layer (DSH freezes `{...process.env}` into a launch-environment snapshot at boot), so they were dead weight for auth; dropping them also stops the plugin mutating the host env. (3) `agent/request-error` no longer falls back to blaming `keyValues[0]`. (4) Uninstall restores the original `resolve` via `ctx.effect` with an identity guard, so hot reloads stop stacking wrappers. Re-send stays DSH's job — every rotation path still calls `next()`.
 
-```jsonc
-"dependencies": { "@omdp/dsh-key-fallback": "^3.3.2" }
-```
-
-#### `@omdp/dsh-vision-bridge` — vision for text-only models (`v0.1.12`)
-
-A zero-dependency plugin that gives **text-only models** vision: it auto-detects whether the routed model supports images (`llm.resolveModelInfo().inputModalities`), and for text-only models forwards pasted / attached images to a configurable OpenAI-compatible multimodal endpoint (default Agnes `agnes-2.5-flash`) and feeds the returned text back as evidence. Ships a `vision_bridge_read_image` tool, a paste/drop → temp-path browser handler, a wrapped `(vision bridge)` provider entry, and an `agent/pre-step` auto-read hook.
+- **DSH `0.2.1` support (v3.3.3)** — all four dsh peers gained the **second triple segment** `>=0.2.0-rc.1 <0.2.1-0 || >=0.2.1-rc.1 <0.2.2-0`; `cordis` gained `4.0.5` and `schemastery` `3.18.5` (both pinned by `0.2.1-rc.2`). **Zero code changes** — the whole surface this plugin touches (`credentials.resolve` wrapping, `ctx.llm` events, `settings`, `webServer`) is byte-identical between `0.2.0-rc.2` and `0.2.1-rc.2`, confirmed by both an export-set diff and real runtime assembly.
 
 ```jsonc
-"dependencies": { "@omdp/dsh-vision-bridge": "^0.1.12" }
+"dependencies": { "@omdp/dsh-key-fallback": "^3.3.3" }
 ```
 
-#### `@omdp/dsh-archived-sessions` — archived-session manager (`v0.3.10`)
+#### `@omdp/dsh-archived-sessions` — archived-session manager (`v0.3.11`)
 
 Fork of [`@muwinds/dsh-archived-sessions`](https://github.com/MuWinds/dsh-archived-sessions) 0.2.0, adapted for **DSH 0.2.0-rc.1 / 0.2.0-rc.2** (since 0.3.9 via the triple range; the earlier **0.1.5-rc.1 → 0.1.7-rc.2** line was supported through 0.3.8 but is no longer declared) — upstream is unmaintained and broken on 0.1.5+ (`sessionPersistence.list()` returns snapshots, `locate()` was removed). Adds **Settings → 归档会话管理**, coexisting with the native archived-sessions page introduced in DSH 0.1.6:
 
@@ -115,21 +106,22 @@ Fork of [`@muwinds/dsh-archived-sessions`](https://github.com/MuWinds/dsh-archiv
 - **0.3.10 — deleted archived sessions reappeared in the chat list**: archiving is only a **visibility mask** in DSH (it never filters the host list; `dsh-session-query` has zero `archiv*` references), so the client row survives in `manager.summaries` and merely gets *hidden*. The old code only removed the archive id — lifting the mask made the surviving row visible again (and clicking it failed with `session/not-found`), because the only removal notice it ever emitted came incidentally from `entry.detach()`'s `session/disposed → api-session/removed`, which **only fires for a live session**. 0.3.10 emits `api-session/removed` explicitly on every delete path (wrapped in try/catch — cordis `emit` is synchronous and uncontained, so a throwing third-party listener must not abort a completed delete), releases the workspace `sessionIds` accounting slot via `entity.detachSession()` (DSH keeps archived ids accounted **by design**, and never forgets them), and stops ignoring `location.found === false` (the old code `rm -rf`'d a guessed path, which always failed and left the archive id stuck forever). Client side: the component never received `ctx` (it read free variables and swallowed the `ReferenceError` in a silent `try/catch`), so its refresh was **dead code**. Verified with an A/B run on a scratch `DSH_HOME` against a **non-live** archived session: old = **0** removal events + accounting leaked; new = **1** event + accounting released.
 - Declared DSH support (0.3.6), then **switched to a triple range in 0.3.9** — the `@deepseek-ai/dsh` peer is now `>=0.2.0-rc.1 <0.2.1-0`, so `0.2.0-rc.2` / later rc builds / the stable `0.2.0` all pass without a republish. Earlier: (0.3.7) rc.2 added to the enumeration — zero code changes, verified by the byte-identical `dsh-shell` diff and a live end-to-end delete test on a scratch `dsh@0.1.7-rc.2` profile; (0.3.8) **0.2.0-rc.1** added — verified by a full `lib/` SHA1 diff (`dsh-shell` byte-identical; `dsh-session`'s changes additive-only, new `ToolCallRecovery` exports, no removals), gate execution on 0.2.0-rc.1, and a live sandbox assembly. ⚠️ The `0.1.7` line is no longer declared as of 0.3.9 — install **0.3.8** if you need it there.
 
+- **DSH `0.2.1` support (v0.3.11)** — the `@deepseek-ai/dsh` peer gained the **second triple segment** `>=0.2.0-rc.1 <0.2.1-0 || >=0.2.1-rc.1 <0.2.2-0`; `cordis` gained `4.0.5`. **Zero code changes.** The `api-session/removed` chain this plugin relies on (the 0.3.10 fix) now runs through the new `dsh-api-remote-access` service, which short-circuits to ALLOW for the profile owner — and the desktop profile is the owner.
+
 ```jsonc
-"dependencies": { "@omdp/dsh-archived-sessions": "^0.3.10" }
+"dependencies": { "@omdp/dsh-archived-sessions": "^0.3.11" }
 ```
 
 ### Installing from npm (recommended)
 
-All four plugins are published to **npm** automatically by GitHub Actions on every `v*` tag. This is the **preferred** install path — it avoids the git-`#path:` normalization, cross-resolution, and `allowBuilds` friction that GitHub installs cause (see the history in `docs/npm-publish.md`).
+All three plugins are published to **npm** automatically by GitHub Actions on every `v*` tag. This is the **preferred** install path — it avoids the git-`#path:` normalization, cross-resolution, and `allowBuilds` friction that GitHub installs cause (see the history in `docs/npm-publish.md`).
 
 ```jsonc
 // ~/.dsh/profiles/<name>/package.json — you can use one or mix-and-match
 "dependencies": {
-  "@omdp/dsh-connector": "^0.3.8",
-  "@omdp/dsh-vision-bridge": "^0.1.12",
-  "@omdp/dsh-key-fallback": "^3.3.2",
-  "@omdp/dsh-archived-sessions": "^0.3.10"
+  "@omdp/dsh-connector": "^0.3.9",
+  "@omdp/dsh-key-fallback": "^3.3.3",
+  "@omdp/dsh-archived-sessions": "^0.3.11"
 }
 ```
 
@@ -142,7 +134,7 @@ Updating is a standard `pnpm update`:
 
 ```sh
 cd ~/.dsh/profiles/<name>
-pnpm update @omdp/dsh-connector @omdp/dsh-vision-bridge @omdp/dsh-key-fallback @omdp/dsh-archived-sessions
+pnpm update @omdp/dsh-connector @omdp/dsh-key-fallback @omdp/dsh-archived-sessions
 ```
 
 ### Remote installs from GitHub (alternative)
@@ -151,7 +143,6 @@ Each active plugin is a standalone npm package in its own subdirectory, so it ca
 
 ```sh
 dsh plugin --profile web add github:XJungit/omdp#path:dsh-connector
-dsh plugin --profile web add github:XJungit/omdp#path:dsh-vision-bridge
 dsh plugin --profile web add github:XJungit/omdp#path:dsh-key-fallback
 dsh plugin --profile web add github:XJungit/omdp#path:dsh-archived-sessions
 ```
@@ -165,7 +156,6 @@ The `#path:<subdir>` selector tells pnpm which workspace subdirectory to install
 ```yaml
 allowBuilds:
   '@omdp/dsh-connector': true
-  '@omdp/dsh-vision-bridge': true
   '@omdp/dsh-key-fallback': true
   '@omdp/dsh-archived-sessions': true
 ```
@@ -199,7 +189,7 @@ Local `link:` installs (`"@omdp/<plugin>": "link:<abs-path>/omdp/<plugin>"`) sti
 - Package names are scoped under `@omdp/` to avoid colliding with upstream `dsh-*` packages on npm.
 - Plugins in this repo are plain JavaScript (no build step), so both local-link and GitHub installs work without a compile stage.
 - **Installing locally is preferred** during development: add `"@omdp/<plugin>": "link:<abs-path>/omdp/<plugin>"` to the profile's `dependencies` and run `pnpm install` — the plugin loads straight from the repo and updates with a restart.
-- New plugins should be modelled on the existing three (connector / vision-bridge / key-fallback) rather than on a skeleton — the real plugins are the living templates.
+- New plugins should be modelled on the existing three (connector / key-fallback / archived-sessions) rather than on a skeleton — the real plugins are the living templates.
 - **Doc discipline** — any plugin update (source / config / version) must keep the root README, the plugin's own README, and the `docs/` files in sync; lessons learned during development go into `notes/<date>/<category>/` (see [AGENTS.md](AGENTS.md) 规范 2).
 
 ### Docs index
@@ -239,12 +229,6 @@ omdp/
 │   ├── cordis.patch.yml # bundle 激活行
 │   ├── package.json
 │   └── README.md
-├── dsh-vision-bridge/   # 视觉桥：让纯文本模型通过配置的多模态端点「看见」
-│   ├── index.js         # host 半区
-│   ├── client.js        # client 半区（粘贴/拖拽 → 临时路径）
-│   ├── cordis.patch.yml # bundle 激活行
-│   ├── package.json
-│   └── README.md
 ├── dsh-archived-sessions/ # 归档会话管理（fork @muwinds，适配 DSH 0.2.0-rc.1 / 0.2.0-rc.2）
 │   ├── lib/index.js     # host 半区（ESM）
 │   ├── lib/client.js    # client 半区（Web UI 设置页）
@@ -255,6 +239,7 @@ omdp/
 │   ├── dsh-gitbash-win/
 │   ├── resume-stream/
 │   ├── key-fallback-*/                  # dsh-key-fallback 各版本快照与设计草案
+│   ├── dsh-vision-bridge-*/              # 2026-10-18 起归档（原为活跃视觉插件）
 │   └── README.md
 ├── notes/               # 开发教训与笔记（三层：notes/<date>/<category>/）
 ├── docs/                # 研究笔记、兼容性矩阵、发布指南
@@ -263,7 +248,7 @@ omdp/
 
 ### 插件
 
-#### `@omdp/dsh-connector` — MCP + Skills 管理器（`v0.3.8`）
+#### `@omdp/dsh-connector` — MCP + Skills 管理器（`v0.3.9`）
 
 一个设置页（**Connector**），从 DSH Web UI 管理三件事：
 
@@ -280,11 +265,13 @@ omdp/
 
 - **peer 声明改用三元组区间（v0.3.8）** —— `@deepseek-ai/dsh` 由逐版本枚举改为 `>=0.2.0-rc.1 <0.2.1-0`；代码零改动。`0.2.0-rc.2` 发布后门禁第三次把旧声明拦下（Connector 标签消失、`/connector/api/*` → 404），根因不是不兼容而是枚举在每次 rc 迭代下必然过时。依据：rc.1→rc.2 全量 20 包逐文件 SHA256（本插件依赖面**只有 `package.json` 版本号变化**）+ 真门禁全矩阵（`0.2.0-rc.1`/`rc.2`/`rc.3`/`rc.9`/正式版 `0.2.0` 全放行；`0.2.1-rc.1`/`0.3.0-rc.1` 全拦截）。⚠️ **同时收窄支持面**：`0.1.7` 线不再声明，需要它请装 **0.3.7**。
 
+- **支持 DSH `0.2.1`（v0.3.9）** —— `@deepseek-ai/dsh` peer 新增**第二段三元组区间**：`>=0.2.0-rc.1 <0.2.1-0 || >=0.2.1-rc.1 <0.2.2-0`（`schemastery` 同步追加 `3.18.5`，为 `0.2.1-rc.2` 的钉版）。**代码零改动。** 四层核查：全量 `@deepseek-ai/*` 逐文件 SHA256（`0.2.0-rc.2` → `0.2.1-rc.2`：288 → 305 个包，177 个有真实 `.js` 改动）、我们消费的 9 个包真实 ESM 导出面比对（移除项均未使用，在 `dsh-app-boot`）、调用到的 37 个符号逐个存在性复核、以及**真实 `0.2.1-rc.2` CLI 装配**（隔离 `DSH_HOME`，`--dump-config` 三个插件全部进树、零跳过）。
+
 ```jsonc
-"dependencies": { "@omdp/dsh-connector": "^0.3.8" }
+"dependencies": { "@omdp/dsh-connector": "^0.3.9" }
 ```
 
-#### `@omdp/dsh-key-fallback` — 多 key API 池 + 轮换（`v3.3.2`）
+#### `@omdp/dsh-key-fallback` — 多 key API 池 + 轮换（`v3.3.3`）
 
 挂在 DSH 的凭证接缝 `credentials.resolve` 上：每次适配器取 key 时，若该 ref 属于已配置的池，就返回池的当前 key；遇配置的触发错误时，把失败 key 标记为冷却并切到下一把——**重发完全交给 DSH 自带的 `dsh-llm-retry`**。带一个常驻可见的设置页（**设置 → API Key 回退**）与全新 UI：
 
@@ -301,19 +288,13 @@ omdp/
 - **对 v3.3.0 说明的更正（v3.3.1）** —— 下方 v3.3.0 条目原先声称「换 key 从来没到达 provider」。**那是错的。** 真正供 key 的 `credentials.resolve` 包装自 **v3.0.0** 就存在（`75ea76a`），已发布的 `3.2.4` tarball 里就有它（`lib/index.js:298`）及配套 `pool-hit` 诊断（`:305`）——从 registry 下载 tarball 核对过。轮换一直在生效；那些 `process.env` 写入是与可用包装**并存**的冗余代码，而不是机制本身。下方 v3.3.0 条目保留，但其中错误断言已改正。
 - **四项真实修复（v3.3.0）** —— ① `/pools` 的 `activeRef` 不再报错当前 key：原先用 `process.env[<池 env>]` 反查、可能高亮错误的成员（实机测得 `activeRef=SENSENOVA_API_KEY` 而 `currentRef=key_fallback_sensenova_key1`），现在直接等于 `currentRef`。② 删除 5 处 `process.env` 写入——已证实启动快照冻结、凭证层读不到，对鉴权是死代码；删掉同时避免插件改写宿主环境。③ `agent/request-error` 不再退化成归咎 `keyValues[0]`。④ 卸载经 `ctx.effect` 还原原始 `resolve`（带身份校验），热重载不再叠加包装层。重发仍归 DSH 管——每条轮换路径都仍调用 `next()`。
 
-```jsonc
-"dependencies": { "@omdp/dsh-key-fallback": "^3.3.2" }
-```
-
-#### `@omdp/dsh-vision-bridge` — 给纯文本模型的视觉（`v0.1.12`）
-
-零依赖插件，给**纯文本模型**装上视觉：自动探测被路由模型是否支持图片（`llm.resolveModelInfo().inputModalities`）；对纯文本模型，把粘贴/附加的图片转发到可配置的 OpenAI 兼容多模态端点（默认 Agnes `agnes-2.5-flash`），并把返回文本喂回作为证据。附带 `vision_bridge_read_image` 工具、粘贴/拖拽 → 临时路径的浏览器处理器、一个包装后的 `(vision bridge)` provider 条目，以及 `agent/pre-step` 自动读取钩子。
+- **支持 DSH `0.2.1`（v3.3.3）** —— 四条 dsh peer 均新增**第二段三元组区间** `>=0.2.0-rc.1 <0.2.1-0 || >=0.2.1-rc.1 <0.2.2-0`；`cordis` 追加 `4.0.5`、`schemastery` 追加 `3.18.5`（均为 `0.2.1-rc.2` 的钉版）。**代码零改动** —— 本插件触及的整个面（`credentials.resolve` 包装、`ctx.llm` 事件、`settings`、`webServer`）在 `0.2.0-rc.2` 与 `0.2.1-rc.2` 之间逐字节一致，已由导出面比对 + 真机装配双重确认。
 
 ```jsonc
-"dependencies": { "@omdp/dsh-vision-bridge": "^0.1.12" }
+"dependencies": { "@omdp/dsh-key-fallback": "^3.3.3" }
 ```
 
-#### `@omdp/dsh-archived-sessions` — 归档会话管理（`v0.3.10`）
+#### `@omdp/dsh-archived-sessions` — 归档会话管理（`v0.3.11`）
 
 fork 自 [`@muwinds/dsh-archived-sessions`](https://github.com/MuWinds/dsh-archived-sessions) 0.2.0，适配 **DSH 0.2.0-rc.1 / 0.2.0-rc.2**（0.3.9 起用三元组区间声明；更早的 **0.1.5-rc.1 → 0.1.7-rc.2** 线支持到 0.3.8，现已不再声明）（上游已不维护，且在 0.1.5+ 下损坏：`sessionPersistence.list()` 返回快照、`locate()` 被移除）。新增 **设置 → 归档会话管理**，与 DSH 0.1.6 起内置的原生「已归档会话」页共存：
 
@@ -326,21 +307,22 @@ fork 自 [`@muwinds/dsh-archived-sessions`](https://github.com/MuWinds/dsh-archi
 - **0.3.10——「删掉的归档会话又回到对话列表」**：归档在 DSH 里**只是可见性遮罩**（从不参与列表过滤，`dsh-session-query` 全库 0 处 `archiv*`），客户端行一直留在 `manager.summaries` 里、**只是被遮住**。旧代码删除时只摘归档 id——遮罩一撤，幸存的行立刻重新可见（点进去报 `session/not-found`）；它唯一的客户端通知来自 `entry.detach()` 顺带触发的 `session/disposed → api-session/removed`，而这条链**只在会话仍 live 时存在**。0.3.10 在每条删除路径上**显式**广播 `api-session/removed`（包 try/catch——cordis 的 `emit` 同步且不隔离，第三方监听器抛错不能把已完成的删除变成报错），并经 `entity.detachSession()` 释放工作区 `sessionIds` 记账（DSH **故意**保留归档会话的记账，且从不遗忘），同时不再忽略 `location.found === false`（旧代码拿猜测路径去 `rm -rf`，必然失败且让归档 id 永久卡住）。客户端侧：组件原本拿不到 `ctx`（读的是自由变量，`ReferenceError` 被静默 `try/catch` 吞掉），刷新逻辑一直是**死代码**。验证方式是在 scratch `DSH_HOME` 上对**非 live 的归档会话**做 A/B：旧代码 **0** 个移除事件 + 记账泄漏；新代码 **1** 个事件 + 记账已释放。
 - 声明 DSH 版本支持（0.3.6），**0.3.9 起改用三元组区间**——`@deepseek-ai/dsh` peer 现为 `>=0.2.0-rc.1 <0.2.1-0`，`0.2.0-rc.2` / 后续同三元组 rc / 正式版 `0.2.0` 都不必重发包即可通过。（0.3.7）追加 `0.1.7-rc.2`——代码零改动，依据 `dsh-shell` 逐字节零变化 diff + scratch `dsh@0.1.7-rc.2` profile **真机删除全链路实测**；（0.3.8）追加 `0.2.0-rc.1`——依据全量 `lib/` SHA1 diff（`dsh-shell` 逐字节一致；`dsh-session` 的 5 个变化文件为**附加式**新增 `ToolCallRecovery` 等导出、既有导出零删除）+ 0.2.0-rc.1 门禁放行 + 沙箱真机装配入树。⚠️ `0.1.7` 线自 0.3.9 起不再声明，需要它请装 **0.3.8**。
 
+- **支持 DSH `0.2.1`（v0.3.11）** —— `@deepseek-ai/dsh` peer 新增**第二段三元组区间** `>=0.2.0-rc.1 <0.2.1-0 || >=0.2.1-rc.1 <0.2.2-0`；`cordis` 追加 `4.0.5`。**代码零改动。** 本插件依赖的 `api-session/removed` 链路（0.3.10 修复）在 0.2.1 上改由新的 `dsh-api-remote-access` 服务把关，而该服务对 profile owner 直接短路放行（桌面 profile 即 owner）。
+
 ```jsonc
-"dependencies": { "@omdp/dsh-archived-sessions": "^0.3.10" }
+"dependencies": { "@omdp/dsh-archived-sessions": "^0.3.11" }
 ```
 
 ### 从 npm 安装（推荐）
 
-四个插件都会由 GitHub Actions 在每次打 `v*` tag 时自动发布到 **npm**。这是**首选**安装路径——绕开 GitHub 安装带来的 git-`#path:` 规范化、交叉解析与 `allowBuilds` 摩擦（历史详见 `docs/npm-publish.md`）。
+三个插件都会由 GitHub Actions 在每次打 `v*` tag 时自动发布到 **npm**。这是**首选**安装路径——绕开 GitHub 安装带来的 git-`#path:` 规范化、交叉解析与 `allowBuilds` 摩擦（历史详见 `docs/npm-publish.md`）。
 
 ```jsonc
 // ~/.dsh/profiles/<name>/package.json —— 可用其一或自由组合
 "dependencies": {
-  "@omdp/dsh-connector": "^0.3.8",
-  "@omdp/dsh-vision-bridge": "^0.1.12",
-  "@omdp/dsh-key-fallback": "^3.3.2",
-  "@omdp/dsh-archived-sessions": "^0.3.10"
+  "@omdp/dsh-connector": "^0.3.9",
+  "@omdp/dsh-key-fallback": "^3.3.3",
+  "@omdp/dsh-archived-sessions": "^0.3.11"
 }
 ```
 
@@ -353,7 +335,7 @@ pnpm install
 
 ```sh
 cd ~/.dsh/profiles/<name>
-pnpm update @omdp/dsh-connector @omdp/dsh-vision-bridge @omdp/dsh-key-fallback @omdp/dsh-archived-sessions
+pnpm update @omdp/dsh-connector @omdp/dsh-key-fallback @omdp/dsh-archived-sessions
 ```
 
 ### 从 GitHub 远程安装（备选）
@@ -362,7 +344,6 @@ pnpm update @omdp/dsh-connector @omdp/dsh-vision-bridge @omdp/dsh-key-fallback @
 
 ```sh
 dsh plugin --profile web add github:XJungit/omdp#path:dsh-connector
-dsh plugin --profile web add github:XJungit/omdp#path:dsh-vision-bridge
 dsh plugin --profile web add github:XJungit/omdp#path:dsh-key-fallback
 dsh plugin --profile web add github:XJungit/omdp#path:dsh-archived-sessions
 ```
@@ -376,7 +357,6 @@ dsh plugin --profile web add github:XJungit/omdp#path:dsh-archived-sessions
 ```yaml
 allowBuilds:
   '@omdp/dsh-connector': true
-  '@omdp/dsh-vision-bridge': true
   '@omdp/dsh-key-fallback': true
   '@omdp/dsh-archived-sessions': true
 ```
@@ -410,7 +390,7 @@ GitHub 安装（`dsh plugin add github:XJungit/omdp#path:<插件>`）能用，�
 - 包名统一挂在 `@omdp/` 作用域下，避免与上游 `dsh-*` 包在 npm 上撞名。
 - 仓库里的插件都是纯 JavaScript（无构建步骤），所以本地 link 与 GitHub 安装都不需要编译环节。
 - 开发期**优先本地安装**：把 `"@omdp/<插件>": "link:<绝对路径>/omdp/<插件>"` 加进 profile 的 `dependencies`，跑 `pnpm install` —— 插件直接从仓库加载，改完重启即生效。
-- 新插件应以现有三个插件（connector / vision-bridge / key-fallback）为蓝本，而不是复制模板——真实插件就是活的模板。
+- 新插件应以现有三个插件（connector / key-fallback / archived-sessions）为蓝本，而不是复制模板——真实插件就是活的模板。
 - **文档纪律**：插件有任何更新（源码/配置/版本）时，必须同步更新根 README、对应插件 README、docs/ 相关文档；开发中产生的教训/经验主动写入 `notes/<date>/<category>/`（详见 [AGENTS.md](AGENTS.md) 规范 2）。
 
 ### 文档索引
