@@ -79,6 +79,27 @@ git -c http.sslVerify=false ls-remote https://140.82.121.3/XJungit/omdp.git refs
    （sha 要先经 `ls-remote` 核实，别凭本地值写）。
 5. 这类网络绕行**不要**固化进仓库配置或 CI —— 它是环境问题的临时对策。
 
+## ⏱️ 时效说明（2026-10-21 更新）
+
+**本文的换 IP + `sslVerify=false` 绕行方案已失效，不要再照做。**
+
+环境变了：`github.com` / `api.github.com` 现被 `Steam++.Accelerator`（本地 443
+TLS 中间人）通过 hosts 劫持到 `127.0.0.1`，不再是「解析到一个被封的境外 IP」。
+补入加速器根证书后，普通 `git push origin master` 实测 **EXIT 0，4 秒**完成：
+
+```
+git push origin master
+   1d8bf4d..a49f73b  master -> master
+```
+
+因此：
+
+- **不需要**换 IP，**不需要** `-c http.sslVerify=false`；
+- 现在若报 `unable to get local issuer certificate (20)`，是中间人根证书缺失，
+  按 `notes/2026-10-21/tooling/本地TLS中间人导致git拉取github依赖SSL失败-CA补根证书.md` 修；
+- 本文的价值仅剩：区分「域名不通 / 某个 IP 不通 / 证书链不通」这套诊断思路，
+  以及 `git update-ref` 校准远端跟踪引用的做法。
+
 ## 相关文件
 
 - 本次推送目标：`XJungit/omdp`，`master` `4fa7e8a → b031341`
